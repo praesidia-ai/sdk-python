@@ -98,3 +98,15 @@ class Praesidia:
         Security: the credential is held only in memory and is never logged.
         """
         self._http.set_api_key(api_key)
+
+    def forward_chain(self, chain_id: str | None) -> None:
+        """
+        Q3-02 — adopt an inbound chain-trace id and forward it (unchanged) on
+        every subsequent outbound call from this client — across all resources
+        — as the ``X-Praesidia-Chain-Id`` header. Call this with the id echoed
+        from an inbound ``X-Praesidia-Chain-Id`` header so a multi-agent chain
+        stays correlated across SDK-driven hops. Pass ``None`` to stop.
+
+        The SDK NEVER mints a chainId — it only propagates one it received.
+        """
+        self._http.set_chain_id(chain_id)

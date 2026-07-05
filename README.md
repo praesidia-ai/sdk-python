@@ -55,7 +55,7 @@ with open("eu-ai-act-report.pdf", "wb") as fh:
 
 | Resource | Class | Key methods |
 |----------|-------|-------------|
-| `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `rotate_client_secret`, `refresh_credential` |
+| `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `rotate_client_secret`, `refresh_credential` |
 | `client.workflows` | `WorkflowsResource` | `list`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `get_run` |
 | `client.audit` | `AuditResource` | `list`, `stream`, `export` |
 | `client.analytics` | `AnalyticsResource` | `usage`, `cost_trends`, `agent_performance`, `top_agents`, `export` |
@@ -84,6 +84,49 @@ client.refresh_credential(rotated["clientSecret"])
 
 `grace_period_seconds` is bounded 0..604800 (7 days) and clamped server-side;
 the effective value is returned as `rotated["gracePeriodSeconds"]`.
+
+**JIT-first orgs (Q4-05).** Organizations on the ephemeral/JIT-first default
+have static client secrets disabled. `rotate_client_secret` then raises a clear
+`ForbiddenError` (HTTP 403) — there is no static secret to rotate; the org
+authenticates with ephemeral JIT capability tokens instead:
+
+```python
+from praesidia import ForbiddenError
+
+try:
+    client.agents.rotate_client_secret("agent-id")
+except ForbiddenError as err:
+    print(err)  # ...JIT-first...capability tokens...
+```
+
+## Chain trace + JIT capability tokens (Q3-02 / Q4-02)
+
+Praesidia correlates a multi-agent call chain with an **unsigned**
+`X-Praesidia-Chain-Id` header, and gates task-scoped MCP tool calls with a
+short-lived **JIT capability token**.
+
+```python
+# Forward the inbound chain id (never mint one) so downstream hops stay joined:
+client.forward_chain(inbound_chain_id)          # X-Praesidia-Chain-Id on every call
+task = client.agents.run("agent-id", input={"message": "hi"}, chain_id=inbound_chain_id)
+
+# Poll the tasks routed to a server agent; each row now carries chainId,
+# hopIndex and (when governance is on) an opaque capabilityToken (may be absent).
+for row in client.agents.poll_pending_tasks("client-id"):
+    # Execute an MCP tool call on behalf of the task, forwarding the four
+    # task-binding fields (capabilityToken, taskId, agentId, chainId) as
+    # X-Praesidia-* headers. The capability token is opaque — never log it.
+    result = client.agents.call_mcp_tool(
+        server_id="mcp-server-id",
+        tool_name="search",
+        arguments={"q": "quarterly filings"},
+        task=row,                               # lifts the four fields
+    )
+```
+
+`create()` returns `credentialMode` (`"jit"` | `"static"`) and `clientSecret`
+(`str | None`). For JIT-first orgs `clientSecret` is `None` — do **not** persist
+a static `X-A2A-Client-Secret`; use the JIT capability-token flow above.
 
 ## Error handling
 

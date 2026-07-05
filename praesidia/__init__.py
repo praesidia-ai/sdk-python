@@ -23,6 +23,7 @@ Quick start::
         print(event)
 """
 
+from .agents import tool_call_headers_from_task
 from .client import Praesidia
 from .exceptions import (
     AuthError,
@@ -41,6 +42,7 @@ __all__ = [
     "NotFoundError",
     "RateLimitError",
     "ServerError",
+    "tool_call_headers_from_task",
 ]
 
 __version__ = "0.1.0"
