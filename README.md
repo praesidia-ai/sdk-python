@@ -2,8 +2,8 @@
 
 Python management SDK for the [Praesidia](https://praesidia.ai) AI agent platform.
 
-Covers agents, agent-tasks, workflows, connections, audit log, and analytics via
-the Praesidia REST API.
+Covers agents, agent-tasks, workflows, connections, audit log, analytics, and
+EU AI Act compliance reports via the Praesidia REST API.
 
 ## Installation
 
@@ -42,6 +42,13 @@ for event in client.audit.stream(from_date="2026-01-01"):
 
 # Cost trends
 trends = client.analytics.cost_trends(period="30d")
+
+# Generate + download an EU AI Act compliance report (async job)
+report = client.compliance.generate_and_wait()          # request + poll until ready
+doc = client.compliance.get_json(report["reportId"])    # structured JSON (q1-04-v1)
+pdf = client.compliance.get_pdf(report["reportId"])     # raw PDF bytes
+with open("eu-ai-act-report.pdf", "wb") as fh:
+    fh.write(pdf)
 ```
 
 ## Resources
@@ -53,6 +60,7 @@ trends = client.analytics.cost_trends(period="30d")
 | `client.audit` | `AuditResource` | `list`, `stream`, `export` |
 | `client.analytics` | `AnalyticsResource` | `usage`, `cost_trends`, `agent_performance`, `top_agents`, `export` |
 | `client.connections` | `ConnectionsResource` | `list`, `get`, `create`, `create_agent`, `create_mcp`, `update_status`, `delete`, `test`, `health` |
+| `client.compliance` | `ComplianceResource` | `request_report`, `get_status`, `get_json`, `get_pdf`, `wait_for_report`, `generate_and_wait` |
 
 ## Error handling
 

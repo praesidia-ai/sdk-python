@@ -21,6 +21,7 @@ from ._http import HttpClient
 from .agents import AgentsResource
 from .analytics import AnalyticsResource
 from .audit import AuditResource
+from .compliance import ComplianceResource
 from .connections import ConnectionsResource
 from .workflows import WorkflowsResource
 
@@ -48,6 +49,7 @@ class Praesidia:
         audit:       :class:`~praesidia.audit.AuditResource`
         analytics:   :class:`~praesidia.analytics.AnalyticsResource`
         connections: :class:`~praesidia.connections.ConnectionsResource`
+        compliance:  :class:`~praesidia.compliance.ComplianceResource`
 
     Example::
 
@@ -80,3 +82,4 @@ class Praesidia:
         self.audit = AuditResource(self._http)
         self.analytics = AnalyticsResource(self._http)
         self.connections = ConnectionsResource(self._http)
+        self.compliance = ComplianceResource(self._http)
