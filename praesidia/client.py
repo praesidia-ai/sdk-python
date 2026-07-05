@@ -83,3 +83,18 @@ class Praesidia:
         self.analytics = AnalyticsResource(self._http)
         self.connections = ConnectionsResource(self._http)
         self.compliance = ComplianceResource(self._http)
+
+    def refresh_credential(self, api_key: str) -> None:
+        """
+        Adopt a rotated credential in-process, at runtime (zero-downtime swap).
+
+        After rotating an agent's client secret with a grace window (see
+        :meth:`~praesidia.agents.AgentsResource.rotate_client_secret`), pass the
+        returned ``clientSecret`` here so every subsequent request from this
+        client — across all resources — authenticates with the new secret. The
+        server-side grace overlap keeps the previous secret valid until
+        ``graceEndsAt``, so in-flight callers are never rejected during the swap.
+
+        Security: the credential is held only in memory and is never logged.
+        """
+        self._http.set_api_key(api_key)

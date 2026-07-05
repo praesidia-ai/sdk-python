@@ -55,12 +55,35 @@ with open("eu-ai-act-report.pdf", "wb") as fh:
 
 | Resource | Class | Key methods |
 |----------|-------|-------------|
-| `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run` |
+| `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `rotate_client_secret`, `refresh_credential` |
 | `client.workflows` | `WorkflowsResource` | `list`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `get_run` |
 | `client.audit` | `AuditResource` | `list`, `stream`, `export` |
 | `client.analytics` | `AnalyticsResource` | `usage`, `cost_trends`, `agent_performance`, `top_agents`, `export` |
 | `client.connections` | `ConnectionsResource` | `list`, `get`, `create`, `create_agent`, `create_mcp`, `update_status`, `delete`, `test`, `health` |
 | `client.compliance` | `ComplianceResource` | `request_report`, `get_status`, `get_json`, `get_pdf`, `wait_for_report`, `generate_and_wait` |
+
+## Agent client-secret rotation
+
+Rotate an agent's A2A client secret and adopt the new one at runtime for a
+**zero-downtime** swap. Requires the ``AGENTS_CONFIGURE`` permission.
+
+```python
+# Rotate with a 1-hour grace overlap so the OLD secret keeps working while
+# consumers roll over. Omit grace_period_seconds (or pass 0) for an instant,
+# fail-closed rotation (old secret dies immediately — the panic button).
+rotated = client.agents.rotate_client_secret("agent-id", grace_period_seconds=3600)
+
+# rotated["clientSecret"] is the NEW plaintext secret — shown ONCE. Store it
+# now (it is never recoverable) and NEVER log it.
+# rotated["graceEndsAt"] — ISO-8601 until which the previous secret also works (or None).
+
+# Adopt the rotated secret in-process without recreating the client:
+client.refresh_credential(rotated["clientSecret"])
+# (also available as client.agents.refresh_credential(...))
+```
+
+`grace_period_seconds` is bounded 0..604800 (7 days) and clamped server-side;
+the effective value is returned as `rotated["gracePeriodSeconds"]`.
 
 ## Error handling
 

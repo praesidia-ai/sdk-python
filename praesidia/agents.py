@@ -94,6 +94,66 @@ class AgentsResource:
         self._http.delete(f"{self._base}/{agent_id}")
 
     # ------------------------------------------------------------------
+    # Credential rotation (Q4-01)
+    # ------------------------------------------------------------------
+
+    def rotate_client_secret(
+        self,
+        agent_id: str,
+        grace_period_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        """
+        Rotate an agent's A2A client secret, minting a fresh plaintext secret.
+
+        Calls ``POST .../agents/{agent_id}/client-secret/rotate`` (requires the
+        ``AGENTS_CONFIGURE`` permission).
+
+        Pass ``grace_period_seconds`` (0..604800) to keep the OUTGOING secret
+        valid for a bounded overlap so live consumers can swap over with zero
+        downtime; omit it (or pass ``0``) for an instant, fail-closed rotation
+        that revokes the old secret immediately (the emergency/panic path).
+        Distinct from the instant ``regenerate-secret`` endpoint, which has no
+        grace window.
+
+        Args:
+            agent_id:             UUID of the agent whose secret to rotate.
+            grace_period_seconds: Overlap window in seconds (0..604800). Omit
+                                  or ``0`` for an instant rotation. Clamped
+                                  server-side.
+
+        Returns:
+            A dict with ``clientId``, ``clientSecret`` (the NEW plaintext
+            secret), ``graceEndsAt`` (ISO-8601 str or None) and
+            ``gracePeriodSeconds`` (effective, after clamping).
+
+        Security:
+            ``clientSecret`` is shown EXACTLY ONCE — Praesidia stores only its
+            hash. Persist it immediately (it is never recoverable) and never
+            log it.
+        """
+        payload: dict[str, Any] = {}
+        if grace_period_seconds is not None:
+            payload["gracePeriodSeconds"] = grace_period_seconds
+        return self._http.post(
+            f"{self._base}/{agent_id}/client-secret/rotate", json=payload
+        )
+
+    def refresh_credential(self, api_key: str) -> None:
+        """
+        Adopt a rotated credential in-process, at runtime (zero-downtime swap).
+
+        Call this after :meth:`rotate_client_secret` with the returned
+        ``clientSecret`` (or any newly provisioned credential): subsequent
+        requests authenticate with the new secret. Combined with the grace
+        window returned by :meth:`rotate_client_secret`, the previous secret
+        keeps working until ``graceEndsAt``, so no in-flight caller is rejected
+        during the swap. Also reachable as ``client.refresh_credential(...)``.
+
+        Security: the credential is held only in memory and is never logged.
+        """
+        self._http.set_api_key(api_key)
+
+    # ------------------------------------------------------------------
     # Task submission
     # ------------------------------------------------------------------
 
