@@ -2,8 +2,9 @@
 
 Python management SDK for the [Praesidia](https://praesidia.ai) AI agent platform.
 
-Covers agents, agent-tasks, workflows, connections, audit log, analytics, and
-EU AI Act compliance reports via the Praesidia REST API.
+Covers agents, agent-tasks, workflows, connections, audit log, analytics, EU AI
+Act compliance reports, agent memory, OTLP GenAI telemetry emit, and offline
+trust-passport verification via the Praesidia REST API.
 
 ## Installation
 
@@ -61,6 +62,70 @@ with open("eu-ai-act-report.pdf", "wb") as fh:
 | `client.analytics` | `AnalyticsResource` | `usage`, `cost_trends`, `agent_performance`, `top_agents`, `export` |
 | `client.connections` | `ConnectionsResource` | `list`, `get`, `create`, `create_agent`, `create_mcp`, `update_status`, `delete`, `test`, `health` |
 | `client.compliance` | `ComplianceResource` | `request_report`, `get_status`, `get_json`, `get_pdf`, `wait_for_report`, `generate_and_wait` |
+| `client.memory` | `MemoryResource` | `create`, `list`, `search`, `erase`, `get`, `delete` |
+| `client.telemetry` | `TelemetryResource` | `emit`, `emit_gen_ai_span`, `emit_gen_ai_spans`, `build_gen_ai_resource_spans` |
+| `client.trust` | `TrustResource` | `fetch_passport`, `fetch_verify_bundle`, `verify_passport`, `fetch_and_verify` |
+
+## Agent memory (H2-06e)
+
+Org-scoped agent-memory store. Writes are PII-redacted + poisoning-scanned and
+encrypted per-org on the backend; reads carry provenance + guardrail metadata.
+
+```python
+m = client.memory.create(
+    content="The customer prefers email.",
+    subject_id="user-42",   # binds the memory for a later GDPR Art-17 erase
+    tags=["crm"],
+)
+hits = client.memory.search("contact preference", top_k=5)
+rows = client.memory.list(limit=20, tag="crm")
+client.memory.erase("user-42", reason="GDPR Art-17 request")
+client.memory.delete(m["id"])
+```
+
+## OTLP GenAI telemetry — become an OBSERVED agent (H1-02)
+
+Emit OTLP/HTTP GenAI-convention traces to `POST /telemetry/otlp/v1/traces`; the
+backend materialises the emitting agent as an **observed** agent — no
+registration. This is a **minimal, dependency-free emitter** (the SDK's only
+runtime dependency is `httpx`); if you already run the OpenTelemetry SDK, point
+its OTLP/HTTP exporter at the endpoint with an
+`Authorization: Bearer <org pk_ key>` header instead.
+
+```python
+client.telemetry.emit_gen_ai_span(
+    agent_name="support-bot",
+    system="openai",
+    request_model="gpt-4o",
+    input_tokens=812,
+    output_tokens=143,
+)
+# → {"accepted": True, "buffered": 1}
+```
+
+Bounds mirror the server (≤100 resourceSpans, ≤2 MB body, 120 req/min). Auth is
+an ORGANIZATION API key; the endpoint accepts it as `X-API-Key` (what the client
+sends) or `Authorization: Bearer`.
+
+## Trust passport — verify a peer agent offline (H3-02f)
+
+Fetch a peer agent's signed trust passport from the **public** trust routes and
+verify the detached Ed25519 proof **locally** — the "verify a peer's reputation
+without trusting Praesidia" client. Offline verification is pure-Python and
+**dependency-free** (a compact RFC 8032 Ed25519 verify + canonical JSON in
+`praesidia._crypto`), so it needs no `cryptography` install.
+
+```python
+result = client.trust.fetch_and_verify(peer_agent_id)
+if result["verified"] and result["passport"]["credentialSubject"]["trustScore"] >= 70:
+    ...  # signed reputation is genuine and fresh — trust the peer
+
+# Or verify a passport handed to you out-of-band — no client / account needed:
+from praesidia import verify_passport
+result = verify_passport(passport, public_key_jwk)
+# result["reason"] ∈ ok | missing-proof | malformed-public-key
+#                    | signature-mismatch | expired
+```
 
 ## Agent client-secret rotation
 

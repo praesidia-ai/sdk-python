@@ -23,6 +23,9 @@ from .analytics import AnalyticsResource
 from .audit import AuditResource
 from .compliance import ComplianceResource
 from .connections import ConnectionsResource
+from .memory import MemoryResource
+from .telemetry import TelemetryResource
+from .trust import TrustResource
 from .workflows import WorkflowsResource
 
 __all__ = ["Praesidia"]
@@ -50,6 +53,9 @@ class Praesidia:
         analytics:   :class:`~praesidia.analytics.AnalyticsResource`
         connections: :class:`~praesidia.connections.ConnectionsResource`
         compliance:  :class:`~praesidia.compliance.ComplianceResource`
+        memory:      :class:`~praesidia.memory.MemoryResource`
+        telemetry:   :class:`~praesidia.telemetry.TelemetryResource`
+        trust:       :class:`~praesidia.trust.TrustResource`
 
     Example::
 
@@ -83,6 +89,9 @@ class Praesidia:
         self.analytics = AnalyticsResource(self._http)
         self.connections = ConnectionsResource(self._http)
         self.compliance = ComplianceResource(self._http)
+        self.memory = MemoryResource(self._http)
+        self.telemetry = TelemetryResource(self._http)
+        self.trust = TrustResource(self._http)
 
     def refresh_credential(self, api_key: str) -> None:
         """

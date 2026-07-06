@@ -23,6 +23,11 @@ Quick start::
         print(event)
 """
 
+from ._crypto import (
+    canonical_json,
+    ed25519_public_key_from_jwk,
+    ed25519_verify,
+)
 from .agents import tool_call_headers_from_task
 from .client import Praesidia
 from .exceptions import (
@@ -33,6 +38,8 @@ from .exceptions import (
     RateLimitError,
     ServerError,
 )
+from .telemetry import gen_ai_span
+from .trust import verify_passport
 
 __all__ = [
     "Praesidia",
@@ -43,6 +50,13 @@ __all__ = [
     "RateLimitError",
     "ServerError",
     "tool_call_headers_from_task",
+    # H3-02f — standalone offline trust-passport verification (no account needed)
+    "verify_passport",
+    "ed25519_verify",
+    "ed25519_public_key_from_jwk",
+    "canonical_json",
+    # H1-02 — OTLP GenAI span builder
+    "gen_ai_span",
 ]
 
 __version__ = "0.1.0"
