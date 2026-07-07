@@ -16,7 +16,6 @@ from ._http import (
     TASK_ID_HEADER,
     HttpClient,
 )
-from .exceptions import ForbiddenError
 
 
 def tool_call_headers_from_task(task: dict[str, Any]) -> dict[str, str]:
@@ -143,78 +142,19 @@ class AgentsResource:
         self._http.delete(f"{self._base}/{agent_id}")
 
     # ------------------------------------------------------------------
-    # Credential rotation (Q4-01)
+    # Credential refresh (Q4-01)
     # ------------------------------------------------------------------
-
-    def rotate_client_secret(
-        self,
-        agent_id: str,
-        grace_period_seconds: int | None = None,
-    ) -> dict[str, Any]:
-        """
-        Rotate an agent's A2A client secret, minting a fresh plaintext secret.
-
-        Calls ``POST .../agents/{agent_id}/client-secret/rotate`` (requires the
-        ``AGENTS_CONFIGURE`` permission).
-
-        Pass ``grace_period_seconds`` (0..604800) to keep the OUTGOING secret
-        valid for a bounded overlap so live consumers can swap over with zero
-        downtime; omit it (or pass ``0``) for an instant, fail-closed rotation
-        that revokes the old secret immediately (the emergency/panic path).
-        Distinct from the instant ``regenerate-secret`` endpoint, which has no
-        grace window.
-
-        Args:
-            agent_id:             UUID of the agent whose secret to rotate.
-            grace_period_seconds: Overlap window in seconds (0..604800). Omit
-                                  or ``0`` for an instant rotation. Clamped
-                                  server-side.
-
-        Returns:
-            A dict with ``clientId``, ``clientSecret`` (the NEW plaintext
-            secret), ``graceEndsAt`` (ISO-8601 str or None) and
-            ``gracePeriodSeconds`` (effective, after clamping).
-
-        Security:
-            ``clientSecret`` is shown EXACTLY ONCE — Praesidia stores only its
-            hash. Persist it immediately (it is never recoverable) and never
-            log it.
-
-        Raises:
-            ForbiddenError: Q4-05 — JIT-first organizations have static client
-                secrets disabled; the backend answers with HTTP 403. This is
-                surfaced as a clear ``ForbiddenError`` (there is no static
-                secret to rotate — the org uses ephemeral JIT capability tokens
-                instead), never an unhandled crash.
-        """
-        payload: dict[str, Any] = {}
-        if grace_period_seconds is not None:
-            payload["gracePeriodSeconds"] = grace_period_seconds
-        try:
-            return self._http.post(
-                f"{self._base}/{agent_id}/client-secret/rotate", json=payload
-            )
-        except ForbiddenError as exc:
-            # Q4-05 — enrich the 403 with actionable context while preserving
-            # the typed ForbiddenError so callers can still catch it narrowly.
-            raise ForbiddenError(
-                "Static client secrets are disabled for this organization "
-                "(JIT-first). There is no static secret to rotate — this org "
-                "authenticates with ephemeral JIT capability tokens (Q4-02). "
-                "Static credentials have been permanently retired and can no "
-                f"longer be re-enabled. Server said: {exc.message}"
-            ) from exc
 
     def refresh_credential(self, api_key: str) -> None:
         """
-        Adopt a rotated credential in-process, at runtime (zero-downtime swap).
+        Adopt a newly provisioned credential in-process, at runtime
+        (zero-downtime swap).
 
-        Call this after :meth:`rotate_client_secret` with the returned
-        ``clientSecret`` (or any newly provisioned credential): subsequent
-        requests authenticate with the new secret. Combined with the grace
-        window returned by :meth:`rotate_client_secret`, the previous secret
-        keeps working until ``graceEndsAt``, so no in-flight caller is rejected
-        during the swap. Also reachable as ``client.refresh_credential(...)``.
+        Call this with a freshly provisioned agent client secret (or any new
+        credential): subsequent requests authenticate with the new secret, so a
+        long-lived client can swap credentials without recreating it or
+        restarting the process. Also reachable as
+        ``client.refresh_credential(...)``.
 
         Security: the credential is held only in memory and is never logged.
         """

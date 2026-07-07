@@ -9,10 +9,9 @@ from __future__ import annotations
 import json
 
 import httpx
-import pytest
 import respx
 
-from praesidia import ForbiddenError, Praesidia, tool_call_headers_from_task
+from praesidia import Praesidia, tool_call_headers_from_task
 
 BASE_URL = "http://test.local"
 ORG_ID = "org-1"
@@ -176,21 +175,3 @@ def test_create_returns_jit_mode_with_null_secret():
     assert result["credentialMode"] == "jit"
     assert result["clientSecret"] is None
     assert result["clientId"] == "ag_public123"
-
-
-@respx.mock
-def test_rotate_client_secret_403_raises_clear_forbidden_error():
-    rotate = (
-        f"{BASE_URL}/organizations/{ORG_ID}/agents/{AGENT_ID}/client-secret/rotate"
-    )
-    respx.post(rotate).mock(
-        return_value=httpx.Response(
-            403, text="Static client secrets are deprecated and disabled"
-        )
-    )
-    with pytest.raises(ForbiddenError) as excinfo:
-        _client().agents.rotate_client_secret(AGENT_ID)
-
-    msg = str(excinfo.value)
-    assert "JIT-first" in msg
-    assert "capability tokens" in msg
