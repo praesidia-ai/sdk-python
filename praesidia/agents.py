@@ -200,10 +200,9 @@ class AgentsResource:
             raise ForbiddenError(
                 "Static client secrets are disabled for this organization "
                 "(JIT-first). There is no static secret to rotate — this org "
-                "authenticates with ephemeral JIT capability tokens (Q4-02). To "
-                "re-enable legacy static secrets, an organization owner must turn "
-                "on the `legacyStaticCredentials` setting (a deliberate security "
-                f"downgrade). Server said: {exc.message}"
+                "authenticates with ephemeral JIT capability tokens (Q4-02). "
+                "Static credentials have been permanently retired and can no "
+                f"longer be re-enabled. Server said: {exc.message}"
             ) from exc
 
     def refresh_credential(self, api_key: str) -> None:
