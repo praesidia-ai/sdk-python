@@ -174,9 +174,18 @@ def _b64url_decode(value: str) -> bytes:
 def canonical_json(value: Any) -> bytes:
     """
     Deterministic JSON byte encoding — byte-for-byte identical to be-core's
-    ``canonicalJson`` (AGV-030). Object keys are sorted lexicographically (by
-    UTF-16 code unit, matching V8 / ``Array.prototype.sort``), ``None`` collapses
-    to ``null``, and separators carry no whitespace.
+    ``canonicalJson`` (AGV-030). Object keys are sorted by their UTF-16
+    code-unit sequence (exactly matching V8 / ``Array.prototype.sort``, which
+    be-core and the TS clients use), ``None`` collapses to ``null``, and
+    separators carry no whitespace.
+
+    BUGHUNT-SDK-04 — the key sort is by UTF-16 code UNIT, not Unicode code
+    POINT. The two agree only within the BMP (≤ U+FFFF): an astral-plane key
+    (≥ U+10000) is a surrogate pair whose lead unit (0xD800–0xDBFF) sorts
+    BELOW U+E000–U+FFFF under UTF-16, but ABOVE them under code-point order.
+    Sorting by the ``utf-16-be`` byte sequence reproduces JS ordering for
+    surrogate pairs too, so the Python verifier reconstructs the SAME signing
+    preimage be-core signed even for caller-influenced (dynamic) object keys.
 
     This reproduces the exact bytes the trust-passport ``proof`` was signed over
     (the passport document with its ``proof`` member removed).
@@ -198,10 +207,13 @@ def _canonicalize(v: Any) -> str:
     if isinstance(v, (list, tuple)):
         return "[" + ",".join(_canonicalize(x) for x in v) + "]"
     if isinstance(v, dict):
-        # Python's default string sort is by Unicode code point, which matches
-        # JS ``Object.keys().sort()`` (UTF-16 code-unit order) for the BMP — all
-        # passport keys are ASCII / '@', so the two orderings are identical.
-        keys = sorted(v.keys())
+        # BUGHUNT-SDK-04 — sort by the UTF-16-BE byte sequence to reproduce
+        # JS ``Object.keys().sort()`` (UTF-16 code-unit order) EXACTLY,
+        # surrogate pairs included. Python's default ``sorted()`` compares by
+        # Unicode code point, which diverges from V8 for astral (non-BMP)
+        # keys — a divergent key order yields different canonical bytes and a
+        # spurious signature mismatch on an otherwise-valid passport.
+        keys = sorted(v.keys(), key=lambda k: k.encode("utf-16-be"))
         parts = [
             json.dumps(k, ensure_ascii=False) + ":" + _canonicalize(v[k])
             for k in keys

@@ -228,6 +228,40 @@ pip install -e ".[dev]"
 pytest
 ```
 
+## Changelog
+
+### 0.2.0 — audit / download bug-fix wave
+
+- **BREAKING — `audit.list()` drops the `resource_type` argument.** The
+  backend `FilterAuditDto` never accepted a `resourceType` query param and
+  rejects unknown params (`forbidNonWhitelisted`), so *every* call that
+  passed `resource_type` got a hard `400` for the whole request — it never
+  worked, so no functioning caller can break. `resourceType` is a value the
+  backend *derives* from the `action` prefix at read time, not a stored,
+  queryable column. **Filter by `action` instead** (e.g.
+  `client.audit.list(action="agent.created")`). *(BUGHUNT-SDK-03)*
+- **`audit.stream(limit=...)` now streams the full range for any `limit`.**
+  The backend hard-caps a page at 100 rows (`PAGINATION_MAX_LIMIT`); the old
+  "stop when a page is shorter than `limit`" heuristic treated the first
+  clamped page as the last and silently dropped every row past the first 100
+  whenever `limit > 100`. The iterator now advances until the server returns
+  an empty page, so a `stream(limit=500)` over 5,000 rows yields all 5,000.
+  *(BUGHUNT-SDK-01)*
+- **Bulk downloads no longer hang forever on a stalled server.**
+  `compliance.get_pdf`, `audit.export` and `analytics.export` used
+  `timeout=None`, which disabled *all* httpx timeouts (connect/read/write/
+  pool). They now use a finite per-operation budget (`connect=10s`,
+  `read=60s` idle-between-chunks, `write=30s`, `pool=10s`) that still lets a
+  large-but-progressing download finish, plus an optional `timeout=` override.
+  *(BUGHUNT-SDK-06)*
+- **Offline passport canonical-JSON matches be-core for astral object keys.**
+  `praesidia._crypto.canonical_json` now sorts object keys by their UTF-16
+  code-unit sequence (matching V8 / `Array.prototype.sort`), so a passport
+  with dynamic non-BMP keys reconstructs the same signing preimage be-core
+  signed instead of falsely failing verification. *(BUGHUNT-SDK-04)*
+
 ## Versioning
 
-SDK version tracks the Praesidia API version.  See `CHANGELOG.md` in the repo root.
+SDK version tracks the Praesidia API version; a minor bump before 1.0 may also
+carry an SDK-level breaking change (see the Changelog above). See `CHANGELOG.md`
+in the repo root.

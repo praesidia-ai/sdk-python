@@ -22,6 +22,15 @@ from .exceptions import (
 
 _DEFAULT_TIMEOUT = 30.0  # seconds
 
+#: BUGHUNT-SDK-06 — timeout budget for bulk download/export calls
+#: (``stream_get``: report PDF, audit export, analytics export). httpx
+#: timeouts are PER-OPERATION (idle), NOT a total wall-clock cap, so a
+#: generous ``read`` idle timeout lets a large-but-progressing export
+#: finish while a stalled peer still fails fast instead of hanging the
+#: client forever (the old ``timeout=None`` disabled connect/read/write/
+#: pool timeouts entirely — a permanent hang on any mid-stream stall).
+_DOWNLOAD_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)
+
 #: Q3-02 — canonical chain-trace propagation header.
 CHAIN_ID_HEADER = "X-Praesidia-Chain-Id"
 #: Q4-02 — task-binding headers forwarded on a task-scoped MCP tool call.
@@ -148,18 +157,31 @@ class HttpClient:
         r = httpx.delete(url, headers=self._headers, timeout=_DEFAULT_TIMEOUT)
         self._raise_for_status(r)
 
-    def stream_get(self, path: str, params: dict[str, Any] | None = None) -> httpx.Response:
+    def stream_get(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        timeout: httpx.Timeout | float | None = None,
+    ) -> httpx.Response:
         """
-        Return a streaming ``httpx.Response`` for chunked GET requests.
+        Buffered GET for bulk download/export endpoints (report PDF, audit
+        export, analytics export).
 
-        The caller is responsible for iterating the response and closing it.
+        BUGHUNT-SDK-06 — uses a generous but finite per-operation timeout
+        (``_DOWNLOAD_TIMEOUT``) rather than ``timeout=None``. httpx's
+        ``read`` timeout is the idle-between-chunks budget, NOT a total
+        cap, so it does not truncate a large-but-progressing export while
+        still failing fast on a stalled peer. Pass ``timeout=`` to override
+        for an unusually long or short transfer. (Despite the name this
+        reads the whole body into ``.content``; a future true-streaming
+        variant can switch to ``httpx.stream()``.)
         """
         url = f"{self._base}{path}"
         return httpx.get(
             url,
             headers=self._headers,
             params=params,
-            timeout=None,  # streaming — no timeout
+            timeout=_DOWNLOAD_TIMEOUT if timeout is None else timeout,
         )
 
     # ------------------------------------------------------------------

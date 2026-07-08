@@ -30,21 +30,29 @@ class AuditResource:
         limit: int = 50,
         page: int = 1,
         action: str | None = None,
-        resource_type: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Return a page of audit log entries.
 
         Args:
-            from_date:     ISO 8601 start date/time (e.g. ``"2026-01-01"``).
-            to_date:       ISO 8601 end date/time.
-            limit:         Maximum number of entries to return (default: 50).
-            page:          1-based page number (default: 1).
-            action:        Filter by action type (e.g. ``"AGENT_CREATED"``).
-            resource_type: Filter by resource type (e.g. ``"agent"``).
+            from_date: ISO 8601 start date/time (e.g. ``"2026-01-01"``).
+            to_date:   ISO 8601 end date/time.
+            limit:     Maximum number of entries to return (default: 50).
+            page:      1-based page number (default: 1).
+            action:    Filter by action type (e.g. ``"AGENT_CREATED"``).
 
         Returns:
             A list of audit event dicts.
+
+        Note:
+            BUGHUNT-SDK-03 — there is deliberately NO ``resource_type``
+            filter. The backend ``FilterAuditDto`` whitelists only
+            ``search`` / ``action`` / ``startDate`` / ``endDate`` and runs
+            under ``forbidNonWhitelisted``, so sending ``resourceType``
+            made the WHOLE request 400. ``resourceType`` is a value the
+            backend *derives* from the ``action`` prefix at read time; it
+            is not a stored, queryable column. Filter by ``action`` (e.g.
+            ``action="agent.created"``) instead.
         """
         params: dict[str, Any] = {"page": page, "limit": limit}
         if from_date is not None:
@@ -53,8 +61,6 @@ class AuditResource:
             params["endDate"] = to_date
         if action is not None:
             params["action"] = action
-        if resource_type is not None:
-            params["resourceType"] = resource_type
 
         result = self._http.get(self._base, params=params)
         if isinstance(result, list):
@@ -70,7 +76,18 @@ class AuditResource:
         Yield audit log events as a lazy iterator.
 
         Internally pages through ``/audit-logs`` using ``limit`` per call,
-        stopping when a page returns fewer results than ``limit`` (last page).
+        advancing until the server returns an EMPTY page.
+
+        BUGHUNT-SDK-01 — the terminal condition is an empty page, NOT a
+        short one. The backend hard-caps the page size
+        (``PAGINATION_MAX_LIMIT = 100`` via ``clampLimit``), so a caller
+        asking for ``limit > 100`` still receives at most 100 rows per
+        page. The old ``len(events) < limit`` heuristic therefore treated
+        the very first (full-but-clamped) page as the last one and
+        silently dropped every event past the first 100 — the worst
+        possible failure for a compliance/audit export. Stopping only on
+        an empty page needs no knowledge of the server's cap and streams
+        the full range.
 
         Args:
             from_date: ISO 8601 start date/time.  When ``None`` the API
@@ -91,12 +108,15 @@ class AuditResource:
                 result if isinstance(result, list) else result.get("data", result.get("logs", []))
             )
 
+            # An empty page is the only reliable end-of-stream signal: a
+            # non-empty page shorter than `limit` may just be the server's
+            # clamp (100), not the end of the data.
+            if not events:
+                break
+
             for event in events:
                 yield event
 
-            # Stop if this was the last page.
-            if len(events) < limit:
-                break
             page += 1
 
     def export(
