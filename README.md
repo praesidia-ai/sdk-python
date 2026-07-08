@@ -109,8 +109,20 @@ client.telemetry.emit_gen_ai_span(
 ```
 
 Bounds mirror the server (≤100 resourceSpans, ≤2 MB body, 120 req/min). Auth is
-an ORGANIZATION API key; the endpoint accepts it as `X-API-Key` (what the client
-sends) or `Authorization: Bearer`.
+an ORGANIZATION API key; the endpoint accepts it as `Authorization: Bearer`
+(what the client sends) or `X-API-Key`.
+
+## Authentication (AUDIT-SDK-04)
+
+The Python SDK sends the API key as an **`Authorization: Bearer <key>`** header on
+every request — matching the TypeScript SDK, the CLI, and the backend's canonical
+`ApiKeyStrategy`. This is why `memory`, `compliance`, `audit`, `analytics`,
+`connections` and `workflows` all authenticate with a personal `pk_` key that
+holds the required org role (the route-level guards were opened to API keys in
+be-core commit `0bff5a0a`), and why routes fronted by `OrAuthGuard` /
+passport-`api-key` (e.g. guardrails) — which read the credential **only** from
+`Authorization: Bearer` — work too. (The prior `X-API-Key`-only header 401'd on
+those `OrAuthGuard` routes.)
 
 ## Trust passport — verify a peer agent offline (H3-02f)
 

@@ -35,16 +35,24 @@ class HttpClient:
     Minimal HTTP client for the Praesidia management API.
 
     Args:
-        api_key:  API key used in the ``X-API-Key`` request header.
+        api_key:  API key sent in the ``Authorization: Bearer <key>`` header.
         org_id:   Organisation UUID scoped into every resource path.
         base_url: Base URL of the Praesidia backend.
+
+    AUDIT-SDK-04 — the SDK authenticates with ``Authorization: Bearer <key>``
+    (matching the TS SDK, the CLI, and the backend's canonical ``ApiKeyStrategy``
+    / ``OrAuthGuard``, which read the credential ONLY from ``Authorization:
+    Bearer``). The prior ``X-API-Key`` header authenticated only on the custom
+    ``JwtOrApiKeyGuard`` routes and 401'd on every ``OrAuthGuard`` /
+    passport-``api-key`` route (e.g. guardrails), so Bearer makes Python work
+    everywhere the TS SDK does.
     """
 
     def __init__(self, api_key: str, org_id: str, base_url: str) -> None:
         self.org_id = org_id
         self._base = base_url.rstrip("/")
         self._headers: dict[str, str] = {
-            "X-API-Key": api_key,
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
@@ -60,7 +68,7 @@ class HttpClient:
 
         Security: the new credential is held only in memory and is never logged.
         """
-        self._headers["X-API-Key"] = api_key
+        self._headers["Authorization"] = f"Bearer {api_key}"
 
     def set_chain_id(self, chain_id: str | None) -> None:
         """

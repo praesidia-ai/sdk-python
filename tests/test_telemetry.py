@@ -56,8 +56,9 @@ def test_emit_gen_ai_span_posts_otlp_export_request():
     # OTLP encodes intValue as a string.
     assert _find_attr(attrs, "gen_ai.usage.input_tokens") == {"intValue": "812"}
     assert _find_attr(attrs, "gen_ai.usage.output_tokens") == {"intValue": "143"}
-    # The api key is accepted as X-API-Key on this endpoint.
-    assert route.calls.last.request.headers["X-API-Key"] == "pk-test"
+    # AUDIT-SDK-04 — the SDK authenticates with Authorization: Bearer <key>
+    # (works on the OTLP JwtOrApiKeyGuard route and everywhere else).
+    assert route.calls.last.request.headers["Authorization"] == "Bearer pk-test"
 
 
 @respx.mock

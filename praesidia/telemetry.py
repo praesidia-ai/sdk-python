@@ -14,8 +14,10 @@ dependency-light path for agents that don't.
 
 Auth: an ORGANIZATION API key. The endpoint takes the tenant SOLELY from the key
 (there is no org id in the path) and accepts it as either ``Authorization:
-Bearer`` or ``X-API-Key`` — the Python client sends ``X-API-Key`` like every
-other resource, which the backend guard honours.
+Bearer`` or ``X-API-Key``. AUDIT-SDK-04 — the Python client sends
+``Authorization: Bearer <key>`` like every other resource (matching the TS SDK /
+CLI and the backend's canonical ``ApiKeyStrategy``), so it authenticates on this
+route and on every ``OrAuthGuard`` route too.
 """
 
 from __future__ import annotations

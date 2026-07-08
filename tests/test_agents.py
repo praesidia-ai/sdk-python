@@ -38,9 +38,10 @@ def test_refresh_credential_swaps_auth_header():
     client.agents.refresh_credential("sec_new_9f8e")
     client.agents.get(AGENT_ID)
 
+    # AUDIT-SDK-04 — the SDK authenticates with Authorization: Bearer <key>.
     calls = respx.calls
-    assert calls[0].request.headers["X-API-Key"] == "sk-test"
-    assert calls[1].request.headers["X-API-Key"] == "sec_new_9f8e"
+    assert calls[0].request.headers["Authorization"] == "Bearer sk-test"
+    assert calls[1].request.headers["Authorization"] == "Bearer sec_new_9f8e"
 
 
 @respx.mock
@@ -56,9 +57,10 @@ def test_client_level_refresh_credential_swaps_auth_header():
     client.refresh_credential("sk-rotated")
     client.agents.get(AGENT_ID)
 
+    # AUDIT-SDK-04 — the SDK authenticates with Authorization: Bearer <key>.
     calls = respx.calls
-    assert calls[0].request.headers["X-API-Key"] == "sk-test"
-    assert calls[1].request.headers["X-API-Key"] == "sk-rotated"
+    assert calls[0].request.headers["Authorization"] == "Bearer sk-test"
+    assert calls[1].request.headers["Authorization"] == "Bearer sk-rotated"
 
 
 # ---------------------------------------------------------------------------
