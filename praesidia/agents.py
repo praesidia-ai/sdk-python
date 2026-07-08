@@ -7,6 +7,7 @@ Covers the ``/organizations/{org_id}/agents`` and
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from ._http import (
@@ -15,6 +16,13 @@ from ._http import (
     CHAIN_ID_HEADER,
     TASK_ID_HEADER,
     HttpClient,
+)
+
+#: AUDIT-SDK-02 — RFC-4122 UUID matcher. ``CreateAgentTaskDto.chainId`` is
+#: ``@IsUUID``, so the SDK validates it client-side for a clear error.
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
 )
 
 
@@ -164,41 +172,88 @@ class AgentsResource:
     # Task submission
     # ------------------------------------------------------------------
 
+    #: AUDIT-SDK-02 — task types accepted by ``CreateAgentTaskDto.type``
+    #: (mirrors the backend ``AgentTaskType`` enum).
+    TASK_TYPES = ("MESSAGE", "TOOL_CALL", "DELEGATION")
+
     def run(
         self,
-        agent_id: str,
+        connection_id: str,
         input: dict[str, Any],
+        *,
+        type: str = "MESSAGE",
         dry_run: bool = False,
         chain_id: str | None = None,
+        callback_url: str | None = None,
+        parent_task_id: str | None = None,
     ) -> dict[str, Any]:
         """
-        Submit a task to be executed by a specific agent.
+        Submit a task to an agent connection.
 
-        Posts to ``/organizations/{org_id}/tasks`` (the agent-tasks endpoint).
+        Posts to ``/organizations/{org_id}/tasks``, which binds the backend
+        ``CreateAgentTaskDto``. That DTO REQUIRES ``connectionId`` (a UUID),
+        ``type`` (an :attr:`TASK_TYPES` value) and a non-empty ``input`` object.
+
+        .. versionchanged:: AUDIT-SDK-02
+            **Breaking:** the first positional argument is now ``connection_id``
+            (was ``agent_id``); ``agentId`` is not a task field. ``type`` is a
+            new keyword. The previous body (``{"agentId": …, "input": …}``)
+            always 400'd against the real DTO.
 
         Args:
-            agent_id: UUID of the target agent.
-            input:    Task input payload (e.g. ``{"message": "Hello, agent!"}``)
-            dry_run:  When ``True`` the task is validated but not dispatched.
-            chain_id: Q3-02 — chain-trace id to continue. Pass the id echoed
-                      from an inbound ``X-Praesidia-Chain-Id`` header (or off a
-                      polled task's ``chainId``) so this submit stays joined to
-                      the same multi-agent chain. When set it is sent both as
-                      the ``chainId`` body field and, via
-                      :meth:`~praesidia.Praesidia.forward_chain`, forwarded on
-                      subsequent outbound calls. Omit for a chain-root submit —
-                      the server mints a fresh chainId. The SDK never mints one.
+            connection_id: UUID of the agent-to-agent connection to route
+                           through (``CreateAgentTaskDto.connectionId``).
+            input:         Non-empty task input object, e.g.
+                           ``{"message": "Hello, agent!"}``.
+            type:          Task type — one of :attr:`TASK_TYPES`
+                           (default ``"MESSAGE"``).
+            dry_run:       When ``True`` the task runs in sandbox mode
+                           (billing skipped).
+            chain_id:      Q3-02 — chain-trace id (UUID) to continue. Pass the
+                           id echoed from an inbound ``X-Praesidia-Chain-Id``
+                           header (or off a polled task's ``chainId``) so this
+                           submit stays joined to the same multi-agent chain.
+                           When set it is sent as the ``chainId`` body field and
+                           forwarded on subsequent outbound calls. Omit for a
+                           chain-root submit — the server mints a fresh chainId.
+                           The SDK never mints one.
+            callback_url:  Optional webhook URL for the task result.
+            parent_task_id: Optional parent task UUID for a delegated sub-task.
 
         Returns:
             Created task dict including ``id`` and ``status`` (plus ``chainId``
             and ``hopIndex`` once assigned).
+
+        Raises:
+            ValueError: If ``input`` is not a non-empty dict or ``type`` is not
+                        a valid :attr:`TASK_TYPES` value (surfaced client-side
+                        instead of a raw backend 400).
         """
+        if not isinstance(input, dict) or not input:
+            raise ValueError(
+                "input must be a non-empty dict (CreateAgentTaskDto.input is "
+                "@IsObject @IsNotEmpty), e.g. {'message': 'Hello, agent!'}"
+            )
+        if type not in self.TASK_TYPES:
+            raise ValueError(
+                f"type must be one of {self.TASK_TYPES}; got {type!r}"
+            )
+        if chain_id is not None and not _UUID_RE.match(chain_id):
+            raise ValueError(
+                "chain_id must be a UUID (CreateAgentTaskDto.chainId is "
+                f"@IsUUID); got {chain_id!r}"
+            )
         payload: dict[str, Any] = {
-            "agentId": agent_id,
+            "connectionId": connection_id,
+            "type": type,
             "input": input,
         }
         if dry_run:
             payload["dryRun"] = True
+        if callback_url:
+            payload["callbackUrl"] = callback_url
+        if parent_task_id:
+            payload["parentTaskId"] = parent_task_id
         if chain_id:
             payload["chainId"] = chain_id
             # Q3-02 — propagate the inbound chain on subsequent hops too.

@@ -25,11 +25,18 @@ for agent in agents:
     print(f"  - {agent.get('name', agent.get('id'))}")
 
 # --------------------------------------------------------------------------
-# 2. Run an agent task
+# 2. Submit an agent task through a connection
+#    POST /tasks binds CreateAgentTaskDto — connectionId (a UUID) is REQUIRED,
+#    along with a task type and a non-empty input object.
 # --------------------------------------------------------------------------
-if agents:
-    agent_id = agents[0]["id"]
-    task = client.agents.run(agent_id, input={"message": "Hello, agent!"})
+connections = client.connections.list()
+if connections:
+    connection_id = connections[0]["id"]
+    task = client.agents.run(
+        connection_id,
+        input={"message": "Hello, agent!"},
+        type="MESSAGE",
+    )
     print(f"\nTask created: {task['id']}, status: {task['status']}")
 
 # --------------------------------------------------------------------------

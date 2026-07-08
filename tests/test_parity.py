@@ -29,6 +29,9 @@ def _client() -> Praesidia:
 
 @respx.mock
 def test_run_sends_chain_id_body_and_forwards_header():
+    # AUDIT-SDK-02 — connectionId + chainId are UUIDs (CreateAgentTaskDto).
+    conn = "00000000-0000-4000-8000-000000000c01"
+    chain = "11111111-1111-4111-8111-111111111111"
     tasks_url = f"{BASE_URL}/organizations/{ORG_ID}/tasks"
     route = respx.post(tasks_url).mock(
         side_effect=[
@@ -37,15 +40,15 @@ def test_run_sends_chain_id_body_and_forwards_header():
         ]
     )
     client = _client()
-    client.agents.run(AGENT_ID, input={"message": "hi"}, chain_id="chain-abc")
+    client.agents.run(conn, input={"message": "hi"}, chain_id=chain)
 
     # chainId travels in the body of the submit...
     first = json.loads(route.calls[0].request.content)
-    assert first["chainId"] == "chain-abc"
+    assert first["chainId"] == chain
 
     # ...and is forwarded as a header on subsequent outbound calls.
-    client.agents.run(AGENT_ID, input={"message": "again"})
-    assert route.calls[1].request.headers["X-Praesidia-Chain-Id"] == "chain-abc"
+    client.agents.run(conn, input={"message": "again"})
+    assert route.calls[1].request.headers["X-Praesidia-Chain-Id"] == chain
 
 
 @respx.mock

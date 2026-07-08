@@ -29,8 +29,13 @@ client = Praesidia(
 agents = client.agents.list()
 print(f"Found {len(agents)} agents")
 
-# Run an agent task
-task = client.agents.run("agent-id", input={"message": "Hello, agent!"})
+# Submit an agent task. POST /tasks binds CreateAgentTaskDto, which REQUIRES a
+# connection UUID + a task type + a non-empty input object.
+task = client.agents.run(
+    "connection-uuid",                    # CreateAgentTaskDto.connectionId (UUID)
+    input={"message": "Hello, agent!"},   # non-empty input object
+    type="MESSAGE",                       # MESSAGE (default) | TOOL_CALL | DELEGATION
+)
 print(f"Task created: {task['id']}, status: {task['status']}")
 
 # Trigger a workflow
@@ -150,7 +155,9 @@ short-lived **JIT capability token**.
 ```python
 # Forward the inbound chain id (never mint one) so downstream hops stay joined:
 client.forward_chain(inbound_chain_id)          # X-Praesidia-Chain-Id on every call
-task = client.agents.run("agent-id", input={"message": "hi"}, chain_id=inbound_chain_id)
+task = client.agents.run(
+    "connection-uuid", input={"message": "hi"}, chain_id=inbound_chain_id
+)
 
 # Poll the tasks routed to a server agent; each row now carries chainId,
 # hopIndex and (when governance is on) an opaque capabilityToken (may be absent).
