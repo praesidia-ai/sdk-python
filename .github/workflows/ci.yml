@@ -1,0 +1,45 @@
+name: CI
+
+# Moved here from be-core's .github/workflows/sdk-python-check.yml when this
+# package was extracted into its own repo. Same logic: install the SDK with dev
+# extras, verify the import, run pytest.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least-privilege: read-only; never writes contents, packages, or issues.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Import + Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.14']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install SDK and dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Verify SDK import
+        run: python -c "from praesidia import Praesidia; print('SDK import OK')"
+
+      - name: Run unit tests
+        run: pytest tests/ -v

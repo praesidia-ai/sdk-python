@@ -21,8 +21,8 @@ dev = [
 [project.urls]
 Homepage = "https://praesidia.ai"
 Documentation = "https://docs.praesidia.ai/sdk/python"
-Repository = "https://github.com/praesidia-ai/be-core"
-"Bug Tracker" = "https://github.com/praesidia-ai/be-core/issues"
+Repository = "https://github.com/praesidia-ai/sdk-python"
+"Bug Tracker" = "https://github.com/praesidia-ai/sdk-python/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["praesidia"]

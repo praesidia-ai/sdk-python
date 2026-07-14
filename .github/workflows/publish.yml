@@ -1,0 +1,39 @@
+name: Publish
+
+# Tag/dispatch-gated PyPI publish. PUBLISHING IS INTENTIONALLY DISABLED.
+# The job is guarded by `if: false` so nothing is ever published until a human
+# flips it on. To enable: remove the `if: false` guard and add a PYPI_API_TOKEN
+# repository secret (or switch to trusted publishing / OIDC).
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: false # DISABLED — remove to enable PyPI publish
+    name: build + twine upload (praesidia)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+
+      - name: Build wheel + sdist
+        run: |
+          pip install build twine
+          python -m build
+
+      - name: Publish to PyPI
+        run: twine upload dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
