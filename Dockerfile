@@ -5,7 +5,8 @@
 #
 # Base: python:3.14-slim. Runs as a non-root user.
 
-FROM python:3.14-slim AS build
+FROM python:3.14-slim@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015 AS build
+# python:3.14-slim
 WORKDIR /app
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 COPY pyproject.toml README.md LICENSE ./
@@ -17,7 +18,8 @@ RUN pip install ".[dev]" \
  && pytest -q
 
 # ---- runtime: minimal, non-root, installs only the package (no dev/test deps) ----
-FROM python:3.14-slim AS runtime
+FROM python:3.14-slim@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015 AS runtime
+# python:3.14-slim
 WORKDIR /app
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN useradd --create-home --uid 10001 praesidia
