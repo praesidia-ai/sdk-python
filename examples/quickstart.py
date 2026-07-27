@@ -48,7 +48,7 @@ print(f"\nFound {len(workflows)} workflows")
 # --------------------------------------------------------------------------
 # 4. Cost trends (last 30 days)
 # --------------------------------------------------------------------------
-trends = client.analytics.cost_trends(period="30d")
+trends = client.analytics.cost_trends(days=30)
 print(f"\nCost trends: {trends}")
 
 # --------------------------------------------------------------------------

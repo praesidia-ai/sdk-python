@@ -24,34 +24,28 @@ class AnalyticsResource:
 
     def usage(
         self,
-        from_date: str,
-        to_date: str,
-        agent_id: str | None = None,
+        days: int = 30,
     ) -> dict[str, Any]:
         """
-        Return aggregate usage metrics for a date range.
+        Return aggregate usage metrics for a rolling day window.
 
         Calls ``GET /organizations/{org_id}/analytics``.
 
         Args:
-            from_date: ISO 8601 start date (inclusive, e.g. ``"2026-01-01"``).
-            to_date:   ISO 8601 end date (inclusive, e.g. ``"2026-01-31"``).
-            agent_id:  Optional UUID to narrow to a single agent.
+            days: Rolling window in days (1..365, default: 30).
 
         Returns:
             Usage summary dict (task counts, token totals, etc.).
         """
-        params: dict[str, Any] = {
-            "startDate": from_date,
-            "endDate": to_date,
-        }
-        if agent_id is not None:
-            params["agentId"] = agent_id
-        return self._http.get(self._base, params=params)
+        if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365:
+            raise ValueError("days must be an integer from 1 to 365")
+        return self._http.get(self._base, params={"days": days})
 
     def cost_trends(
         self,
-        period: str = "30d",
+        days: int = 30,
+        from_date: str | None = None,
+        to_date: str | None = None,
     ) -> dict[str, Any]:
         """
         Return cost-over-time data for the specified rolling period.
@@ -59,15 +53,22 @@ class AnalyticsResource:
         Calls ``GET /organizations/{org_id}/analytics/advanced/cost-trends``.
 
         Args:
-            period: Rolling window — e.g. ``"7d"``, ``"30d"``, ``"90d"``
-                    (default: ``"30d"``).
+            days:      Rolling window in days (1..365, default: 30).
+            from_date: Optional ISO 8601 start date.
+            to_date:   Optional ISO 8601 end date.
 
         Returns:
             Cost trend dict with time-series data points.
         """
+        if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365:
+            raise ValueError("days must be an integer from 1 to 365")
+        params: dict[str, Any] = {"days": days}
+        if from_date is not None:
+            params["startDate"] = from_date
+        if to_date is not None:
+            params["endDate"] = to_date
         return self._http.get(
-            f"{self._base}/advanced/cost-trends",
-            params={"period": period},
+            f"{self._base}/advanced/cost-trends", params=params
         )
 
     def agent_performance(
@@ -124,7 +125,6 @@ class AnalyticsResource:
         self,
         from_date: str | None = None,
         to_date: str | None = None,
-        format: str = "json",
     ) -> bytes:
         """
         Export analytics data in bulk.
@@ -134,12 +134,10 @@ class AnalyticsResource:
         Args:
             from_date: ISO 8601 start date (optional).
             to_date:   ISO 8601 end date (optional).
-            format:    ``"json"`` or ``"csv"`` (default: ``"json"``).
-
         Returns:
-            Raw export bytes.
+            Raw CSV export bytes.
         """
-        params: dict[str, Any] = {"format": format}
+        params: dict[str, Any] = {}
         if from_date is not None:
             params["startDate"] = from_date
         if to_date is not None:

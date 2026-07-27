@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ._http import HttpClient
+from ._http import HttpClient, path_segment
 
 
 class ConnectionsResource:
@@ -18,6 +18,8 @@ class ConnectionsResource:
 
     Endpoint base: ``/organizations/{org_id}/connections``
     """
+
+    STATUSES = ("ACTIVE", "IDLE", "ERROR", "PENDING", "DISCONNECTED")
 
     def __init__(self, http: HttpClient) -> None:
         self._http = http
@@ -56,7 +58,9 @@ class ConnectionsResource:
         Raises:
             NotFoundError: If no connection with that ID exists in the org.
         """
-        return self._http.get(f"{self._base}/{connection_id}")
+        return self._http.get(
+            f"{self._base}/{path_segment(connection_id, 'connection_id')}"
+        )
 
     def create_agent(self, data: dict[str, Any]) -> dict[str, Any]:
         """
@@ -106,13 +110,15 @@ class ConnectionsResource:
 
         Args:
             connection_id: UUID of the connection.
-            status:        New status value (e.g. ``"active"`` or ``"inactive"``).
+            status:        One of :attr:`STATUSES` (uppercase).
 
         Returns:
             Updated connection dict.
         """
+        if status not in self.STATUSES:
+            raise ValueError(f"status must be one of {self.STATUSES}; got {status!r}")
         return self._http.patch(
-            f"{self._base}/{connection_id}/status",
+            f"{self._base}/{path_segment(connection_id, 'connection_id')}/status",
             json={"status": status},
         )
 
@@ -123,7 +129,9 @@ class ConnectionsResource:
         Args:
             connection_id: UUID of the connection to delete.
         """
-        self._http.delete(f"{self._base}/{connection_id}")
+        self._http.delete(
+            f"{self._base}/{path_segment(connection_id, 'connection_id')}"
+        )
 
     def test(self, connection_id: str) -> dict[str, Any]:
         """
@@ -137,7 +145,9 @@ class ConnectionsResource:
         Returns:
             Test result dict (latency, success, error, etc.).
         """
-        return self._http.post(f"{self._base}/{connection_id}/test")
+        return self._http.post(
+            f"{self._base}/{path_segment(connection_id, 'connection_id')}/test"
+        )
 
     def health(self, connection_id: str) -> dict[str, Any]:
         """
@@ -149,4 +159,6 @@ class ConnectionsResource:
         Returns:
             Health dict.
         """
-        return self._http.get(f"{self._base}/{connection_id}/health")
+        return self._http.get(
+            f"{self._base}/{path_segment(connection_id, 'connection_id')}/health"
+        )

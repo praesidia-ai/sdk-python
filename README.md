@@ -23,6 +23,7 @@ client = Praesidia(
     api_key="sk-...",        # from Praesidia dashboard → Settings → API Keys
     org_id="your-org-id",   # organisation UUID
     base_url="https://api.praesidia.ai",  # default; omit for hosted API
+    timeout=30.0,             # per-operation request timeout; max 300 seconds
 )
 
 # List agents
@@ -47,7 +48,7 @@ for event in client.audit.stream(from_date="2026-01-01"):
     print(event["action"], event["createdAt"])
 
 # Cost trends
-trends = client.analytics.cost_trends(period="30d")
+trends = client.analytics.cost_trends(days=30)
 
 # Generate + download an EU AI Act compliance report (async job)
 report = client.compliance.generate_and_wait()          # request + poll until ready
@@ -141,22 +142,25 @@ if result["verified"] and result["passport"]["credentialSubject"]["trustScore"] 
 from praesidia import verify_passport
 result = verify_passport(passport, public_key_jwk)
 # result["reason"] ∈ ok | missing-proof | malformed-public-key
-#                    | signature-mismatch | expired
+#                    | malformed-passport | signature-mismatch
+#                    | invalid-expiration | expired
 ```
 
 ## Agent credential refresh
 
-Adopt a newly provisioned agent client secret at runtime for a
+Adopt a newly provisioned management API key at runtime for a
 **zero-downtime** swap — no restart, no recreating the client.
 
 ```python
 # Adopt a freshly provisioned secret in-process without recreating the client:
-client.refresh_credential(new_client_secret)
+client.refresh_credential(new_management_api_key)
 # (also available as client.agents.refresh_credential(...))
 ```
 
-Subsequent requests from this client — across all resources — authenticate with
-the new secret. The credential is held only in memory and is never logged.
+Subsequent management requests from this client authenticate with the new key.
+For A2A task polling, pass either `access_token=` or `client_secret=` directly to
+`poll_pending_tasks`; static secrets must use the `X-A2A-*` headers and must not
+be mixed with a management Bearer credential.
 
 ## Chain trace + JIT capability tokens (Q3-02 / Q4-02)
 
@@ -166,14 +170,18 @@ short-lived **JIT capability token**.
 
 ```python
 # Forward the inbound chain id (never mint one) so downstream hops stay joined:
-client.forward_chain(inbound_chain_id)          # X-Praesidia-Chain-Id on every call
 task = client.agents.run(
     "connection-uuid", input={"message": "hi"}, chain_id=inbound_chain_id
 )
+# run() scopes the chain header to this request, so concurrent root tasks cannot
+# inherit it. For a dedicated client whose every call belongs to the same chain:
+client.forward_chain(inbound_chain_id)
 
 # Poll the tasks routed to a server agent; each row now carries chainId,
 # hopIndex and (when governance is on) an opaque capabilityToken (may be absent).
-for row in client.agents.poll_pending_tasks("client-id"):
+for row in client.agents.poll_pending_tasks(
+    "client-id", access_token=agent_oauth_access_token
+):
     # Execute an MCP tool call on behalf of the task, forwarding the four
     # task-binding fields (capabilityToken, taskId, agentId, chainId) as
     # X-Praesidia-* headers. The capability token is opaque — never log it.

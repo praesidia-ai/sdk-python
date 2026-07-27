@@ -7,7 +7,9 @@ future release via httpx.AsyncClient without changing the resource API.
 
 from __future__ import annotations
 
+from threading import RLock
 from typing import Any
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
@@ -21,6 +23,7 @@ from .exceptions import (
 )
 
 _DEFAULT_TIMEOUT = 30.0  # seconds
+_MAX_TIMEOUT = 300.0  # seconds
 
 #: BUGHUNT-SDK-06 — timeout budget for bulk download/export calls
 #: (``stream_get``: report PDF, audit export, analytics export). httpx
@@ -37,6 +40,58 @@ CHAIN_ID_HEADER = "X-Praesidia-Chain-Id"
 TASK_ID_HEADER = "X-Praesidia-Task-Id"
 AGENT_ID_HEADER = "X-Praesidia-Agent-Id"
 CAPABILITY_TOKEN_HEADER = "X-Praesidia-Capability-Token"
+
+
+def path_segment(value: str, name: str = "path segment") -> str:
+    """Validate and percent-encode a caller-controlled URL path segment."""
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{name} must be a non-empty string")
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError(f"{name} must not contain control characters")
+    return quote(value, safe="")
+
+
+def normalize_base_url(base_url: str) -> str:
+    """Return a safe absolute HTTP(S) API base URL without a trailing slash."""
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ValueError("base_url must be a non-empty absolute HTTP(S) URL")
+    if base_url != base_url.strip() or any(
+        ord(char) < 32 or ord(char) == 127 for char in base_url
+    ):
+        raise ValueError("base_url must not contain whitespace or control characters")
+    parsed = urlsplit(base_url)
+    if (
+        parsed.scheme not in ("http", "https")
+        or not parsed.netloc
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(
+            "base_url must be an absolute HTTP(S) URL without credentials, "
+            "a query, or a fragment"
+        )
+    path = parsed.path.rstrip("/")
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def _validate_api_key(api_key: str) -> str:
+    if not isinstance(api_key, str) or not api_key.strip():
+        raise ValueError("api_key must be a non-empty string")
+    if "\r" in api_key or "\n" in api_key:
+        raise ValueError("api_key must not contain newline characters")
+    return api_key
+
+
+def _validate_timeout(timeout: float) -> float:
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        raise ValueError("timeout must be a number of seconds")
+    value = float(timeout)
+    if not 0 < value <= _MAX_TIMEOUT:
+        raise ValueError(f"timeout must be greater than 0 and at most {_MAX_TIMEOUT}s")
+    return value
 
 
 class HttpClient:
@@ -57,11 +112,19 @@ class HttpClient:
     everywhere the TS SDK does.
     """
 
-    def __init__(self, api_key: str, org_id: str, base_url: str) -> None:
-        self.org_id = org_id
-        self._base = base_url.rstrip("/")
+    def __init__(
+        self,
+        api_key: str,
+        org_id: str,
+        base_url: str,
+        timeout: float = _DEFAULT_TIMEOUT,
+    ) -> None:
+        self.org_id = path_segment(org_id, "org_id")
+        self._base = normalize_base_url(base_url)
+        self._timeout = _validate_timeout(timeout)
+        self._headers_lock = RLock()
         self._headers: dict[str, str] = {
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {_validate_api_key(api_key)}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
@@ -77,7 +140,8 @@ class HttpClient:
 
         Security: the new credential is held only in memory and is never logged.
         """
-        self._headers["Authorization"] = f"Bearer {api_key}"
+        with self._headers_lock:
+            self._headers["Authorization"] = f"Bearer {_validate_api_key(api_key)}"
 
     def set_chain_id(self, chain_id: str | None) -> None:
         """
@@ -89,22 +153,35 @@ class HttpClient:
         inbound hop so a multi-agent chain stays correlated across SDK-driven
         hops. Chain ids are unsigned metadata.
         """
-        if chain_id:
-            self._headers[CHAIN_ID_HEADER] = chain_id
-        else:
-            self._headers.pop(CHAIN_ID_HEADER, None)
+        if chain_id is not None and not isinstance(chain_id, str):
+            raise ValueError("chain_id must be a string or None")
+        if chain_id and ("\r" in chain_id or "\n" in chain_id):
+            raise ValueError("chain_id must not contain newline characters")
+        with self._headers_lock:
+            if chain_id:
+                self._headers[CHAIN_ID_HEADER] = chain_id
+            else:
+                self._headers.pop(CHAIN_ID_HEADER, None)
 
     def get_chain_id(self) -> str | None:
         """Return the chain-trace id currently being propagated, if any."""
-        return self._headers.get(CHAIN_ID_HEADER)
+        with self._headers_lock:
+            return self._headers.get(CHAIN_ID_HEADER)
 
     def _merged_headers(
-        self, extra: dict[str, str] | None
+        self,
+        extra: dict[str, str] | None,
+        *,
+        include_auth: bool = True,
     ) -> dict[str, str]:
         """Base headers (auth + chain) plus optional per-request extras."""
+        with self._headers_lock:
+            base = dict(self._headers)
+        if not include_auth:
+            base.pop("Authorization", None)
         if not extra:
-            return self._headers
-        return {**self._headers, **extra}
+            return base
+        return {**base, **extra}
 
     # ------------------------------------------------------------------
     # Public verbs
@@ -115,14 +192,15 @@ class HttpClient:
         path: str,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        include_auth: bool = True,
     ) -> Any:
         """Send a GET request and return the parsed JSON body."""
         url = f"{self._base}{path}"
         r = httpx.get(
             url,
-            headers=self._merged_headers(headers),
+            headers=self._merged_headers(headers, include_auth=include_auth),
             params=params,
-            timeout=_DEFAULT_TIMEOUT,
+            timeout=self._timeout,
         )
         self._raise_for_status(r)
         return r.json()
@@ -139,7 +217,7 @@ class HttpClient:
             url,
             headers=self._merged_headers(headers),
             json=json,
-            timeout=_DEFAULT_TIMEOUT,
+            timeout=self._timeout,
         )
         self._raise_for_status(r)
         return r.json()
@@ -147,14 +225,21 @@ class HttpClient:
     def patch(self, path: str, json: dict[str, Any] | None = None) -> Any:
         """Send a PATCH request and return the parsed JSON body."""
         url = f"{self._base}{path}"
-        r = httpx.patch(url, headers=self._headers, json=json, timeout=_DEFAULT_TIMEOUT)
+        r = httpx.patch(
+            url,
+            headers=self._merged_headers(None),
+            json=json,
+            timeout=self._timeout,
+        )
         self._raise_for_status(r)
         return r.json()
 
     def delete(self, path: str) -> None:
         """Send a DELETE request (no response body expected)."""
         url = f"{self._base}{path}"
-        r = httpx.delete(url, headers=self._headers, timeout=_DEFAULT_TIMEOUT)
+        r = httpx.delete(
+            url, headers=self._merged_headers(None), timeout=self._timeout
+        )
         self._raise_for_status(r)
 
     def stream_get(
@@ -179,7 +264,7 @@ class HttpClient:
         url = f"{self._base}{path}"
         return httpx.get(
             url,
-            headers=self._headers,
+            headers=self._merged_headers(None),
             params=params,
             timeout=_DOWNLOAD_TIMEOUT if timeout is None else timeout,
         )

@@ -59,4 +59,4 @@ __all__ = [
     "gen_ai_span",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

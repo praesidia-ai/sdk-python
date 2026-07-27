@@ -27,10 +27,12 @@ jobs:
           python-version: '3.14'
           cache: pip
 
-      - name: Build wheel + sdist
+      - name: Test and build wheel + sdist
         run: |
-          pip install build twine
+          pip install ".[dev]" build twine
+          pytest tests/ -q
           python -m build
+          twine check dist/*
 
       - name: Publish to PyPI
         run: twine upload dist/*

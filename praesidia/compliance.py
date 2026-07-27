@@ -14,7 +14,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from ._http import HttpClient
+from ._http import HttpClient, path_segment
 from .exceptions import PraesidiaError
 
 _DEFAULT_POLL_INTERVAL = 2.0  # seconds
@@ -71,7 +71,9 @@ class ComplianceResource:
             ``pdfByteLength`` (int or None), ``error`` (str or None),
             ``requestedAt`` and ``completedAt`` (str or None).
         """
-        return self._http.get(f"{self._base}/{report_id}")
+        return self._http.get(
+            f"{self._base}/{path_segment(report_id, 'report_id')}"
+        )
 
     def get_json(self, report_id: str) -> dict[str, Any]:
         """
@@ -85,7 +87,9 @@ class ComplianceResource:
         Returns:
             The full report document dict.
         """
-        return self._http.get(f"{self._base}/{report_id}/json")
+        return self._http.get(
+            f"{self._base}/{path_segment(report_id, 'report_id')}/json"
+        )
 
     def get_pdf(self, report_id: str) -> bytes:
         """
@@ -99,7 +103,9 @@ class ComplianceResource:
         Returns:
             Raw PDF bytes — write with ``open(path, "wb").write(pdf)``.
         """
-        r = self._http.stream_get(f"{self._base}/{report_id}/pdf")
+        r = self._http.stream_get(
+            f"{self._base}/{path_segment(report_id, 'report_id')}/pdf"
+        )
         self._http._raise_for_status(r)
         return r.content
 

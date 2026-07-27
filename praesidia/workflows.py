@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ._http import HttpClient
+from ._http import HttpClient, path_segment
 
 
 class WorkflowsResource:
@@ -55,7 +55,9 @@ class WorkflowsResource:
         Raises:
             NotFoundError: If the workflow does not exist in the org.
         """
-        return self._http.get(f"{self._base}/{workflow_id}")
+        return self._http.get(
+            f"{self._base}/{path_segment(workflow_id, 'workflow_id')}"
+        )
 
     def create(self, data: dict[str, Any]) -> dict[str, Any]:
         """
@@ -80,7 +82,9 @@ class WorkflowsResource:
         Returns:
             Updated workflow dict.
         """
-        return self._http.patch(f"{self._base}/{workflow_id}", json=data)
+        return self._http.patch(
+            f"{self._base}/{path_segment(workflow_id, 'workflow_id')}", json=data
+        )
 
     def delete(self, workflow_id: str) -> None:
         """
@@ -89,12 +93,16 @@ class WorkflowsResource:
         Args:
             workflow_id: UUID of the workflow to delete.
         """
-        self._http.delete(f"{self._base}/{workflow_id}")
+        self._http.delete(
+            f"{self._base}/{path_segment(workflow_id, 'workflow_id')}"
+        )
 
     def trigger(
         self,
         workflow_id: str,
         input: dict[str, Any] | None = None,
+        *,
+        budget_limit_usd: float | None = None,
     ) -> dict[str, Any]:
         """
         Start a new run for a workflow.
@@ -104,13 +112,25 @@ class WorkflowsResource:
         Args:
             workflow_id: UUID of the workflow to trigger.
             input:       Optional run-level input payload.
+            budget_limit_usd: Optional non-negative auto-pause threshold.
 
         Returns:
             Created run dict including ``id`` and ``status``.
         """
+        if input is not None and not isinstance(input, dict):
+            raise ValueError("input must be a dict or None")
+        if budget_limit_usd is not None and (
+            isinstance(budget_limit_usd, bool)
+            or not isinstance(budget_limit_usd, (int, float))
+            or budget_limit_usd < 0
+        ):
+            raise ValueError("budget_limit_usd must be a non-negative number")
+        body: dict[str, Any] = {"initialInput": input or {}}
+        if budget_limit_usd is not None:
+            body["budgetLimitUsd"] = budget_limit_usd
         return self._http.post(
-            f"{self._base}/{workflow_id}/runs",
-            json=input or {},
+            f"{self._base}/{path_segment(workflow_id, 'workflow_id')}/runs",
+            json=body,
         )
 
     def list_runs(
@@ -131,7 +151,7 @@ class WorkflowsResource:
             A list of run dicts.
         """
         result = self._http.get(
-            f"{self._base}/{workflow_id}/runs",
+            f"{self._base}/{path_segment(workflow_id, 'workflow_id')}/runs",
             params={"page": page, "limit": limit},
         )
         if isinstance(result, list):
@@ -149,4 +169,7 @@ class WorkflowsResource:
         Returns:
             Run dict.
         """
-        return self._http.get(f"{self._base}/{workflow_id}/runs/{run_id}")
+        return self._http.get(
+            f"{self._base}/{path_segment(workflow_id, 'workflow_id')}"
+            f"/runs/{path_segment(run_id, 'run_id')}"
+        )

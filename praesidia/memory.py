@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from ._http import HttpClient
+from ._http import HttpClient, path_segment
 
 
 class MemoryResource:
@@ -166,11 +166,13 @@ class MemoryResource:
         Fetch a single memory (org-scoped, decrypted). ``GET .../memories/{id}``
         (MEMORY_VIEW).
         """
-        return self._http.get(f"{self._base}/{memory_id}")
+        return self._http.get(
+            f"{self._base}/{path_segment(memory_id, 'memory_id')}"
+        )
 
     def delete(self, memory_id: str) -> None:
         """
         Soft-delete a single memory (org-scoped). ``DELETE .../memories/{id}``
         (MEMORY_DELETE). The backend answers 204 No Content.
         """
-        self._http.delete(f"{self._base}/{memory_id}")
+        self._http.delete(f"{self._base}/{path_segment(memory_id, 'memory_id')}")

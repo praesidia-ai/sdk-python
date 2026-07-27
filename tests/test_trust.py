@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 
 import httpx
+import pytest
 import respx
 
 from praesidia import (
@@ -112,6 +113,46 @@ def test_verify_passport_missing_proof():
     no_proof = {k: v for k, v in PASSPORT.items() if k != "proof"}
     result = verify_passport(no_proof, PUBLIC_KEY_JWK)
     assert result["reason"] == "missing-proof"
+
+
+@pytest.mark.parametrize("expiration", [None, "", "not-a-date", "2999-01-01"])
+def test_verify_passport_fails_closed_on_invalid_expiration(monkeypatch, expiration):
+    passport = copy.deepcopy(PASSPORT)
+    if expiration is None:
+        passport.pop("expirationDate")
+    else:
+        passport["expirationDate"] = expiration
+    monkeypatch.setattr("praesidia.trust.ed25519_verify", lambda *_args: True)
+
+    result = verify_passport(passport, PUBLIC_KEY_JWK)
+
+    assert result == {
+        "verified": False,
+        "signatureValid": True,
+        "expired": False,
+        "reason": "invalid-expiration",
+    }
+
+
+def test_verify_passport_never_raises_for_non_json_object_keys(monkeypatch):
+    passport = copy.deepcopy(PASSPORT)
+    passport[1] = "invalid JSON key"
+    monkeypatch.setattr("praesidia.trust.ed25519_verify", lambda *_args: True)
+
+    result = verify_passport(passport, PUBLIC_KEY_JWK)
+
+    assert result["verified"] is False
+    assert result["reason"] == "malformed-passport"
+
+
+def test_verify_passport_rejects_noncanonical_base64_proof():
+    passport = copy.deepcopy(PASSPORT)
+    passport["proof"]["proofValue"] += "!ignored-by-lenient-decoders"
+
+    result = verify_passport(passport, PUBLIC_KEY_JWK)
+
+    assert result["verified"] is False
+    assert result["reason"] == "signature-mismatch"
 
 
 def test_ed25519_public_key_from_jwk_roundtrip():

@@ -24,7 +24,7 @@ from ._crypto import (
     ed25519_public_key_from_jwk,
     ed25519_verify,
 )
-from ._http import HttpClient
+from ._http import HttpClient, path_segment
 
 # ── Standalone offline verification (no client / account required) ──────────
 
@@ -51,7 +51,8 @@ def verify_passport(
           "signatureValid": bool,  # signature valid (ignores expiry)
           "expired": bool,
           "reason": "ok" | "missing-proof" | "malformed-public-key"
-                    | "signature-mismatch" | "expired",
+                    | "signature-mismatch" | "invalid-expiration"
+                    | "malformed-passport" | "expired",
         }
     """
     proof = passport.get("proof") if isinstance(passport, dict) else None
@@ -65,18 +66,24 @@ def verify_passport(
         return _result(False, False, False, "malformed-public-key")
 
     # Sign-the-doc / attach-the-proof: strip `proof`, canonicalize the rest.
-    unsigned = {k: v for k, v in passport.items() if k != "proof"}
-    message = canonical_json(unsigned)
     try:
-        signature = base64.b64decode(proof["proofValue"])
-    except Exception:
+        unsigned = {k: v for k, v in passport.items() if k != "proof"}
+        message = canonical_json(unsigned)
+    except (AttributeError, TypeError, UnicodeError, ValueError):
+        return _result(False, False, False, "malformed-passport")
+    try:
+        signature = base64.b64decode(proof["proofValue"], validate=True)
+    except (ValueError, TypeError):
         return _result(False, False, False, "signature-mismatch")
 
     signature_valid = ed25519_verify(message, signature, public_key)
-    expired = _is_expired(passport.get("expirationDate"))
+    expiration = _expiration_state(passport.get("expirationDate"))
+    expired = expiration == "expired"
 
     if not signature_valid:
         return _result(False, False, expired, "signature-mismatch")
+    if expiration == "invalid":
+        return _result(False, True, False, "invalid-expiration")
     if expired:
         return _result(False, True, True, "expired")
     return _result(True, True, False, "ok")
@@ -93,19 +100,23 @@ def _result(
     }
 
 
-def _is_expired(expiration_date: Optional[str]) -> bool:
-    if not expiration_date:
-        return False
+def _expiration_state(expiration_date: Optional[str]) -> str:
+    if not isinstance(expiration_date, str) or not expiration_date:
+        return "invalid"
     from datetime import datetime, timezone
 
     try:
-        text = expiration_date.replace("Z", "+00:00")
+        text = (
+            expiration_date[:-1] + "+00:00"
+            if expiration_date.endswith("Z")
+            else expiration_date
+        )
         dt = datetime.fromisoformat(text)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt < datetime.now(timezone.utc)
-    except Exception:
-        return False
+            return "invalid"
+        return "expired" if dt < datetime.now(timezone.utc) else "valid"
+    except (TypeError, ValueError, OverflowError):
+        return "invalid"
 
 
 class TrustResource:
@@ -128,14 +139,18 @@ class TrustResource:
         (public — no auth). Raises ``NotFoundError`` for unknown, inactive,
         soft-deleted, or non-PUBLIC agents.
         """
-        return self._http.get(f"/trust/passport/{agent_id}")
+        return self._http.get(
+            f"/trust/passport/{path_segment(agent_id, 'agent_id')}"
+        )
 
     def fetch_verify_bundle(self, agent_id: str) -> dict[str, Any]:
         """
         Fetch the verification bundle (passport + org public key JWK +
         didDocumentUrl + hint). ``GET /trust/passport/{agent_id}/verify`` (public).
         """
-        return self._http.get(f"/trust/passport/{agent_id}/verify")
+        return self._http.get(
+            f"/trust/passport/{path_segment(agent_id, 'agent_id')}/verify"
+        )
 
     def verify_passport(
         self,

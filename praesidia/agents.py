@@ -16,6 +16,7 @@ from ._http import (
     CHAIN_ID_HEADER,
     TASK_ID_HEADER,
     HttpClient,
+    path_segment,
 )
 
 #: AUDIT-SDK-02 — RFC-4122 UUID matcher. ``CreateAgentTaskDto.chainId`` is
@@ -101,7 +102,7 @@ class AgentsResource:
         Raises:
             NotFoundError: If no agent with that ID exists in the org.
         """
-        return self._http.get(f"{self._base}/{agent_id}")
+        return self._http.get(f"{self._base}/{path_segment(agent_id, 'agent_id')}")
 
     def create(self, data: dict[str, Any]) -> dict[str, Any]:
         """
@@ -138,7 +139,9 @@ class AgentsResource:
         Returns:
             Updated agent dict.
         """
-        return self._http.patch(f"{self._base}/{agent_id}", json=data)
+        return self._http.patch(
+            f"{self._base}/{path_segment(agent_id, 'agent_id')}", json=data
+        )
 
     def delete(self, agent_id: str) -> None:
         """
@@ -147,7 +150,7 @@ class AgentsResource:
         Args:
             agent_id: UUID of the agent to delete.
         """
-        self._http.delete(f"{self._base}/{agent_id}")
+        self._http.delete(f"{self._base}/{path_segment(agent_id, 'agent_id')}")
 
     # ------------------------------------------------------------------
     # Credential refresh (Q4-01)
@@ -158,8 +161,8 @@ class AgentsResource:
         Adopt a newly provisioned credential in-process, at runtime
         (zero-downtime swap).
 
-        Call this with a freshly provisioned agent client secret (or any new
-        credential): subsequent requests authenticate with the new secret, so a
+        Call this with a freshly provisioned management API key: subsequent
+        requests authenticate with the new key, so a
         long-lived client can swap credentials without recreating it or
         restarting the process. Also reachable as
         ``client.refresh_credential(...)``.
@@ -214,9 +217,11 @@ class AgentsResource:
                            header (or off a polled task's ``chainId``) so this
                            submit stays joined to the same multi-agent chain.
                            When set it is sent as the ``chainId`` body field and
-                           forwarded on subsequent outbound calls. Omit for a
+                           on this request's trace header only. Omit for a
                            chain-root submit — the server mints a fresh chainId.
-                           The SDK never mints one.
+                           Use ``client.forward_chain`` only when every request
+                           from that client intentionally shares one chain. The
+                           SDK never mints an id.
             callback_url:  Optional webhook URL for the task result.
             parent_task_id: Optional parent task UUID for a delegated sub-task.
 
@@ -234,6 +239,8 @@ class AgentsResource:
                 "input must be a non-empty dict (CreateAgentTaskDto.input is "
                 "@IsObject @IsNotEmpty), e.g. {'message': 'Hello, agent!'}"
             )
+        if not isinstance(connection_id, str) or not _UUID_RE.match(connection_id):
+            raise ValueError("connection_id must be an RFC-4122 UUID")
         if type not in self.TASK_TYPES:
             raise ValueError(
                 f"type must be one of {self.TASK_TYPES}; got {type!r}"
@@ -243,6 +250,8 @@ class AgentsResource:
                 "chain_id must be a UUID (CreateAgentTaskDto.chainId is "
                 f"@IsUUID); got {chain_id!r}"
             )
+        if parent_task_id is not None and not _UUID_RE.match(parent_task_id):
+            raise ValueError("parent_task_id must be an RFC-4122 UUID")
         payload: dict[str, Any] = {
             "connectionId": connection_id,
             "type": type,
@@ -256,16 +265,21 @@ class AgentsResource:
             payload["parentTaskId"] = parent_task_id
         if chain_id:
             payload["chainId"] = chain_id
-            # Q3-02 — propagate the inbound chain on subsequent hops too.
-            self._http.set_chain_id(chain_id)
         tasks_url = f"/organizations/{self._http.org_id}/tasks"
-        return self._http.post(tasks_url, json=payload)
+        headers = {CHAIN_ID_HEADER: chain_id} if chain_id else None
+        return self._http.post(tasks_url, json=payload, headers=headers)
 
     # ------------------------------------------------------------------
     # Chain-aware polling + task-scoped MCP tool calls (Q3-02 / Q4-02)
     # ------------------------------------------------------------------
 
-    def poll_pending_tasks(self, client_id: str) -> list[dict[str, Any]]:
+    def poll_pending_tasks(
+        self,
+        client_id: str,
+        *,
+        client_secret: str | None = None,
+        access_token: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Q3-02 / Q4-02 — claim the pending tasks routed to a polling (server)
         agent.
@@ -279,11 +293,38 @@ class AgentsResource:
 
         Args:
             client_id: The polling agent's A2A ``clientId``.
+            client_secret: Static A2A client secret. Sends only the required
+                           ``X-A2A-*`` headers (no management Bearer header).
+            access_token: OAuth A2A access token. Mutually exclusive with
+                          ``client_secret``. When both are omitted, the
+                          client's configured Bearer credential is used.
 
         Returns:
             A list of claimed task rows. NEVER log a row's ``capabilityToken``.
         """
-        result = self._http.get(f"/a2a/tasks/pending/{client_id}")
+        if client_secret is not None and access_token is not None:
+            raise ValueError("provide client_secret or access_token, not both")
+        headers: dict[str, str] | None = None
+        include_auth = True
+        if client_secret is not None:
+            if not client_secret or "\r" in client_secret or "\n" in client_secret:
+                raise ValueError("client_secret must be a non-empty single-line string")
+            headers = {
+                "X-A2A-Client-Id": client_id,
+                "X-A2A-Client-Secret": client_secret,
+            }
+            # A2A auth treats any Bearer header as authoritative, so the
+            # management API key must be omitted for static-secret auth.
+            include_auth = False
+        elif access_token is not None:
+            if not access_token or "\r" in access_token or "\n" in access_token:
+                raise ValueError("access_token must be a non-empty single-line string")
+            headers = {"Authorization": f"Bearer {access_token}"}
+        result = self._http.get(
+            f"/a2a/tasks/pending/{path_segment(client_id, 'client_id')}",
+            headers=headers,
+            include_auth=include_auth,
+        )
         if isinstance(result, list):
             return result
         return result.get("data", result.get("tasks", []))
@@ -343,12 +384,22 @@ class AgentsResource:
         if chain_id:
             headers[CHAIN_ID_HEADER] = chain_id
 
-        body: dict[str, Any] = {"arguments": arguments or {}}
+        body: dict[str, Any] = {
+            "toolName": tool_name,
+            "arguments": arguments or {},
+        }
         if timeout_ms is not None:
+            if (
+                isinstance(timeout_ms, bool)
+                or not isinstance(timeout_ms, (int, float))
+                or not 1000 <= timeout_ms <= 300_000
+            ):
+                raise ValueError("timeout_ms must be a number from 1000 to 300000")
             body["timeoutMs"] = timeout_ms
 
         path = (
             f"/organizations/{self._http.org_id}"
-            f"/mcp-servers/{server_id}/tools/{tool_name}/call"
+            f"/mcp-servers/{path_segment(server_id, 'server_id')}"
+            f"/tools/{path_segment(tool_name, 'tool_name')}/call"
         )
         return self._http.post(path, json=body, headers=headers or None)

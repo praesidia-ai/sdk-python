@@ -8,7 +8,13 @@ genuinely valid passport with dynamic object keys is falsely rejected.
 
 from __future__ import annotations
 
-from praesidia._crypto import canonical_json
+import pytest
+
+from praesidia._crypto import (
+    canonical_json,
+    ed25519_public_key_from_jwk,
+    ed25519_verify,
+)
 
 
 def test_astral_key_sorts_by_utf16_code_unit_like_js():
@@ -43,3 +49,26 @@ def test_nested_dynamic_keys_are_sorted_at_every_level():
     assert out == (
         '{"credentialSubject":{"z":3,"\U0001F600":2,"￿":1}}'.encode("utf-8")
     )
+
+
+def test_ed25519_rejects_identity_key_trivial_signature():
+    identity = bytes([1]) + bytes(31)
+    forged_signature = identity + bytes(32)  # R=identity, S=0
+
+    assert ed25519_verify(b"any document", forged_signature, identity) is False
+
+
+def test_jwk_rejects_noncanonical_base64url():
+    valid_x = "EAxCTATcxCZf-LxssFR99e6TaZa1Vj7yPWb6prZPv4c"
+    assert ed25519_public_key_from_jwk(
+        {"kty": "OKP", "crv": "Ed25519", "x": valid_x}
+    ) is not None
+    assert ed25519_public_key_from_jwk(
+        {"kty": "OKP", "crv": "Ed25519", "x": valid_x + "!"}
+    ) is None
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_canonical_json_rejects_nonfinite_numbers(value):
+    with pytest.raises(ValueError, match="non-finite"):
+        canonical_json({"value": value})

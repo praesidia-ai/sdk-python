@@ -45,6 +45,8 @@ class Praesidia:
         base_url: Override the backend base URL.  Defaults to the hosted API
                   at ``https://api.praesidia.ai``.  Set to
                   ``http://localhost:5001`` for local development.
+        timeout:   Per-operation HTTP timeout in seconds (default: 30, maximum:
+                   300). Bulk downloads use their own finite idle timeout.
 
     Attributes:
         agents:      :class:`~praesidia.agents.AgentsResource`
@@ -81,8 +83,14 @@ class Praesidia:
         api_key: str,
         org_id: str,
         base_url: str = _DEFAULT_BASE_URL,
+        timeout: float = 30.0,
     ) -> None:
-        self._http = HttpClient(api_key=api_key, org_id=org_id, base_url=base_url)
+        self._http = HttpClient(
+            api_key=api_key,
+            org_id=org_id,
+            base_url=base_url,
+            timeout=timeout,
+        )
         self.agents = AgentsResource(self._http)
         self.workflows = WorkflowsResource(self._http)
         self.audit = AuditResource(self._http)
@@ -98,9 +106,10 @@ class Praesidia:
         Adopt a newly provisioned credential in-process, at runtime
         (zero-downtime swap).
 
-        Pass a freshly provisioned agent client secret here so every subsequent
+        Pass a freshly provisioned management API key here so every subsequent
         request from this client — across all resources — authenticates with
-        the new secret, without recreating the client.
+        the new key, without recreating the client. A2A client secrets belong
+        only in ``agents.poll_pending_tasks(..., client_secret=...)``.
 
         Security: the credential is held only in memory and is never logged.
         """

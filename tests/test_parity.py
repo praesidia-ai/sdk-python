@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
 import respx
 
 from praesidia import Praesidia, tool_call_headers_from_task
@@ -28,7 +29,7 @@ def _client() -> Praesidia:
 
 
 @respx.mock
-def test_run_sends_chain_id_body_and_forwards_header():
+def test_run_sends_chain_id_only_for_that_request():
     # AUDIT-SDK-02 — connectionId + chainId are UUIDs (CreateAgentTaskDto).
     conn = "00000000-0000-4000-8000-000000000c01"
     chain = "11111111-1111-4111-8111-111111111111"
@@ -46,9 +47,12 @@ def test_run_sends_chain_id_body_and_forwards_header():
     first = json.loads(route.calls[0].request.content)
     assert first["chainId"] == chain
 
-    # ...and is forwarded as a header on subsequent outbound calls.
+    assert route.calls[0].request.headers["X-Praesidia-Chain-Id"] == chain
+
+    # A per-task chain must not mutate shared client state: concurrent or later
+    # root tasks must not be attached to an unrelated chain.
     client.agents.run(conn, input={"message": "again"})
-    assert route.calls[1].request.headers["X-Praesidia-Chain-Id"] == chain
+    assert "X-Praesidia-Chain-Id" not in route.calls[1].request.headers
 
 
 @respx.mock
@@ -101,10 +105,26 @@ def test_poll_pending_tasks_returns_rows_with_chain_and_token():
     poll_url = f"{BASE_URL}/a2a/tasks/pending/client-1"
     respx.get(poll_url).mock(return_value=httpx.Response(200, json=[POLLED_TASK]))
 
-    rows = _client().agents.poll_pending_tasks("client-1")
+    rows = _client().agents.poll_pending_tasks(
+        "client-1", client_secret="static-secret"
+    )
     assert rows[0]["chainId"] == "chain-c1"
     assert rows[0]["hopIndex"] == 2
     assert rows[0]["capabilityToken"] == "jwt.opaque.token"
+    request = respx.calls.last.request
+    assert request.headers["X-A2A-Client-Id"] == "client-1"
+    assert request.headers["X-A2A-Client-Secret"] == "static-secret"
+    assert "Authorization" not in request.headers
+
+
+@respx.mock
+def test_poll_pending_tasks_supports_oauth_bearer_without_management_key():
+    poll_url = f"{BASE_URL}/a2a/tasks/pending/client-1"
+    respx.get(poll_url).mock(return_value=httpx.Response(200, json=[]))
+
+    _client().agents.poll_pending_tasks("client-1", access_token="oauth-token")
+
+    assert respx.calls.last.request.headers["Authorization"] == "Bearer oauth-token"
 
 
 @respx.mock
@@ -130,7 +150,10 @@ def test_call_mcp_tool_forwards_four_headers_and_keeps_token_out_of_body():
     assert req.headers["X-Praesidia-Chain-Id"] == "chain-c1"
     # The opaque token must never ride in the JSON body.
     assert b"jwt.opaque.token" not in req.content
-    assert json.loads(req.content) == {"arguments": {"q": "test"}}
+    assert json.loads(req.content) == {
+        "toolName": "search",
+        "arguments": {"q": "test"},
+    }
 
 
 @respx.mock
@@ -153,6 +176,11 @@ def test_call_mcp_tool_explicit_kwargs_override_task():
         route.calls.last.request.headers["X-Praesidia-Capability-Token"]
         == "override.token"
     )
+
+
+def test_call_mcp_tool_rejects_backend_invalid_timeout():
+    with pytest.raises(ValueError, match="timeout_ms"):
+        _client().agents.call_mcp_tool("srv", "search", timeout_ms=999)
 
 
 # ---------------------------------------------------------------------------

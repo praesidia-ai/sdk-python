@@ -24,6 +24,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
+import re
 from typing import Any, Optional
 
 # ── edwards25519 curve constants (RFC 8032 §5.1) ───────────────────────────
@@ -55,6 +57,8 @@ def _x_recover(y: int) -> int:
 _BY = (4 * _inv(5)) % _P
 _BX = _x_recover(_BY)
 _B = (_BX % _P, _BY % _P, 1, (_BX * _BY) % _P)  # extended coords (X, Y, Z, T)
+_IDENTITY_ENCODING = bytes([1]) + bytes(31)
+_BASE64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _edwards_add(p: tuple, q: tuple) -> tuple:
@@ -106,6 +110,12 @@ def _decode_point(s: bytes) -> Optional[tuple]:
     p = (x % _P, y % _P, 1, (x * y) % _P)
     # Verify the point is on the curve: -x^2 + y^2 = 1 + d x^2 y^2.
     if (-x * x + y * y - 1 - _D * x * x * y * y) % _P != 0:
+        return None
+    # Strict verification requires prime-order subgroup points. Otherwise the
+    # identity key accepts the trivial R=identity, S=0 signature for any input.
+    if _encode_point(p) == _IDENTITY_ENCODING:
+        return None
+    if _encode_point(_scalarmult(p, _L)) != _IDENTITY_ENCODING:
         return None
     return p
 
@@ -167,8 +177,10 @@ def ed25519_public_key_from_jwk(jwk: Any) -> Optional[bytes]:
 
 
 def _b64url_decode(value: str) -> bytes:
+    if not _BASE64URL_RE.fullmatch(value):
+        raise ValueError("non-canonical base64url")
     padding = "=" * (-len(value) % 4)
-    return base64.urlsafe_b64decode(value + padding)
+    return base64.b64decode(value + padding, altchars=b"-_", validate=True)
 
 
 def canonical_json(value: Any) -> bytes:
@@ -199,6 +211,8 @@ def _canonicalize(v: Any) -> str:
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, (int, float)):
+        if isinstance(v, float) and not math.isfinite(v):
+            raise ValueError("canonical_json: non-finite number")
         # json.dumps matches JSON.stringify for the integer / finite-float cases
         # that appear in a passport (trust score is an int).
         return json.dumps(v)
