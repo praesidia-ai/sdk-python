@@ -177,6 +177,7 @@ def test_fetch_and_verify_hits_public_route_and_verifies():
     )
     result = _client().trust.fetch_and_verify("agent-1")
     assert route.called
+    assert "Authorization" not in route.calls.last.request.headers
     assert result["verified"] is True
     assert result["passport"]["credentialSubject"]["agentName"] == "Nova"
     assert result["didDocumentUrl"].endswith("/agents/agent-1/did.json")
@@ -189,4 +190,5 @@ def test_fetch_passport_returns_signed_credential():
     )
     passport = _client().trust.fetch_passport("agent-1")
     assert route.called
+    assert "Authorization" not in route.calls.last.request.headers
     assert passport["proof"]["type"] == "Ed25519Signature2020"

@@ -11,6 +11,7 @@ is ``ready``, then download the structured JSON and/or the rendered PDF.
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Any
 
@@ -130,6 +131,10 @@ class ComplianceResource:
             PraesidiaError: If the report status becomes ``failed``.
             TimeoutError:   If ``timeout`` elapses before the report is ready.
         """
+        timeout = _validate_wait_value(timeout, "timeout", allow_zero=False)
+        poll_interval = _validate_wait_value(
+            poll_interval, "poll_interval", allow_zero=True
+        )
         deadline = time.monotonic() + timeout
         while True:
             status = self.get_status(report_id)
@@ -169,3 +174,14 @@ class ComplianceResource:
             timeout=timeout,
             poll_interval=poll_interval,
         )
+
+
+def _validate_wait_value(value: float, name: str, *, allow_zero: bool) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite number of seconds")
+    result = float(value)
+    minimum_valid = result >= 0 if allow_zero else result > 0
+    if not minimum_valid or not math.isfinite(result):
+        comparison = "non-negative" if allow_zero else "greater than zero"
+        raise ValueError(f"{name} must be finite and {comparison}")
+    return result

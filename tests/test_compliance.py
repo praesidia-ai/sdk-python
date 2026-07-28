@@ -129,6 +129,22 @@ def test_wait_for_report_times_out():
         )
 
 
+@pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf"), True, "5"])
+def test_wait_for_report_rejects_invalid_timeout(timeout):
+    with pytest.raises(ValueError, match="timeout"):
+        _client().compliance.wait_for_report("rep-1", timeout=timeout)
+
+
+@pytest.mark.parametrize(
+    "poll_interval", [-1, float("nan"), float("inf"), True, "1"]
+)
+def test_wait_for_report_rejects_invalid_poll_interval(poll_interval):
+    with pytest.raises(ValueError, match="poll_interval"):
+        _client().compliance.wait_for_report(
+            "rep-1", poll_interval=poll_interval
+        )
+
+
 @respx.mock
 def test_generate_and_wait():
     respx.post(REPORTS).mock(

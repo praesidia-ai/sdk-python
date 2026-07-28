@@ -44,8 +44,16 @@ CAPABILITY_TOKEN_HEADER = "X-Praesidia-Capability-Token"
 
 def path_segment(value: str, name: str = "path segment") -> str:
     """Validate and percent-encode a caller-controlled URL path segment."""
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"{name} must be a non-empty string")
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or value in (".", "..")
+    ):
+        raise ValueError(
+            f"{name} must be a non-empty path segment without surrounding "
+            "whitespace or dot traversal"
+        )
     if any(ord(char) < 32 or ord(char) == 127 for char in value):
         raise ValueError(f"{name} must not contain control characters")
     return quote(value, safe="")
@@ -55,11 +63,15 @@ def normalize_base_url(base_url: str) -> str:
     """Return a safe absolute HTTP(S) API base URL without a trailing slash."""
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("base_url must be a non-empty absolute HTTP(S) URL")
-    if base_url != base_url.strip() or any(
-        ord(char) < 32 or ord(char) == 127 for char in base_url
-    ):
+    if base_url != base_url.strip() or any(char.isspace() for char in base_url):
         raise ValueError("base_url must not contain whitespace or control characters")
+    if "\\" in base_url:
+        raise ValueError("base_url must not contain backslashes")
     parsed = urlsplit(base_url)
+    try:
+        parsed.port
+    except ValueError as exc:
+        raise ValueError("base_url contains an invalid port") from exc
     if (
         parsed.scheme not in ("http", "https")
         or not parsed.netloc
@@ -80,8 +92,8 @@ def normalize_base_url(base_url: str) -> str:
 def _validate_api_key(api_key: str) -> str:
     if not isinstance(api_key, str) or not api_key.strip():
         raise ValueError("api_key must be a non-empty string")
-    if "\r" in api_key or "\n" in api_key:
-        raise ValueError("api_key must not contain newline characters")
+    if api_key != api_key.strip() or any(ord(char) < 32 or ord(char) == 127 for char in api_key):
+        raise ValueError("api_key must not contain surrounding whitespace or control characters")
     return api_key
 
 

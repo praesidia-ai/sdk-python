@@ -65,6 +65,9 @@ def test_stream_get_respects_explicit_timeout_override(monkeypatch):
         "https://api.example.test?redirect=evil",
         "https://api.example.test/#fragment",
         " https://api.example.test",
+        "https://api example.test",
+        "https:\\evil.example.test",
+        "https://api.example.test:99999",
     ],
 )
 def test_rejects_unsafe_base_urls(base_url):
@@ -72,7 +75,9 @@ def test_rejects_unsafe_base_urls(base_url):
         HttpClient(api_key="k", org_id="o", base_url=base_url)
 
 
-@pytest.mark.parametrize("api_key", ["", "   ", "key\r\ninjected: true"])
+@pytest.mark.parametrize(
+    "api_key", ["", "   ", " key", "key ", "key\tvalue", "key\r\ninjected: true"]
+)
 def test_rejects_invalid_api_keys(api_key):
     with pytest.raises(ValueError, match="api_key"):
         HttpClient(api_key=api_key, org_id="o", base_url="https://api.test")
@@ -104,10 +109,11 @@ def test_general_requests_use_configured_timeout(monkeypatch):
     assert captured["timeout"] == 7.5
 
 
-def test_path_segments_are_encoded_and_empty_values_rejected():
+def test_path_segments_are_encoded_and_unsafe_values_rejected():
     assert path_segment("../admin/a b", "resource_id") == "..%2Fadmin%2Fa%20b"
-    with pytest.raises(ValueError, match="resource_id"):
-        path_segment("", "resource_id")
+    for unsafe in ("", " ", " id", ".", ".."):
+        with pytest.raises(ValueError, match="resource_id"):
+            path_segment(unsafe, "resource_id")
 
 
 def test_public_client_exposes_matching_package_version():

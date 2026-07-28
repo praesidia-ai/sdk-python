@@ -140,7 +140,8 @@ class TrustResource:
         soft-deleted, or non-PUBLIC agents.
         """
         return self._http.get(
-            f"/trust/passport/{path_segment(agent_id, 'agent_id')}"
+            f"/trust/passport/{path_segment(agent_id, 'agent_id')}",
+            include_auth=False,
         )
 
     def fetch_verify_bundle(self, agent_id: str) -> dict[str, Any]:
@@ -149,7 +150,8 @@ class TrustResource:
         didDocumentUrl + hint). ``GET /trust/passport/{agent_id}/verify`` (public).
         """
         return self._http.get(
-            f"/trust/passport/{path_segment(agent_id, 'agent_id')}/verify"
+            f"/trust/passport/{path_segment(agent_id, 'agent_id')}/verify",
+            include_auth=False,
         )
 
     def verify_passport(
