@@ -17,7 +17,10 @@ Usage::
 
 from __future__ import annotations
 
+from typing import Union
+
 from ._http import HttpClient
+from ._retry import RetryConfig
 from .agents import AgentsResource
 from .analytics import AnalyticsResource
 from .audit import AuditResource
@@ -47,6 +50,11 @@ class Praesidia:
                   ``http://localhost:5001`` for local development.
         timeout:   Per-operation HTTP timeout in seconds (default: 30, maximum:
                    300). Bulk downloads use their own finite idle timeout.
+        retry:     FINDING-4 — bounded retry policy for GET/DELETE (and
+                   idempotency-keyed POST/PATCH) requests. A ``RetryConfig``
+                   instance, ``None`` (default policy: 3 attempts, jittered
+                   backoff, 15s budget, honours ``Retry-After``), or ``False``
+                   to disable retries entirely.
 
     Attributes:
         agents:      :class:`~praesidia.agents.AgentsResource`
@@ -84,12 +92,14 @@ class Praesidia:
         org_id: str,
         base_url: str = _DEFAULT_BASE_URL,
         timeout: float = 30.0,
+        retry: Union[RetryConfig, bool, None] = None,
     ) -> None:
         self._http = HttpClient(
             api_key=api_key,
             org_id=org_id,
             base_url=base_url,
             timeout=timeout,
+            retry=retry,
         )
         self.agents = AgentsResource(self._http)
         self.workflows = WorkflowsResource(self._http)

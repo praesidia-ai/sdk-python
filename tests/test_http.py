@@ -119,5 +119,5 @@ def test_path_segments_are_encoded_and_unsafe_values_rejected():
 def test_public_client_exposes_matching_package_version():
     import praesidia
 
-    assert praesidia.__version__ == "0.2.0"
+    assert praesidia.__version__ == "0.3.0"
     assert Praesidia(api_key="k", org_id="o")._http._timeout == 30.0

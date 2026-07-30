@@ -28,6 +28,7 @@ from ._crypto import (
     ed25519_public_key_from_jwk,
     ed25519_verify,
 )
+from ._retry import RetryConfig
 from .agents import tool_call_headers_from_task
 from .client import Praesidia
 from .exceptions import (
@@ -57,6 +58,8 @@ __all__ = [
     "canonical_json",
     # H1-02 — OTLP GenAI span builder
     "gen_ai_span",
+    # FINDING-4 — bounded retry policy config
+    "RetryConfig",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

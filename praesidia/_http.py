@@ -7,12 +7,20 @@ future release via httpx.AsyncClient without changing the resource API.
 
 from __future__ import annotations
 
+import time
 from threading import RLock
-from typing import Any
+from typing import Any, Callable, Optional, Union
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
+from ._retry import (
+    RetryConfig,
+    compute_backoff_s,
+    is_retryable_status,
+    parse_retry_after_s,
+    resolve_retry_config,
+)
 from .exceptions import (
     AuthError,
     ForbiddenError,
@@ -130,6 +138,7 @@ class HttpClient:
         org_id: str,
         base_url: str,
         timeout: float = _DEFAULT_TIMEOUT,
+        retry: Union[RetryConfig, bool, None] = None,
     ) -> None:
         self.org_id = path_segment(org_id, "org_id")
         self._base = normalize_base_url(base_url)
@@ -140,6 +149,8 @@ class HttpClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        #: FINDING-4 -- resolved retry policy, or None when retries are disabled.
+        self._retry: Optional[RetryConfig] = resolve_retry_config(retry)
 
     def set_api_key(self, api_key: str) -> None:
         """
@@ -196,6 +207,58 @@ class HttpClient:
         return {**base, **extra}
 
     # ------------------------------------------------------------------
+    # FINDING-4 -- bounded retry wrapper
+    # ------------------------------------------------------------------
+
+    def _send_with_retry(
+        self, retryable: bool, do_request: Callable[[], httpx.Response]
+    ) -> httpx.Response:
+        """
+        Invoke ``do_request`` once, retrying it only when ``retryable`` is
+        True AND a retry policy is active. Retries a transient network
+        failure (``httpx.HTTPError`` -- connection reset, DNS failure, etc,
+        which raises rather than returning a response) exactly like a 5xx,
+        under the same attempt/elapsed budget. Honours ``Retry-After`` on a
+        429/5xx response; otherwise uses jittered exponential backoff.
+        """
+        if self._retry is None or not retryable:
+            return do_request()
+
+        cfg = self._retry
+        start = time.monotonic()
+        attempt = 1
+        while True:
+            try:
+                response = do_request()
+            except httpx.HTTPError:
+                elapsed = time.monotonic() - start
+                if attempt >= cfg.max_attempts or elapsed >= cfg.max_elapsed_s:
+                    raise
+                delay = compute_backoff_s(attempt, cfg.base_delay_s, cfg.max_delay_s)
+                if elapsed + delay >= cfg.max_elapsed_s:
+                    raise
+                time.sleep(delay)
+                attempt += 1
+                continue
+
+            if attempt < cfg.max_attempts and is_retryable_status(response.status_code):
+                elapsed = time.monotonic() - start
+                if elapsed >= cfg.max_elapsed_s:
+                    return response
+                retry_after = parse_retry_after_s(response.headers.get("retry-after"))
+                delay = (
+                    retry_after
+                    if retry_after is not None
+                    else compute_backoff_s(attempt, cfg.base_delay_s, cfg.max_delay_s)
+                )
+                if elapsed + delay >= cfg.max_elapsed_s:
+                    return response
+                time.sleep(delay)
+                attempt += 1
+                continue
+            return response
+
+    # ------------------------------------------------------------------
     # Public verbs
     # ------------------------------------------------------------------
 
@@ -206,14 +269,18 @@ class HttpClient:
         headers: dict[str, str] | None = None,
         include_auth: bool = True,
     ) -> Any:
-        """Send a GET request and return the parsed JSON body."""
+        """Send a GET request and return the parsed JSON body. Always idempotent -- retried per policy."""
         url = f"{self._base}{path}"
-        r = httpx.get(
-            url,
-            headers=self._merged_headers(headers, include_auth=include_auth),
-            params=params,
-            timeout=self._timeout,
-        )
+
+        def do() -> httpx.Response:
+            return httpx.get(
+                url,
+                headers=self._merged_headers(headers, include_auth=include_auth),
+                params=params,
+                timeout=self._timeout,
+            )
+
+        r = self._send_with_retry(True, do)
         self._raise_for_status(r)
         return r.json()
 
@@ -222,36 +289,69 @@ class HttpClient:
         path: str,
         json: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        idempotency_key: str | None = None,
     ) -> Any:
-        """Send a POST request and return the parsed JSON body."""
+        """
+        Send a POST request and return the parsed JSON body.
+
+        Retried ONLY when ``idempotency_key`` is supplied (sent as the
+        ``Idempotency-Key`` header) -- a bare POST is never retried by this
+        client, to avoid a duplicate create/charge after a transient failure.
+        """
         url = f"{self._base}{path}"
-        r = httpx.post(
-            url,
-            headers=self._merged_headers(headers),
-            json=json,
-            timeout=self._timeout,
-        )
+        merged = {**(headers or {}), "Idempotency-Key": idempotency_key} if idempotency_key else headers
+
+        def do() -> httpx.Response:
+            return httpx.post(
+                url,
+                headers=self._merged_headers(merged),
+                json=json,
+                timeout=self._timeout,
+            )
+
+        r = self._send_with_retry(bool(idempotency_key), do)
         self._raise_for_status(r)
         return r.json()
 
-    def patch(self, path: str, json: dict[str, Any] | None = None) -> Any:
-        """Send a PATCH request and return the parsed JSON body."""
+    def patch(
+        self,
+        path: str,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """
+        Send a PATCH request and return the parsed JSON body.
+
+        Retried ONLY when ``idempotency_key`` is supplied -- a PATCH is not
+        guaranteed idempotent across this API's whole surface, so this
+        client stays conservative by default (see FINDING-4).
+        """
         url = f"{self._base}{path}"
-        r = httpx.patch(
-            url,
-            headers=self._merged_headers(None),
-            json=json,
-            timeout=self._timeout,
-        )
+        merged = {**(headers or {}), "Idempotency-Key": idempotency_key} if idempotency_key else headers
+
+        def do() -> httpx.Response:
+            return httpx.patch(
+                url,
+                headers=self._merged_headers(merged),
+                json=json,
+                timeout=self._timeout,
+            )
+
+        r = self._send_with_retry(bool(idempotency_key), do)
         self._raise_for_status(r)
         return r.json()
 
     def delete(self, path: str) -> None:
-        """Send a DELETE request (no response body expected)."""
+        """Send a DELETE request (no response body expected). Always idempotent -- retried per policy."""
         url = f"{self._base}{path}"
-        r = httpx.delete(
-            url, headers=self._merged_headers(None), timeout=self._timeout
-        )
+
+        def do() -> httpx.Response:
+            return httpx.delete(
+                url, headers=self._merged_headers(None), timeout=self._timeout
+            )
+
+        r = self._send_with_retry(True, do)
         self._raise_for_status(r)
 
     def stream_get(
@@ -262,7 +362,7 @@ class HttpClient:
     ) -> httpx.Response:
         """
         Buffered GET for bulk download/export endpoints (report PDF, audit
-        export, analytics export).
+        export, analytics export). Always idempotent -- retried per policy.
 
         BUGHUNT-SDK-06 — uses a generous but finite per-operation timeout
         (``_DOWNLOAD_TIMEOUT``) rather than ``timeout=None``. httpx's
@@ -274,12 +374,16 @@ class HttpClient:
         variant can switch to ``httpx.stream()``.)
         """
         url = f"{self._base}{path}"
-        return httpx.get(
-            url,
-            headers=self._merged_headers(None),
-            params=params,
-            timeout=_DOWNLOAD_TIMEOUT if timeout is None else timeout,
-        )
+
+        def do() -> httpx.Response:
+            return httpx.get(
+                url,
+                headers=self._merged_headers(None),
+                params=params,
+                timeout=_DOWNLOAD_TIMEOUT if timeout is None else timeout,
+            )
+
+        return self._send_with_retry(True, do)
 
     # ------------------------------------------------------------------
     # Internal helpers

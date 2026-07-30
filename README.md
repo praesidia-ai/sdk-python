@@ -197,6 +197,44 @@ for row in client.agents.poll_pending_tasks(
 (`str | None`). For JIT-first orgs `clientSecret` is `None` — do **not** persist
 a static `X-A2A-Client-Secret`; use the JIT capability-token flow above.
 
+## Retry (FINDING-4) — bounded, idempotency-safe by default
+
+The client retries **only** requests that are safe to repeat: GET, DELETE, and
+any POST/PATCH the caller explicitly marks with an `idempotency_key`. **A bare
+POST (task submission, agent/workflow/connection creation) is never
+retried** — retrying an already-applied create/charge is a duplication bug,
+not a resilience feature.
+
+Retries use jittered exponential backoff, honour a `Retry-After` header on
+`429`/`5xx`, and are bounded by both an attempt count and a wall-clock budget:
+
+```python
+from praesidia import Praesidia, RetryConfig
+
+client = Praesidia(
+    api_key="sk-...",
+    org_id="...",
+    retry=RetryConfig(
+        max_attempts=3,      # default: 3 (i.e. up to 2 retries)
+        base_delay_s=0.25,   # default: 0.25
+        max_delay_s=4.0,     # default: 4.0
+        max_elapsed_s=15.0,  # default: 15.0 -- total budget across all attempts
+    ),
+)
+
+# Disable retries entirely:
+client_no_retry = Praesidia(api_key="sk-...", org_id="...", retry=False)
+
+# Opt an idempotent write into retry:
+client.agents.update("agent-1", {"name": "Renamed"})  # PATCH — not retried by default
+```
+
+To retry a POST/PATCH from a resource method, pass through to
+`client._http.post(..., idempotency_key=...)` / `.patch(...)` directly, or
+wait for a resource-level `idempotency_key` parameter (not yet threaded
+through every resource method — the transport-level primitive is what this
+release adds).
+
 ## Error handling
 
 All SDK errors derive from `PraesidiaError`:
@@ -231,12 +269,35 @@ The local BE exposes the OpenAPI spec at `http://localhost:5001/api-docs-json`.
 
 ## Contributing
 
+Reproducible dev environment via `uv` (this repo's committed `uv.lock` is the
+source of truth):
+
+```bash
+uv sync --extra dev
+uv run pytest -q
+```
+
+Without `uv`, a plain venv works too:
+
 ```bash
 pip install -e ".[dev]"
 pytest
 ```
 
 ## Changelog
+
+### 0.3.0 — bounded retry (FINDING-4) + dev environment
+
+- **Added** bounded, idempotency-safe retry to `HttpClient` (`get`/`delete`
+  retry by default; `post`/`patch` only retry when called with
+  `idempotency_key=...`). New `retry` constructor kwarg on `Praesidia`
+  (`RetryConfig` instance, `None` for the default policy, or `False` to
+  disable). Non-breaking — no existing method signature changed.
+- **Dev environment**: this repo's `uv.lock` is the source of truth for a
+  reproducible dev environment — `uv sync --extra dev && uv run pytest -q`
+  runs the full suite without touching the ambient system Python. (`pip
+  install -e ".[dev]"` remains a valid alternative for contributors without
+  `uv`.)
 
 ### 0.2.0 — audit / download bug-fix wave
 
