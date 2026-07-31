@@ -205,6 +205,15 @@ POST (task submission, agent/workflow/connection creation) is never
 retried** — retrying an already-applied create/charge is a duplication bug,
 not a resilience feature.
 
+**R-SDK-1 — `idempotency_key` is allow-listed, not a blanket promise.**
+be-core only deduplicates a request server-side on `Idempotency-Key` for
+three routes today: `POST /organizations/:orgId/tasks`, `POST /a2a/tasks`,
+and `POST /a2a/tasks/:taskId/result`. Every other route — including every
+PATCH — ignores the header entirely. Passing `idempotency_key` to
+`HttpClient.post`/`.patch` for any other path raises `ValueError`
+immediately (no request is sent) rather than silently retrying a write the
+server can double-apply.
+
 Retries use jittered exponential backoff, honour a `Retry-After` header on
 `429`/`5xx`, and are bounded by both an attempt count and a wall-clock budget:
 
@@ -230,10 +239,11 @@ client.agents.update("agent-1", {"name": "Renamed"})  # PATCH — not retried by
 ```
 
 To retry a POST/PATCH from a resource method, pass through to
-`client._http.post(..., idempotency_key=...)` / `.patch(...)` directly, or
-wait for a resource-level `idempotency_key` parameter (not yet threaded
-through every resource method — the transport-level primitive is what this
-release adds).
+`client._http.post(..., idempotency_key=...)` / `.patch(...)` directly — and
+only for the three allow-listed routes above (in practice: task
+submission) — or wait for a resource-level `idempotency_key` parameter (not
+yet threaded through every resource method — the transport-level primitive
+is what this release adds).
 
 ## Error handling
 
@@ -285,6 +295,17 @@ pytest
 ```
 
 ## Changelog
+
+### 0.3.1 — R-SDK-1: allow-list the routes `idempotency_key` may retry
+
+- **Fixed** `idempotency_key` retry is now allow-listed to the routes
+  be-core actually deduplicates (`POST /organizations/:orgId/tasks`,
+  `POST /a2a/tasks`, `POST /a2a/tasks/:taskId/result`); every other path
+  raises `ValueError` instead of retrying a write the server can
+  double-apply. Previously any path accepted the option. **Behavioral,
+  non-breaking for existing callers** — no shipped resource method passed
+  `idempotency_key` before this fix, so no caller's request shape changes;
+  the transport-level escape hatch is simply narrower/safer than before.
 
 ### 0.3.0 — bounded retry (FINDING-4) + dev environment
 

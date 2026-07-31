@@ -13,6 +13,7 @@ duplicate create/charge.
 from __future__ import annotations
 
 import random
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -115,3 +116,39 @@ def compute_backoff_s(attempt: int, base_delay_s: float, max_delay_s: float) -> 
     """Exponential backoff with full jitter, capped at ``max_delay_s``."""
     exp = min(max_delay_s, base_delay_s * (2 ** (attempt - 1)))
     return random.random() * exp
+
+
+#: R-SDK-1 — be-core honours ``Idempotency-Key`` for safe replay on exactly
+#: two route families (grepped ``be/src`` for consumers of the header):
+#: ``POST /organizations/:orgId/tasks`` (``agent-tasks.controller.ts``, via
+#: ``withIdempotency``) and the A2A inbound routes (``POST /a2a/tasks``,
+#: ``POST /a2a/tasks/:taskId/result``). Every other POST/PATCH in the API --
+#: including every PATCH route today -- ignores the header entirely. Parity
+#: with the TS SDK's ``retry.ts``.
+_IDEMPOTENCY_HONOURED_POST_PATHS = (
+    re.compile(r"^/organizations/[^/]+/tasks$"),
+    re.compile(r"^/a2a/tasks$"),
+    re.compile(r"^/a2a/tasks/[^/]+/result$"),
+)
+
+
+def assert_idempotency_key_supported(method: str, path: str) -> None:
+    """
+    Raise ``ValueError`` when ``idempotency_key`` is requested for a
+    ``method``+``path`` combination that be-core does not deduplicate
+    server-side. Called only when the caller actually supplied an
+    ``idempotency_key`` -- a bare request never invokes this and is never
+    retried.
+    """
+    if method == "POST" and any(
+        pattern.match(path) for pattern in _IDEMPOTENCY_HONOURED_POST_PATHS
+    ):
+        return
+    raise ValueError(
+        f"be-core does not honour Idempotency-Key on {method} {path} -- "
+        "retry-on-write is only safe for routes with server-side dedup "
+        "(today: POST /organizations/:orgId/tasks, POST /a2a/tasks, "
+        "POST /a2a/tasks/:taskId/result). Passing idempotency_key here would "
+        "let a transient 5xx double-apply a write the server does not "
+        "deduplicate."
+    )

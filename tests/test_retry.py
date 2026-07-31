@@ -14,6 +14,7 @@ from praesidia._http import HttpClient
 from praesidia._retry import (
     DEFAULT_RETRY_CONFIG,
     RetryConfig,
+    assert_idempotency_key_supported,
     compute_backoff_s,
     is_retryable_status,
     parse_retry_after_s,
@@ -187,10 +188,50 @@ def test_post_with_idempotency_key_is_retried_and_sends_header(monkeypatch):
 
     monkeypatch.setattr("praesidia._http.httpx.post", fake_post)
     client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
-    result = client.post("/tasks", json={"input": {}}, idempotency_key="idem-123")
+    result = client.post(
+        "/organizations/o/tasks", json={"input": {}}, idempotency_key="idem-123"
+    )
     assert result == {"created": True}
     assert calls["n"] == 2
     assert seen_headers[0]["Idempotency-Key"] == "idem-123"
+
+
+def test_idempotency_key_rejected_on_a_route_be_core_does_not_dedup(monkeypatch):
+    """R-SDK-1 -- be-core ignores Idempotency-Key everywhere except the
+    allow-listed task routes; passing one to any other path must fail closed
+    (no request sent) rather than silently retry an un-deduplicated write."""
+    calls = {"n": 0}
+
+    def fake_post(url, **kwargs):
+        calls["n"] += 1
+        return httpx.Response(201, json={"id": "x"}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr("praesidia._http.httpx.post", fake_post)
+    client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
+    with pytest.raises(ValueError, match="does not honour Idempotency-Key"):
+        client.post("/organizations/o/agents", json={"name": "a"}, idempotency_key="idem-123")
+    assert calls["n"] == 0
+
+
+def test_idempotency_key_rejected_on_every_patch_route(monkeypatch):
+    """R-SDK-1 -- be-core honours Idempotency-Key on no PATCH route today."""
+    client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
+    with pytest.raises(ValueError, match="does not honour Idempotency-Key"):
+        client.patch(
+            "/organizations/o/tasks", json={"name": "a"}, idempotency_key="idem-123"
+        )
+
+
+def test_idempotency_key_allowed_on_a2a_inbound_routes(monkeypatch):
+    def fake_post(url, **kwargs):
+        return httpx.Response(201, json={"ok": True}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr("praesidia._http.httpx.post", fake_post)
+    client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
+    assert client.post("/a2a/tasks", json={}, idempotency_key="k") == {"ok": True}
+    assert client.post(
+        "/a2a/tasks/task-1/result", json={}, idempotency_key="k"
+    ) == {"ok": True}
 
 
 def test_gives_up_after_max_attempts(monkeypatch):
@@ -234,3 +275,34 @@ def test_network_level_failure_is_retried(monkeypatch):
     client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
     assert client.get("/health") == {"ok": True}
     assert calls["n"] == 2
+
+
+# ---------------------------------------------------------------------------
+# assert_idempotency_key_supported (R-SDK-1) -- the idempotency_key
+# allow-list. be-core honours Idempotency-Key on exactly three routes;
+# everything else must be rejected client-side. Parity with the TS SDK's
+# retry.spec.ts.
+# ---------------------------------------------------------------------------
+
+
+def test_assert_idempotency_key_supported_allows_task_creation():
+    assert_idempotency_key_supported("POST", "/organizations/org_1/tasks")
+
+
+def test_assert_idempotency_key_supported_allows_a2a_inbound_routes():
+    assert_idempotency_key_supported("POST", "/a2a/tasks")
+    assert_idempotency_key_supported("POST", "/a2a/tasks/task-1/result")
+
+
+def test_assert_idempotency_key_supported_rejects_other_post_paths():
+    with pytest.raises(ValueError, match="does not honour Idempotency-Key"):
+        assert_idempotency_key_supported("POST", "/organizations/org_1/agents")
+    with pytest.raises(ValueError, match="does not honour Idempotency-Key"):
+        assert_idempotency_key_supported(
+            "POST", "/organizations/org_1/tasks/task-1/approve"
+        )
+
+
+def test_assert_idempotency_key_supported_rejects_every_patch_path():
+    with pytest.raises(ValueError, match="does not honour Idempotency-Key"):
+        assert_idempotency_key_supported("PATCH", "/organizations/org_1/tasks")

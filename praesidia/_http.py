@@ -16,6 +16,7 @@ import httpx
 
 from ._retry import (
     RetryConfig,
+    assert_idempotency_key_supported,
     compute_backoff_s,
     is_retryable_status,
     parse_retry_after_s,
@@ -297,7 +298,13 @@ class HttpClient:
         Retried ONLY when ``idempotency_key`` is supplied (sent as the
         ``Idempotency-Key`` header) -- a bare POST is never retried by this
         client, to avoid a duplicate create/charge after a transient failure.
+
+        R-SDK-1 -- ``idempotency_key`` is only honoured for the routes
+        be-core actually deduplicates server-side; see
+        :func:`._retry.assert_idempotency_key_supported`.
         """
+        if idempotency_key:
+            assert_idempotency_key_supported("POST", path)
         url = f"{self._base}{path}"
         merged = {**(headers or {}), "Idempotency-Key": idempotency_key} if idempotency_key else headers
 
@@ -326,7 +333,14 @@ class HttpClient:
         Retried ONLY when ``idempotency_key`` is supplied -- a PATCH is not
         guaranteed idempotent across this API's whole surface, so this
         client stays conservative by default (see FINDING-4).
+
+        R-SDK-1 -- be-core honours ``Idempotency-Key`` on no PATCH route
+        today, so :func:`._retry.assert_idempotency_key_supported` always
+        rejects a PATCH-level ``idempotency_key`` until a server-side PATCH
+        dedup route exists.
         """
+        if idempotency_key:
+            assert_idempotency_key_supported("PATCH", path)
         url = f"{self._base}{path}"
         merged = {**(headers or {}), "Idempotency-Key": idempotency_key} if idempotency_key else headers
 
