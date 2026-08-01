@@ -58,8 +58,18 @@ def test_success_returns_dispatch_result_and_sends_correct_body():
     }
 
 
+# PA-0026 — these are the tests that would have caught the original
+# heuristic bug: it decided "pre-dispatch denial?" via
+# `errorCode != 'TOOL_ERROR'`, but `'TOOL_ERROR'` is never present in this
+# endpoint's caller-visible response at all (it only exists in be's internal
+# forensic write). Both cases below satisfy that old heuristic's "raise"
+# branch and would have wrongly raised ProtectedActionDeniedError.
 @respx.mock
-def test_tool_level_error_does_not_raise():
+def test_tool_level_error_does_not_raise_no_error_code():
+    """A successful call whose tool itself reports failure carries no
+    errorCode at all, and no actionDenyReason — verified by tracing
+    mcp-client.service.ts's success-with-tool-error return site
+    (PA01-FIXED-be3.md "Design decision 2")."""
     respx.post(CALL_URL).mock(
         return_value=httpx.Response(
             200,
@@ -69,7 +79,6 @@ def test_tool_level_error_does_not_raise():
                 "isError": True,
                 "latencyMs": 5,
                 "error": "downstream tool failed",
-                "errorCode": "TOOL_ERROR",
             },
         )
     )
@@ -79,8 +88,47 @@ def test_tool_level_error_does_not_raise():
     assert result["isError"] is True
 
 
+@pytest.mark.parametrize("error_code", ["BAD_REQUEST", "INTERNAL_ERROR"])
 @respx.mock
-def test_permit_missing_raises_protected_action_denied_error():
+def test_downstream_tool_transport_exception_does_not_raise(error_code):
+    """A genuine downstream tool/transport exception — NOT a denial — has no
+    actionDenyReason even though it carries an errorCode."""
+    respx.post(CALL_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "success": False,
+                "content": [],
+                "isError": True,
+                "latencyMs": 5,
+                "error": "downstream tool threw",
+                "errorCode": error_code,
+            },
+        )
+    )
+
+    result = _client().agents.protect_action("srv-1", "search")
+    assert result["success"] is False
+    assert result["isError"] is True
+
+
+@pytest.mark.parametrize(
+    "action_deny_reason,message",
+    [
+        ("PERMIT_MISSING", "no Permit presented (X-Praesidia-Permit missing)"),
+        ("PERMIT_INVALID", "Permit signature invalid"),
+        ("PERMIT_EXPIRED", "Permit expired"),
+        ("PERMIT_MISMATCH", "Permit commitment mismatch"),
+        ("PERMIT_REPLAYED", "Permit already consumed (replay suppressed)"),
+        ("POLICY_DENIED", "denied by agent tool policy"),
+    ],
+)
+@respx.mock
+def test_each_deny_reason_raises_protected_action_denied_error(
+    action_deny_reason, message
+):
+    """PA-0026 — actionDenyReason is the reliable discriminator: every one
+    of the frozen six values must raise."""
     respx.post(CALL_URL).mock(
         return_value=httpx.Response(
             200,
@@ -89,36 +137,16 @@ def test_permit_missing_raises_protected_action_denied_error():
                 "content": [],
                 "isError": True,
                 "latencyMs": 0,
-                "error": 'Tool "search" denied: no Permit presented (X-Praesidia-Permit missing)',
-                "errorCode": "PERMIT_MISSING",
+                "error": f'Tool "search" denied: {message}',
+                "errorCode": f"PERMIT_{action_deny_reason}",
+                "actionDenyReason": action_deny_reason,
             },
         )
     )
 
     with pytest.raises(ProtectedActionDeniedError) as excinfo:
         _client().agents.protect_action("srv-1", "search")
-    assert excinfo.value.error_code == "PERMIT_MISSING"
-
-
-@respx.mock
-def test_confirmed_replay_raises_protected_action_denied_error():
-    respx.post(CALL_URL).mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "success": False,
-                "content": [],
-                "isError": True,
-                "latencyMs": 0,
-                "error": "Tool \"search\" denied: Permit already consumed (replay suppressed)",
-                "errorCode": "PERMIT_REPLAYED",
-            },
-        )
-    )
-
-    with pytest.raises(ProtectedActionDeniedError) as excinfo:
-        _client().agents.protect_action("srv-1", "search")
-    assert excinfo.value.error_code == "PERMIT_REPLAYED"
+    assert excinfo.value.action_deny_reason == action_deny_reason
 
 
 @respx.mock

@@ -65,9 +65,15 @@ class ProtectedActionDeniedError(PraesidiaError):
     tool-level failure (the tool dispatched and reported its OWN error —
     that does not raise; it comes back in the returned dict's ``isError``).
 
-    ``action_id``/``closure`` are populated once ``be``'s response carries
-    them (see ``.claude/tickets/PA01-CONTRACT-sdk-action-response.md``) —
-    ``None`` until that contract lands.
+    PA-0026 — ``protect_action`` raises this if and only if ``be``'s
+    response carries ``actionDenyReason`` (mirrored below as
+    ``action_deny_reason``, one of ``"PERMIT_MISSING"`` | ``"PERMIT_INVALID"``
+    | ``"PERMIT_EXPIRED"`` | ``"PERMIT_MISMATCH"`` | ``"PERMIT_REPLAYED"`` |
+    ``"POLICY_DENIED"``); a downstream tool/transport error never reaches
+    this constructor. ``action_id``/``closure`` are populated whenever
+    ``be``'s response carries them — ``None`` when the denial happened
+    before the Proof Edge block ran (``action_deny_reason ==
+    "POLICY_DENIED"``).
     """
 
     def __init__(
@@ -76,11 +82,13 @@ class ProtectedActionDeniedError(PraesidiaError):
         error_code: str | None = None,
         action_id: str | None = None,
         closure: str | None = None,
+        action_deny_reason: str | None = None,
     ) -> None:
         super().__init__(message)
         self.error_code = error_code
         self.action_id = action_id
         self.closure = closure
+        self.action_deny_reason = action_deny_reason
 
 
 class UnsupportedProtectedActionTargetError(PraesidiaError):

@@ -217,11 +217,13 @@ try:
     )
     # result["success"] / result["content"] — the tool's own dispatch outcome.
     # result.get("actionId") / .get("closure") / .get("evidenceGrade") are
-    # None until be's response carries them
-    # (PA01-CONTRACT-sdk-action-response.md); absence != failure.
+    # None when the Proof Edge feature is off for the org; absence != failure.
 except ProtectedActionDeniedError as e:
     # Permit missing/expired/invalid/mismatched, or a confirmed replay (which
-    # denies even under observe-mode). e.error_code / e.action_id / e.closure.
+    # denies even under observe-mode). e.action_deny_reason is the
+    # machine-readable reason ("PERMIT_MISSING" | "PERMIT_INVALID" |
+    # "PERMIT_EXPIRED" | "PERMIT_MISMATCH" | "PERMIT_REPLAYED" |
+    # "POLICY_DENIED"); e.error_code / e.action_id / e.closure are also set.
     ...
 except UnsupportedProtectedActionTargetError:
     # protocol was not "mcp" — the only destination this SDK version can
@@ -232,9 +234,20 @@ except UnsupportedProtectedActionTargetError:
 ```
 
 Only `protocol="mcp"` (the default) is supported today. A tool-level failure (the call dispatched
-and the *tool itself* reported an error) does **not** raise — it comes back as
-`result["isError"]`; only a *pre-dispatch* denial (RBAC/ABAC gate, or the Proof Edge's Permit
-deny/mismatch/replay) raises. The Permit (D3) rides `X-Praesidia-Permit` — a header kept strictly
+and the *tool itself* reported an error, OR the call failed downstream with a transport/tool
+exception) does **not** raise — it comes back as `result["isError"]` with `result["success"] is
+False`; only a *pre-dispatch* denial (RBAC/ABAC gate, or the Proof Edge's Permit deny/mismatch/
+replay) raises.
+
+**PA-0026 — the discriminator is `actionDenyReason`, not `errorCode`.** `protect_action` raises
+`ProtectedActionDeniedError` if and only if `be`'s response carries `actionDenyReason` — set on and
+only on a genuine pre-dispatch denial. A downstream tool/transport exception returns `errorCode:
+"BAD_REQUEST" | "INTERNAL_ERROR"` (no `actionDenyReason`) and a successful call whose tool errored
+carries no `errorCode` at all; neither raises. (An earlier version of this SDK keyed the decision on
+`errorCode != "TOOL_ERROR"`, which is wrong — `"TOOL_ERROR"` is never present in this endpoint's
+caller-visible response.)
+
+The Permit (D3) rides `X-Praesidia-Permit` — a header kept strictly
 separate from the JIT `X-Praesidia-Capability-Token` verify path; PA01 has no HTTP permit-issuance
 endpoint yet, so `permit=` is forward-compatible plumbing, not something you can obtain today.
 
@@ -342,6 +355,21 @@ pytest
 ```
 
 ## Changelog
+
+### Unreleased — PA-0026: fix `protect_action`'s deny discriminator (defect in PA01 DX-002)
+
+- **Fixed** `protect_action` misclassifying a downstream tool/transport error as a pre-dispatch
+  policy denial. The shipped heuristic (`errorCode != 'TOOL_ERROR'`) was broken: `'TOOL_ERROR'` is
+  never present in this endpoint's caller-visible response, so both a real tool exception
+  (`errorCode: 'BAD_REQUEST' | 'INTERNAL_ERROR'`) and a successful call whose tool errored (no
+  `errorCode` at all) satisfied the old "raise" condition. Switched the discriminator to presence
+  of the response's `actionDenyReason` field, which `be` sets on and only on genuine pre-dispatch
+  denials.
+- **Added** `ProtectedActionDeniedError.action_deny_reason` (one of `"PERMIT_MISSING"` |
+  `"PERMIT_INVALID"` | `"PERMIT_EXPIRED"` | `"PERMIT_MISMATCH"` | `"PERMIT_REPLAYED"` |
+  `"POLICY_DENIED"`).
+- No breaking change to `protect_action`'s return shape; `ProtectedActionDeniedError` gained an
+  additive attribute.
 
 ### Unreleased — PA01 DX-002: `AgentsResource.protect_action` (blocking/raising Proof Edge wrapper)
 

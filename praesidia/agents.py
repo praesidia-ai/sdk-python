@@ -24,14 +24,6 @@ from .exceptions import (
     UnsupportedProtectedActionTargetError,
 )
 
-#: PA01 D8 — the ONE `errorCode` value the managed MCP route's normal
-#: (HTTP 200) `success: False` body can carry when the dispatch itself
-#: proceeded and the TOOL reported its own failure — as opposed to the call
-#: never having been authorized/dispatched at all (RBAC/ABAC policy deny, or
-#: the Proof Edge's Permit deny/mismatch/replay). Every other success:False
-#: body is a pre-dispatch denial `protect_action` raises on.
-_TOOL_LEVEL_ERROR_CODE = "TOOL_ERROR"
-
 #: AUDIT-SDK-02 — RFC-4122 UUID matcher. ``CreateAgentTaskDto.chainId`` is
 #: ``@IsUUID``, so the SDK validates it client-side for a clear error.
 _UUID_RE = re.compile(
@@ -465,12 +457,19 @@ class AgentsResource:
           mismatched Permit, or a confirmed replay (``DUPLICATE_SUPPRESSED``,
           which denies even under observe-mode — see D7/D9). Distinct from
           the tool itself reporting failure after a real dispatch, which
-          does NOT raise (see the returned dict's ``isError``).
+          does NOT raise (see the returned dict's ``isError``). PA-0026: the
+          discriminator is presence of ``actionDenyReason`` on the response —
+          NOT ``errorCode``. ``errorCode`` alone cannot tell a pre-dispatch
+          denial from a downstream tool failure: a genuine tool/transport
+          exception returns ``errorCode: "BAD_REQUEST" | "INTERNAL_ERROR"``
+          (no ``actionDenyReason``), and a successful call whose tool errored
+          (``isError: True``) carries no ``errorCode`` at all. ``"TOOL_ERROR"``
+          is never present in this endpoint's response — it exists only in
+          ``be``'s internal forensic write.
         - Otherwise returns the dispatch result dict. ``actionId``/
-          ``closure``/``evidenceGrade`` are present only once ``be``'s
-          response carries them
-          (``.claude/tickets/PA01-CONTRACT-sdk-action-response.md`` — not
-          yet landed); their absence is not itself a failure signal.
+          ``closure``/``evidenceGrade`` are present whenever ``be``'s
+          response carries them (absent when the Proof Edge feature is off
+          for the org); their absence is not itself a failure signal.
 
         Header discipline (D3): the Permit rides ``X-Praesidia-Permit``, kept
         strictly separate from the JIT ``X-Praesidia-Capability-Token``
@@ -551,21 +550,21 @@ class AgentsResource:
         # HTTP exceptions today).
         result = self._http.post(path, json=body, headers=headers or None)
 
-        # The AGV-020/025 policy gates AND the Proof Edge both deny with an
-        # ordinary HTTP 200 body rather than an HTTP error status — the ONLY
-        # success:False case that means "the tool actually dispatched and
-        # reported its own failure" carries errorCode 'TOOL_ERROR'; every
-        # other success:False is a pre-dispatch denial this method raises on.
-        if (
-            isinstance(result, dict)
-            and result.get("success") is False
-            and result.get("errorCode") != _TOOL_LEVEL_ERROR_CODE
-        ):
+        # PA-0026 — `actionDenyReason` is present ON AND ONLY ON a genuine
+        # pre-dispatch denial (the Proof Edge's Permit deny/mismatch/replay,
+        # or the AGV-020/025 policy gates that run before the Proof Edge
+        # block). It is absent on every success AND on every downstream
+        # tool/transport error — so, unlike `errorCode`, it never
+        # misclassifies a routine tool failure as a policy denial. Do NOT
+        # revert to `errorCode != 'TOOL_ERROR'`: that string is never present
+        # in this endpoint's caller-visible response at all.
+        if isinstance(result, dict) and result.get("actionDenyReason") is not None:
             raise ProtectedActionDeniedError(
                 result.get("error") or "protected action denied",
                 result.get("errorCode"),
                 result.get("actionId"),
                 result.get("closure"),
+                result.get("actionDenyReason"),
             )
 
         return result
