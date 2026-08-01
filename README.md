@@ -62,7 +62,7 @@ with open("eu-ai-act-report.pdf", "wb") as fh:
 
 | Resource | Class | Key methods |
 |----------|-------|-------------|
-| `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `refresh_credential` |
+| `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `protect_action`, `refresh_credential` |
 | `client.workflows` | `WorkflowsResource` | `list`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `get_run` |
 | `client.audit` | `AuditResource` | `list`, `stream`, `export` |
 | `client.analytics` | `AnalyticsResource` | `usage`, `cost_trends`, `agent_performance`, `top_agents`, `export` |
@@ -197,6 +197,50 @@ for row in client.agents.poll_pending_tasks(
 (`str | None`). For JIT-first orgs `clientSecret` is `None` — do **not** persist
 a static `X-A2A-Client-Secret`; use the JIT capability-token flow above.
 
+## Protect a dispatch — `protect_action` (PA01 DX-002)
+
+`call_mcp_tool` above never raises on denial and has no way to distinguish "the tool ran and
+failed" from "the call was never authorized". `protect_action` is a **blocking, raising** wrapper
+over the same managed MCP route — the one place `be`'s Proof Edge mints/binds/consumes a Permit
+and durably records dispatch evidence **before** the call returns (evidence grade **C** at
+best — Praesidia-managed observation, never independent target proof). It ignores no config knob:
+there is no way to silently degrade it into best-effort behaviour like `call_mcp_tool`.
+
+```python
+from praesidia import ProtectedActionDeniedError, UnsupportedProtectedActionTargetError
+
+try:
+    result = client.agents.protect_action(
+        server_id="mcp-server-id",
+        tool_name="send_email",
+        arguments={"to": "user@example.com", "subject": "Hi"},
+    )
+    # result["success"] / result["content"] — the tool's own dispatch outcome.
+    # result.get("actionId") / .get("closure") / .get("evidenceGrade") are
+    # None until be's response carries them
+    # (PA01-CONTRACT-sdk-action-response.md); absence != failure.
+except ProtectedActionDeniedError as e:
+    # Permit missing/expired/invalid/mismatched, or a confirmed replay (which
+    # denies even under observe-mode). e.error_code / e.action_id / e.closure.
+    ...
+except UnsupportedProtectedActionTargetError:
+    # protocol was not "mcp" — the only destination this SDK version can
+    # honestly protect. A customer-controlled Proof Edge for arbitrary
+    # destinations (EDGE-003) is a later release; this NEVER silently falls
+    # back to call_mcp_tool-style unraised behaviour.
+    ...
+```
+
+Only `protocol="mcp"` (the default) is supported today. A tool-level failure (the call dispatched
+and the *tool itself* reported an error) does **not** raise — it comes back as
+`result["isError"]`; only a *pre-dispatch* denial (RBAC/ABAC gate, or the Proof Edge's Permit
+deny/mismatch/replay) raises. The Permit (D3) rides `X-Praesidia-Permit` — a header kept strictly
+separate from the JIT `X-Praesidia-Capability-Token` verify path; PA01 has no HTTP permit-issuance
+endpoint yet, so `permit=` is forward-compatible plumbing, not something you can obtain today.
+
+Python has no `beginTask`/`TaskHandle`-style lifecycle object (unlike the TS SDK) — `protect_action`
+is net-new on `AgentsResource`, matching the TS SDK's states, headers and error taxonomy exactly.
+
 ## Retry (FINDING-4) — bounded, idempotency-safe by default
 
 The client retries **only** requests that are safe to repeat: GET, DELETE, and
@@ -264,6 +308,9 @@ except RateLimitError:
     print("Too many requests — slow down")
 ```
 
+`ProtectedActionDeniedError` and `UnsupportedProtectedActionTargetError` (PA01 DX-002) are raised
+only by `client.agents.protect_action` — see [above](#protect-a-dispatch--protect_action-pa01-dx-002).
+
 ## Local development
 
 ```bash
@@ -295,6 +342,16 @@ pytest
 ```
 
 ## Changelog
+
+### Unreleased — PA01 DX-002: `AgentsResource.protect_action` (blocking/raising Proof Edge wrapper)
+
+- **Added** `client.agents.protect_action(...)` — a blocking, raising wrapper over the managed MCP
+  Proof Edge (`POST /organizations/{org_id}/mcp-servers/{server_id}/tools/{tool_name}/call`).
+  Raises `ProtectedActionDeniedError` on a pre-dispatch denial (missing/expired/invalid/mismatched
+  Permit, or a confirmed replay) and `UnsupportedProtectedActionTargetError` for any `protocol`
+  other than `"mcp"` — never silently downgrades to `call_mcp_tool`-style unraised behaviour.
+- **Added** `jcs_canonicalize`/`jcs_commitment`/`JcsCanonicalizationError` (RFC 8785 JCS) —
+  byte-compared against the shared `sdk`/`be`/`audit-verifier` golden fixtures.
 
 ### 0.3.1 — R-SDK-1: allow-list the routes `idempotency_key` may retry
 

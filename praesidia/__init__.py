@@ -28,6 +28,11 @@ from ._crypto import (
     ed25519_public_key_from_jwk,
     ed25519_verify,
 )
+from ._jcs_canonical import (
+    JcsCanonicalizationError,
+    jcs_canonicalize,
+    jcs_commitment,
+)
 from ._retry import RetryConfig
 from .agents import tool_call_headers_from_task
 from .client import Praesidia
@@ -36,8 +41,10 @@ from .exceptions import (
     ForbiddenError,
     NotFoundError,
     PraesidiaError,
+    ProtectedActionDeniedError,
     RateLimitError,
     ServerError,
+    UnsupportedProtectedActionTargetError,
 )
 from .telemetry import gen_ai_span
 from .trust import verify_passport
@@ -60,6 +67,13 @@ __all__ = [
     "gen_ai_span",
     # FINDING-4 — bounded retry policy config
     "RetryConfig",
+    # PA01 DX-002 — protect_action error taxonomy
+    "ProtectedActionDeniedError",
+    "UnsupportedProtectedActionTargetError",
+    # PA01 D2/D18 — RFC 8785 JCS canonicalization
+    "jcs_canonicalize",
+    "jcs_commitment",
+    "JcsCanonicalizationError",
 ]
 
 __version__ = "0.3.1"

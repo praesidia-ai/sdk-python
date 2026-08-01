@@ -49,6 +49,11 @@ CHAIN_ID_HEADER = "X-Praesidia-Chain-Id"
 TASK_ID_HEADER = "X-Praesidia-Task-Id"
 AGENT_ID_HEADER = "X-Praesidia-Agent-Id"
 CAPABILITY_TOKEN_HEADER = "X-Praesidia-Capability-Token"
+#: PA01 D3 — the Permit rides a header DISTINCT from the capability token
+#: above. Overloading X-Praesidia-Capability-Token would put two different
+#: verify paths behind one header — a confused-deputy hazard for a security
+#: primitive. Never reuse CAPABILITY_TOKEN_HEADER for a Permit.
+PERMIT_HEADER = "X-Praesidia-Permit"
 
 
 def path_segment(value: str, name: str = "path segment") -> str:

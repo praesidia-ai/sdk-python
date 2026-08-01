@@ -14,10 +14,23 @@ from ._http import (
     AGENT_ID_HEADER,
     CAPABILITY_TOKEN_HEADER,
     CHAIN_ID_HEADER,
+    PERMIT_HEADER,
     TASK_ID_HEADER,
     HttpClient,
     path_segment,
 )
+from .exceptions import (
+    ProtectedActionDeniedError,
+    UnsupportedProtectedActionTargetError,
+)
+
+#: PA01 D8 — the ONE `errorCode` value the managed MCP route's normal
+#: (HTTP 200) `success: False` body can carry when the dispatch itself
+#: proceeded and the TOOL reported its own failure — as opposed to the call
+#: never having been authorized/dispatched at all (RBAC/ABAC policy deny, or
+#: the Proof Edge's Permit deny/mismatch/replay). Every other success:False
+#: body is a pre-dispatch denial `protect_action` raises on.
+_TOOL_LEVEL_ERROR_CODE = "TOOL_ERROR"
 
 #: AUDIT-SDK-02 — RFC-4122 UUID matcher. ``CreateAgentTaskDto.chainId`` is
 #: ``@IsUUID``, so the SDK validates it client-side for a clear error.
@@ -403,3 +416,156 @@ class AgentsResource:
             f"/tools/{path_segment(tool_name, 'tool_name')}/call"
         )
         return self._http.post(path, json=body, headers=headers or None)
+
+    # ------------------------------------------------------------------
+    # PA01 DX-002 — protect_action (managed MCP Proof Edge)
+    # ------------------------------------------------------------------
+
+    def protect_action(
+        self,
+        server_id: str,
+        tool_name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        protocol: str = "mcp",
+        timeout_ms: int | None = None,
+        agent_id: str | None = None,
+        task_id: str | None = None,
+        chain_id: str | None = None,
+        capability_token: str | None = None,
+        permit: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        PA01 DX-002 — protect a dispatch on the managed MCP path. Python has
+        no ``beginTask``/``TaskHandle`` equivalent (unlike the TS SDK); this
+        method is net-new, matching the TS SDK's states, headers and error
+        taxonomy exactly.
+
+        A **blocking, raising** wrapper over
+        ``POST /organizations/{org_id}/mcp-servers/{server_id}/tools/{tool_name}/call``
+        — the one route where ``be``'s Proof Edge (``mcp-client.service.ts``)
+        mints, binds and consumes a Permit and durably records dispatch
+        evidence BEFORE the tool call returns (D8: evidence grade **C** —
+        Praesidia-managed observation, never independent target proof).
+
+        Unlike :meth:`call_mcp_tool`, this method:
+
+        - **Raises** :class:`~praesidia.exceptions.UnsupportedProtectedActionTargetError`
+          immediately, before any network call, if ``protocol`` is not
+          ``"mcp"`` — the only destination this SDK version can honestly
+          protect. A customer-controlled Proof Edge for arbitrary
+          destinations (EDGE-003) is a later release; this method never
+          silently falls back to :meth:`call_mcp_tool`-style best-effort
+          behaviour.
+        - **Raises** the usual :class:`~praesidia.exceptions.PraesidiaError`
+          subclasses unchanged for any denial ``be`` returns as an HTTP
+          error status (e.g. the pre-Proof-Edge ABAC/rate-limit gates).
+        - **Raises** :class:`~praesidia.exceptions.ProtectedActionDeniedError`
+          for a same-status (HTTP 200) denial body — no/expired/invalid/
+          mismatched Permit, or a confirmed replay (``DUPLICATE_SUPPRESSED``,
+          which denies even under observe-mode — see D7/D9). Distinct from
+          the tool itself reporting failure after a real dispatch, which
+          does NOT raise (see the returned dict's ``isError``).
+        - Otherwise returns the dispatch result dict. ``actionId``/
+          ``closure``/``evidenceGrade`` are present only once ``be``'s
+          response carries them
+          (``.claude/tickets/PA01-CONTRACT-sdk-action-response.md`` — not
+          yet landed); their absence is not itself a failure signal.
+
+        Header discipline (D3): the Permit rides ``X-Praesidia-Permit``, kept
+        strictly separate from the JIT ``X-Praesidia-Capability-Token``
+        verify path (Q4-02) — both may be forwarded on the same call, they
+        answer different questions.
+
+        Retry discipline: this is a bare POST — never retried by the client
+        (``_retry.py``). A retried dispatch is a new attempt under the same
+        ``actionId``, which the server decides, never a client-side re-send.
+
+        Args:
+            server_id:  UUID of the managed MCP server connection.
+            tool_name:  Name of the tool to invoke.
+            arguments:  Tool arguments object.
+            protocol:   Closed today to ``"mcp"`` — any other value raises
+                        immediately. Accepted as a parameter (rather than
+                        hardcoded) so a future EDGE-003 protocol is additive,
+                        not a signature break.
+            timeout_ms: Optional per-call timeout in milliseconds
+                        (1000-300000).
+            agent_id:   Executing agent id. Forwarded as
+                        ``X-Praesidia-Agent-Id``.
+            task_id:    Owning task id. Forwarded as ``X-Praesidia-Task-Id``.
+            chain_id:   Chain-trace id. Forwarded as ``X-Praesidia-Chain-Id``.
+            capability_token: Opaque JIT capability token (Q4-02). Forwarded
+                        as ``X-Praesidia-Capability-Token`` — a DIFFERENT
+                        header/verify path from ``permit`` (D3).
+            permit:     A previously-issued Permit token, forwarded as
+                        ``X-Praesidia-Permit``. PA01 has no HTTP
+                        permit-issuance endpoint yet — ``PermitService.mint``
+                        is in-process only in ``be`` — so this parameter is
+                        forward-compatible plumbing for when one ships. Omit
+                        it today.
+
+        Returns:
+            The tool result dict on a non-denied dispatch.
+
+        Raises:
+            UnsupportedProtectedActionTargetError: ``protocol`` is not ``"mcp"``.
+            ProtectedActionDeniedError: pre-dispatch denial (Permit or policy gate).
+            ValueError: ``timeout_ms`` out of the accepted range.
+        """
+        if protocol != "mcp":
+            raise UnsupportedProtectedActionTargetError(protocol)
+
+        headers: dict[str, str] = {}
+        if permit:
+            headers[PERMIT_HEADER] = permit
+        if capability_token:
+            headers[CAPABILITY_TOKEN_HEADER] = capability_token
+        if task_id:
+            headers[TASK_ID_HEADER] = task_id
+        if agent_id:
+            headers[AGENT_ID_HEADER] = agent_id
+        if chain_id:
+            headers[CHAIN_ID_HEADER] = chain_id
+
+        body: dict[str, Any] = {
+            "toolName": tool_name,
+            "arguments": arguments or {},
+        }
+        if timeout_ms is not None:
+            if (
+                isinstance(timeout_ms, bool)
+                or not isinstance(timeout_ms, (int, float))
+                or not 1000 <= timeout_ms <= 300_000
+            ):
+                raise ValueError("timeout_ms must be a number from 1000 to 300000")
+            body["timeoutMs"] = timeout_ms
+
+        path = (
+            f"/organizations/{self._http.org_id}"
+            f"/mcp-servers/{path_segment(server_id, 'server_id')}"
+            f"/tools/{path_segment(tool_name, 'tool_name')}/call"
+        )
+        # HttpClient.post raises a typed PraesidiaError subclass unchanged
+        # for any non-2xx (the pre-Proof-Edge ABAC/rate-limit gates raise
+        # HTTP exceptions today).
+        result = self._http.post(path, json=body, headers=headers or None)
+
+        # The AGV-020/025 policy gates AND the Proof Edge both deny with an
+        # ordinary HTTP 200 body rather than an HTTP error status — the ONLY
+        # success:False case that means "the tool actually dispatched and
+        # reported its own failure" carries errorCode 'TOOL_ERROR'; every
+        # other success:False is a pre-dispatch denial this method raises on.
+        if (
+            isinstance(result, dict)
+            and result.get("success") is False
+            and result.get("errorCode") != _TOOL_LEVEL_ERROR_CODE
+        ):
+            raise ProtectedActionDeniedError(
+                result.get("error") or "protected action denied",
+                result.get("errorCode"),
+                result.get("actionId"),
+                result.get("closure"),
+            )
+
+        return result
