@@ -1,0 +1,115 @@
+name: 🔗 API Contract Drift
+
+# CD-0007 — praesidia/*.py hand-writes route strings/bodies against be-core's
+# REST API. `praesidia` is a PUBLISHED, customer-installed PyPI package —
+# nothing checked its calls against be-core before this: a be-core route
+# rename or DTO field drop would ship silently to PyPI and 404/400 in a
+# customer's application against a version they cannot easily roll back.
+#
+# Reuses the SAME scanner instance as `sdk` (CD-0006) via a sibling checkout
+# — `sdk/scripts/audit-api-contract.mjs --lang py` — rather than a third,
+# Python-native re-derivation. See that script's header comment for the full
+# rationale (mcp-dev's original scanner generalized/copied once for `sdk`,
+# then made to also read `.py` sources so `sdk-python` does not need its own
+# copy). MONO-003 sibling-checkout pattern mirrors `mcp`'s and `sdk`'s own
+# contract-drift.yml jobs.
+
+on:
+  push:
+    branches: [main, prod]
+  pull_request:
+    branches: [main, prod, develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-python-contract-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-contract-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout sdk-python (the PR under test)
+        uses: actions/checkout@v4
+        with:
+          path: sdk-python
+
+      - name: Checkout sdk (owns the shared contract-drift scanner, CD-0006)
+        uses: actions/checkout@v4
+        with:
+          repository: praesidia-ai/sdk
+          path: sdk
+          token: ${{ secrets.SDK_READ_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Checkout be-core (spec source of truth)
+        uses: actions/checkout@v4
+        with:
+          repository: praesidia-ai/be-core
+          path: be-core
+          token: ${{ secrets.BE_CORE_READ_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Checkout queue-core (be-core's local package sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: praesidia-ai/queue-core
+          path: shared
+          token: ${{ secrets.QUEUE_CORE_READ_TOKEN || github.token }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: be-core/package-lock.json
+
+      - name: Build queue-core sibling
+        working-directory: be-core
+        run: npm run ci:prepare-queue-core
+
+      - name: Install be-core deps
+        working-directory: be-core
+        run: npm ci
+
+      # Boot-only OpenAPI emit needs every SQS queue's URL env var satisfied
+      # (sqsConfig's fail-loud `routedButNoUrl` guard) — mirrors be-core's own
+      # contract-drift.yml step verbatim, see mcp's/sdk's identical step.
+      - name: 🌱 Seed SQS queue URLs (default=sqs boot guard)
+        working-directory: be-core
+        run: |
+          for n in agent-tasks agent-tasks-dlq workflow-continuation \
+            workflow-continuation-dlq workflow-generation workflow-schedule \
+            budget-actions team-quotas webhooks siem webhooks-dlq siem-dlq \
+            audit-anchor slack-notifications agent-deploy \
+            lifecycle-hook-processor eval-runs discovery-ingest auditor-report \
+            executive-report executive-report-dlq redteam-runs intent-model-eval \
+            telemetry-ingest; do
+            var="SQS_QUEUE_URL_$(echo "$n" | tr 'a-z-' 'A-Z_')"
+            echo "${var}=http://localhost:9324/000000000000/${n}" >> "$GITHUB_ENV"
+          done
+
+      - name: Export current OpenAPI from be-core
+        working-directory: be-core
+        env:
+          OPENAPI_OUT: ../swagger.generated.json
+          NODE_ENV: test
+          JWT_SECRET: dummy-jwt-secret-for-export-openapi-only-32chars
+          POSTGRES_HOST: localhost
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: praesidia
+        run: npm run export:openapi
+
+      - name: Audit sdk-python's hand-written API calls against the fresh be-core spec
+        # `export:openapi`'s OPENAPI_OUT (`../swagger.generated.json`, set
+        # relative to the `be-core` working-directory two steps up) lands one
+        # level above `be-core/` — i.e. at this step's own (default) working
+        # directory, the checkout workspace root — same as mcp's/sdk's own
+        # contract-drift.yml jobs.
+        run: |
+          node sdk/scripts/audit-api-contract.mjs swagger.generated.json \
+            --source sdk-python/praesidia --lang py

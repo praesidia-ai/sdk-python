@@ -354,6 +354,27 @@ pip install -e ".[dev]"
 pytest
 ```
 
+### API contract drift check (CD-0007)
+
+`praesidia/*.py` hand-writes be-core's REST routes and request-body shapes
+(a `self._base` f-string precomputed per resource class, then interpolated
+or passed straight through to `self._http.get/post/put/patch/delete/
+stream_get`). This is checked against a fresh be-core OpenAPI spec by the
+**same** contract-drift scanner the TypeScript SDK uses
+(`sdk/scripts/audit-api-contract.mjs --lang py` — see that file's header),
+not a separate Python-native re-derivation, so this SDK never drifts from
+its own gate's design. Run locally via a sibling checkout of `sdk`:
+
+```bash
+node ../sdk/scripts/audit-api-contract.mjs <path-to-swagger.json> \
+  --source praesidia --lang py
+```
+
+Wired as its own CI job (`.github/workflows/contract-drift.yml`): sibling
+checkouts of `sdk` (owns the scanner), `be-core` (spec source of truth) and
+`queue-core`, mirroring `mcp`'s (CD-0001) and `sdk`'s (CD-0006) equivalent
+jobs.
+
 ## Changelog
 
 ### Unreleased — PA-0026: fix `protect_action`'s deny discriminator (defect in PA01 DX-002)
