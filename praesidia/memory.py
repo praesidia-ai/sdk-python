@@ -29,6 +29,12 @@ class MemoryResource:
         hits = client.memory.search(query="contact preference", top_k=5)
     """
 
+    # Exact backend enum values (`MemorySourceType` /
+    # `MemoryRetentionRegime`). Keep these uppercase: class-validator rejects
+    # the formerly documented lowercase spellings under forbidNonWhitelisted.
+    SOURCE_TYPES = ("AGENT", "USER", "SYSTEM", "IMPORT")
+    RETENTION_REGIMES = ("NONE", "GDPR", "HIPAA", "SOC2", "CUSTOM")
+
     def __init__(self, http: HttpClient) -> None:
         self._http = http
         self._base = f"/organizations/{http.org_id}/memories"
@@ -60,16 +66,47 @@ class MemoryResource:
             memory_key:       Logical grouping key (namespace / conversation id).
             tags:             Free-form tags for retrieval filtering.
             source_type:      Provenance principal kind
-                              (``agent`` | ``user`` | ``system`` | ``tool`` | ``import``).
+                              (``AGENT`` | ``USER`` | ``SYSTEM`` | ``IMPORT``).
             source_agent_id:  Provenance: the agent that produced this memory.
             source_reference: Provenance: free-form origin ref (task id, url).
             retention_regime: Compliance retention regime
-                              (``none`` | ``gdpr`` | ``hipaa`` | ``sox`` | ``custom``).
-            retention_days:   Custom window in days (only when regime=custom).
+                              (``NONE`` | ``GDPR`` | ``HIPAA`` | ``SOC2`` | ``CUSTOM``).
+            retention_days:   Custom window in days (only when regime=``CUSTOM``).
 
         Returns:
             The created memory dict.
         """
+        if not isinstance(content, str) or not content or len(content) > 32_768:
+            raise ValueError(
+                "content must be a non-empty string of at most 32768 characters"
+            )
+        if source_type is not None and source_type not in self.SOURCE_TYPES:
+            raise ValueError(
+                f"source_type must be one of {self.SOURCE_TYPES}; got {source_type!r}"
+            )
+        if (
+            retention_regime is not None
+            and retention_regime not in self.RETENTION_REGIMES
+        ):
+            raise ValueError(
+                "retention_regime must be one of "
+                f"{self.RETENTION_REGIMES}; got {retention_regime!r}"
+            )
+        if retention_days is not None and (
+            isinstance(retention_days, bool)
+            or not isinstance(retention_days, int)
+            or not 1 <= retention_days <= 36_500
+        ):
+            raise ValueError("retention_days must be an integer from 1 to 36500")
+        if retention_regime == "CUSTOM" and retention_days is None:
+            raise ValueError(
+                "retention_days is required when retention_regime is 'CUSTOM'"
+            )
+        if retention_days is not None and retention_regime != "CUSTOM":
+            raise ValueError(
+                "retention_days is only valid when retention_regime is 'CUSTOM'"
+            )
+
         payload: dict[str, Any] = {"content": content}
         if subject_id is not None:
             payload["subjectId"] = subject_id
@@ -105,6 +142,10 @@ class MemoryResource:
         Returns:
             A list of memory dicts (unwrapped from the pagination envelope).
         """
+        if source_type is not None and source_type not in self.SOURCE_TYPES:
+            raise ValueError(
+                f"source_type must be one of {self.SOURCE_TYPES}; got {source_type!r}"
+            )
         params: dict[str, Any] = {"page": page, "limit": limit}
         if memory_key is not None:
             params["memoryKey"] = memory_key
@@ -136,6 +177,16 @@ class MemoryResource:
         Returns:
             A list of matching memory dicts.
         """
+        if not isinstance(query, str) or not query or len(query) > 4_096:
+            raise ValueError(
+                "query must be a non-empty string of at most 4096 characters"
+            )
+        if top_k is not None and (
+            isinstance(top_k, bool)
+            or not isinstance(top_k, int)
+            or not 1 <= top_k <= 50
+        ):
+            raise ValueError("top_k must be an integer from 1 to 50")
         payload: dict[str, Any] = {"query": query}
         if memory_key is not None:
             payload["memoryKey"] = memory_key
@@ -166,9 +217,7 @@ class MemoryResource:
         Fetch a single memory (org-scoped, decrypted). ``GET .../memories/{id}``
         (MEMORY_VIEW).
         """
-        return self._http.get(
-            f"{self._base}/{path_segment(memory_id, 'memory_id')}"
-        )
+        return self._http.get(f"{self._base}/{path_segment(memory_id, 'memory_id')}")
 
     def delete(self, memory_id: str) -> None:
         """

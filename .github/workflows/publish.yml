@@ -31,8 +31,9 @@ jobs:
 
       - name: Test and build wheel + sdist
         run: |
-          pip install ".[dev]" build twine
-          pytest tests/ -q
+          pip install ".[dev]" build==1.3.0 twine==6.2.0
+          coverage run -m pytest tests/ -q
+          coverage report
           python -m build
           twine check dist/*
 

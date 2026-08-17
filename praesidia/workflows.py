@@ -6,6 +6,7 @@ Covers the ``/organizations/{org_id}/workflows`` management endpoints.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from ._http import HttpClient, path_segment
@@ -122,6 +123,7 @@ class WorkflowsResource:
         if budget_limit_usd is not None and (
             isinstance(budget_limit_usd, bool)
             or not isinstance(budget_limit_usd, (int, float))
+            or not math.isfinite(budget_limit_usd)
             or budget_limit_usd < 0
         ):
             raise ValueError("budget_limit_usd must be a non-negative number")

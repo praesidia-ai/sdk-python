@@ -100,6 +100,11 @@ def test_verify_passport_fails_closed_on_wrong_key():
     assert result["verified"] is False
 
 
+def test_verify_passport_reports_malformed_public_key():
+    result = verify_passport(PASSPORT, {"kty": "EC"})
+    assert result["reason"] == "malformed-public-key"
+
+
 def test_verify_passport_reports_expired():
     expired = copy.deepcopy(PASSPORT)
     expired["expirationDate"] = "2000-01-01T00:00:00.000Z"
@@ -159,6 +164,26 @@ def test_ed25519_public_key_from_jwk_roundtrip():
     raw = ed25519_public_key_from_jwk(PUBLIC_KEY_JWK)
     assert raw is not None and len(raw) == 32
     assert ed25519_public_key_from_jwk({"kty": "EC"}) is None
+
+
+def test_resource_verify_passport_delegates_to_offline_verifier():
+    result = _client().trust.verify_passport(PASSPORT, PUBLIC_KEY_JWK)
+    assert result["verified"] is True
+
+
+def test_verify_passport_reports_valid_signature_on_expired_document(monkeypatch):
+    expired = copy.deepcopy(PASSPORT)
+    expired["expirationDate"] = "2000-01-01T00:00:00+00:00"
+    monkeypatch.setattr("praesidia.trust.ed25519_verify", lambda *_args: True)
+
+    result = verify_passport(expired, PUBLIC_KEY_JWK)
+
+    assert result == {
+        "verified": False,
+        "signatureValid": True,
+        "expired": True,
+        "reason": "expired",
+    }
 
 
 # ── resource fetch + verify ──────────────────────────────────────────────────

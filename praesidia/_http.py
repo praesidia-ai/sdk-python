@@ -184,8 +184,13 @@ class HttpClient:
         """
         if chain_id is not None and not isinstance(chain_id, str):
             raise ValueError("chain_id must be a string or None")
-        if chain_id and ("\r" in chain_id or "\n" in chain_id):
-            raise ValueError("chain_id must not contain newline characters")
+        if chain_id and (
+            chain_id != chain_id.strip()
+            or any(ord(char) < 32 or ord(char) == 127 for char in chain_id)
+        ):
+            raise ValueError(
+                "chain_id must be a single-line string without surrounding whitespace"
+            )
         with self._headers_lock:
             if chain_id:
                 self._headers[CHAIN_ID_HEADER] = chain_id

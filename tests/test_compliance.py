@@ -162,3 +162,20 @@ def test_generate_and_wait():
 
     assert status["ready"] is True
     assert status["reportId"] == "rep-1"
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"timeout": 0}, "timeout"),
+        ({"poll_interval": float("nan")}, "poll_interval"),
+    ],
+)
+@respx.mock
+def test_generate_and_wait_validates_before_enqueuing(kwargs, message):
+    create_route = respx.post(REPORTS)
+
+    with pytest.raises(ValueError, match=message):
+        _client().compliance.generate_and_wait(**kwargs)
+
+    assert not create_route.called

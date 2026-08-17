@@ -78,7 +78,10 @@ class Praesidia:
             print(agent["name"])
 
         # Run a task
-        task = client.agents.run("agent-id", input={"message": "Summarise this"})
+        task = client.agents.run(
+            "00000000-0000-4000-8000-000000000001",
+            input={"message": "Summarise this"},
+        )
         print(task["status"])
 
         # Stream audit log

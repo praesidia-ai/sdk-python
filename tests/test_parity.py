@@ -100,6 +100,21 @@ def test_tool_call_headers_omits_absent_capability_token():
     assert headers["X-Praesidia-Chain-Id"] == "c-1"
 
 
+def test_tool_call_headers_prefers_explicit_task_and_agent_ids():
+    headers = tool_call_headers_from_task(
+        {
+            "taskId": "task-explicit",
+            "id": "task-fallback",
+            "agentId": "agent-explicit",
+            "serverAgentId": "agent-fallback",
+        }
+    )
+    assert headers == {
+        "X-Praesidia-Task-Id": "task-explicit",
+        "X-Praesidia-Agent-Id": "agent-explicit",
+    }
+
+
 @respx.mock
 def test_poll_pending_tasks_returns_rows_with_chain_and_token():
     poll_url = f"{BASE_URL}/a2a/tasks/pending/client-1"
@@ -128,10 +143,39 @@ def test_poll_pending_tasks_supports_oauth_bearer_without_management_key():
 
 
 @respx.mock
-def test_call_mcp_tool_forwards_four_headers_and_keeps_token_out_of_body():
-    call_url = (
-        f"{BASE_URL}/organizations/{ORG_ID}/mcp-servers/srv-1/tools/search/call"
+def test_poll_pending_tasks_supports_management_auth_and_response_envelopes():
+    poll_url = f"{BASE_URL}/a2a/tasks/pending/client-1"
+    route = respx.get(poll_url).mock(
+        side_effect=[
+            httpx.Response(200, json={"data": [POLLED_TASK]}),
+            httpx.Response(200, json={"tasks": [POLLED_TASK]}),
+        ]
     )
+
+    client = _client()
+    assert client.agents.poll_pending_tasks("client-1") == [POLLED_TASK]
+    assert route.calls[0].request.headers["Authorization"] == "Bearer sk-test"
+    assert client.agents.poll_pending_tasks("client-1") == [POLLED_TASK]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"client_secret": "secret", "access_token": "token"},
+        {"client_secret": ""},
+        {"client_secret": "bad\nsecret"},
+        {"access_token": ""},
+        {"access_token": "bad\rsecret"},
+    ],
+)
+def test_poll_pending_tasks_rejects_ambiguous_or_unsafe_credentials(kwargs):
+    with pytest.raises(ValueError):
+        _client().agents.poll_pending_tasks("client-1", **kwargs)
+
+
+@respx.mock
+def test_call_mcp_tool_forwards_four_headers_and_keeps_token_out_of_body():
+    call_url = f"{BASE_URL}/organizations/{ORG_ID}/mcp-servers/srv-1/tools/search/call"
     route = respx.post(call_url).mock(
         return_value=httpx.Response(200, json={"content": []})
     )
@@ -158,9 +202,7 @@ def test_call_mcp_tool_forwards_four_headers_and_keeps_token_out_of_body():
 
 @respx.mock
 def test_call_mcp_tool_explicit_kwargs_override_task():
-    call_url = (
-        f"{BASE_URL}/organizations/{ORG_ID}/mcp-servers/srv-1/tools/search/call"
-    )
+    call_url = f"{BASE_URL}/organizations/{ORG_ID}/mcp-servers/srv-1/tools/search/call"
     route = respx.post(call_url).mock(
         return_value=httpx.Response(200, json={"content": []})
     )
@@ -171,11 +213,17 @@ def test_call_mcp_tool_explicit_kwargs_override_task():
         {"q": "x"},
         task=POLLED_TASK,
         capability_token="override.token",
+        task_id="task-override",
+        agent_id="agent-override",
+        chain_id="chain-override",
+        timeout_ms=2_500,
     )
-    assert (
-        route.calls.last.request.headers["X-Praesidia-Capability-Token"]
-        == "override.token"
-    )
+    request = route.calls.last.request
+    assert request.headers["X-Praesidia-Capability-Token"] == "override.token"
+    assert request.headers["X-Praesidia-Task-Id"] == "task-override"
+    assert request.headers["X-Praesidia-Agent-Id"] == "agent-override"
+    assert request.headers["X-Praesidia-Chain-Id"] == "chain-override"
+    assert json.loads(request.content)["timeoutMs"] == 2_500
 
 
 def test_call_mcp_tool_rejects_backend_invalid_timeout():

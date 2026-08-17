@@ -6,7 +6,6 @@ Covers the ``/organizations/{org_id}/audit-logs`` endpoints.
 
 from __future__ import annotations
 
-import json
 from typing import Any, Iterator
 
 from ._http import HttpClient
@@ -105,7 +104,9 @@ class AuditResource:
 
             result = self._http.get(self._base, params=params)
             events: list[dict[str, Any]] = (
-                result if isinstance(result, list) else result.get("data", result.get("logs", []))
+                result
+                if isinstance(result, list)
+                else result.get("data", result.get("logs", []))
             )
 
             # An empty page is the only reliable end-of-stream signal: a
@@ -138,6 +139,8 @@ class AuditResource:
         Returns:
             Raw export bytes.
         """
+        if format not in ("json", "csv"):
+            raise ValueError("format must be 'json' or 'csv'")
         params: dict[str, Any] = {"format": format}
         if from_date is not None:
             params["startDate"] = from_date

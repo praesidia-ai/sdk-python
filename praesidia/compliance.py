@@ -168,6 +168,13 @@ class ComplianceResource:
             The final ``ready`` status dict (carries ``reportId``); pass
             ``status["reportId"]`` to :meth:`get_json` / :meth:`get_pdf`.
         """
+        # Validate before the POST. Invalid local polling options must never
+        # enqueue a real report and then fail before the caller can observe or
+        # recover its report id.
+        timeout = _validate_wait_value(timeout, "timeout", allow_zero=False)
+        poll_interval = _validate_wait_value(
+            poll_interval, "poll_interval", allow_zero=True
+        )
         created = self.request_report()
         return self.wait_for_report(
             created["reportId"],

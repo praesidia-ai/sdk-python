@@ -51,6 +51,35 @@ _GENAI = {
 _SERVICE_NAME_ATTR = "service.name"
 _SPAN_KIND_CLIENT = 3  # SPAN_KIND_CLIENT — a GenAI inference call is a client span
 _SDK_SCOPE_VERSION = "0.1.0"
+_MAX_AGENT_IDENTITY_LENGTH = 255
+_MAX_ATTRIBUTE_VALUE_LENGTH = 512
+
+
+def _validated_text(
+    value: Optional[str], name: str, max_length: int, *, required: bool = False
+) -> Optional[str]:
+    if value is None and not required:
+        return None
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or len(value) > max_length
+    ):
+        requirement = "non-empty " if required else ""
+        raise ValueError(
+            f"{name} must be a {requirement}string without surrounding whitespace "
+            f"and at most {max_length} characters"
+        )
+    return value
+
+
+def _validated_non_negative_int(value: Optional[int], name: str) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return value
 
 
 def _str_attr(key: str, value: str) -> dict[str, Any]:
@@ -81,6 +110,37 @@ def gen_ai_span(
     mirror the backend GenAI parser exactly so the emitting agent is materialised
     as an OBSERVED agent.
     """
+    agent_name = _validated_text(
+        agent_name,
+        "agent_name",
+        _MAX_AGENT_IDENTITY_LENGTH,
+        required=True,
+    )
+    agent_id = _validated_text(agent_id, "agent_id", _MAX_AGENT_IDENTITY_LENGTH)
+    system = _validated_text(system, "system", _MAX_ATTRIBUTE_VALUE_LENGTH)
+    request_model = _validated_text(
+        request_model, "request_model", _MAX_ATTRIBUTE_VALUE_LENGTH
+    )
+    response_model = _validated_text(
+        response_model, "response_model", _MAX_ATTRIBUTE_VALUE_LENGTH
+    )
+    operation_name = _validated_text(
+        operation_name, "operation_name", _MAX_ATTRIBUTE_VALUE_LENGTH
+    )
+    name = _validated_text(name, "name", _MAX_AGENT_IDENTITY_LENGTH)
+    input_tokens = _validated_non_negative_int(input_tokens, "input_tokens")
+    output_tokens = _validated_non_negative_int(output_tokens, "output_tokens")
+    duration_ms = _validated_non_negative_int(duration_ms, "duration_ms")
+    if extra_attributes is not None and (
+        not isinstance(extra_attributes, list)
+        or any(not isinstance(attribute, dict) for attribute in extra_attributes)
+    ):
+        raise ValueError("extra_attributes must be a list of OTLP attribute dicts")
+    # Required/defaulted inputs above cannot be None after validation; keep
+    # that invariant explicit for static type checkers as well as readers.
+    assert agent_name is not None
+    assert duration_ms is not None
+
     attributes: list[dict[str, Any]] = [_str_attr(_GENAI["agent_name"], agent_name)]
     if agent_id is not None:
         attributes.append(_str_attr(_GENAI["agent_id"], agent_id))
@@ -127,11 +187,11 @@ class TelemetryResource:
         )
     """
 
-    def __init__(
-        self, http: HttpClient, *, service_name: Optional[str] = None
-    ) -> None:
+    def __init__(self, http: HttpClient, *, service_name: Optional[str] = None) -> None:
         self._http = http
-        self._service_name = service_name
+        self._service_name = _validated_text(
+            service_name, "service_name", _MAX_AGENT_IDENTITY_LENGTH
+        )
 
     def emit(self, resource_spans: list[dict[str, Any]]) -> dict[str, Any]:
         """
@@ -145,6 +205,8 @@ class TelemetryResource:
         """
         if not isinstance(resource_spans, list):
             raise ValueError("emit() requires a resourceSpans list")
+        if any(not isinstance(resource_span, dict) for resource_span in resource_spans):
+            raise ValueError("each resourceSpans item must be a dict")
         if len(resource_spans) > OTLP_MAX_RESOURCE_SPANS:
             raise ValueError(
                 f"Too many resourceSpans ({len(resource_spans)} > "
@@ -167,6 +229,8 @@ class TelemetryResource:
         Build the OTLP resourceSpans for a set of GenAI spans WITHOUT sending
         them. The emitting service identity is stamped as ``service.name``.
         """
+        if not isinstance(spans, list) or not spans:
+            raise ValueError("spans must be a non-empty list")
         resource_spans: dict[str, Any] = {
             "scopeSpans": [
                 {

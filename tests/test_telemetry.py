@@ -71,9 +71,78 @@ def test_emit_rejects_oversized_batch_without_calling_network():
 
 
 def test_gen_ai_span_builds_client_span_with_hex_ids():
-    span = gen_ai_span("bot", request_model="gpt-4o")
+    span = gen_ai_span(
+        "bot",
+        agent_id="agent-1",
+        system="openai",
+        request_model="gpt-4o",
+        response_model="gpt-4o-2026-08-01",
+        operation_name="chat",
+        input_tokens=10,
+        output_tokens=5,
+        name="named-span",
+        duration_ms=25,
+        extra_attributes=[{"key": "custom", "value": {"stringValue": "value"}}],
+    )
     assert span["kind"] == 3
     assert len(span["traceId"]) == 32
     assert len(span["spanId"]) == 16
-    assert span["name"] == "chat gpt-4o"
+    assert span["name"] == "named-span"
     assert span["startTimeUnixNano"].isdigit()
+    attrs = span["attributes"]
+    assert _find_attr(attrs, "gen_ai.agent.id") == {"stringValue": "agent-1"}
+    assert _find_attr(attrs, "gen_ai.response.model") == {
+        "stringValue": "gpt-4o-2026-08-01"
+    }
+    assert _find_attr(attrs, "gen_ai.operation.name") == {"stringValue": "chat"}
+    assert _find_attr(attrs, "custom") == {"stringValue": "value"}
+    assert int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"]) == 25_000_000
+
+
+@pytest.mark.parametrize(
+    ("agent_name", "kwargs", "message"),
+    [
+        ("", {}, "agent_name"),
+        (" bot", {}, "agent_name"),
+        ("bot", {"input_tokens": -1}, "input_tokens"),
+        ("bot", {"input_tokens": True}, "input_tokens"),
+        ("bot", {"output_tokens": 1.5}, "output_tokens"),
+        ("bot", {"duration_ms": -1}, "duration_ms"),
+        ("bot", {"request_model": " model"}, "request_model"),
+        ("bot", {"extra_attributes": {}}, "extra_attributes"),
+        ("bot", {"extra_attributes": ["invalid"]}, "extra_attributes"),
+    ],
+)
+def test_gen_ai_span_rejects_values_that_would_be_dropped_or_corrupted(
+    agent_name, kwargs, message
+):
+    with pytest.raises(ValueError, match=message):
+        gen_ai_span(agent_name, **kwargs)
+
+
+def test_emit_gen_ai_spans_requires_at_least_one_span():
+    with pytest.raises(ValueError, match="non-empty"):
+        _client().telemetry.emit_gen_ai_spans([])
+
+
+@pytest.mark.parametrize("resource_spans", [None, ["invalid"]])
+def test_emit_rejects_invalid_raw_resource_spans(resource_spans):
+    with pytest.raises(ValueError, match="resourceSpans"):
+        _client().telemetry.emit(resource_spans)
+
+
+def test_emit_rejects_body_over_server_limit():
+    oversized = [{"scopeSpans": [], "padding": "x" * (5 * 1024 * 1024)}]
+    with pytest.raises(ValueError, match="body limit"):
+        _client().telemetry.emit(oversized)
+
+
+def test_build_resource_spans_without_service_name_omits_resource_identity():
+    span = gen_ai_span("bot")
+    result = _client().telemetry.build_gen_ai_resource_spans([span])
+    assert "resource" not in result[0]
+
+
+def test_telemetry_service_name_matches_backend_identity_bounds():
+    with pytest.raises(ValueError, match="service_name"):
+        TelemetryResource(_client()._http, service_name=" ")

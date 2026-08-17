@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
 import respx
 
 from praesidia import Praesidia
@@ -40,9 +41,7 @@ def _client() -> Praesidia:
 
 @respx.mock
 def test_create_posts_create_memory_dto():
-    route = respx.post(MEMORIES).mock(
-        return_value=httpx.Response(201, json=MEMORY)
-    )
+    route = respx.post(MEMORIES).mock(return_value=httpx.Response(201, json=MEMORY))
     result = _client().memory.create(
         content="The customer prefers email.",
         subject_id="subject-9",
@@ -58,15 +57,80 @@ def test_create_posts_create_memory_dto():
 
 
 @respx.mock
+def test_create_uses_exact_backend_memory_enums():
+    route = respx.post(MEMORIES).mock(return_value=httpx.Response(201, json=MEMORY))
+
+    _client().memory.create(
+        "retained",
+        memory_key="namespace-1",
+        source_type="IMPORT",
+        source_agent_id="00000000-0000-4000-8000-000000000001",
+        source_reference="import-job-1",
+        retention_regime="CUSTOM",
+        retention_days=30,
+    )
+
+    assert json.loads(route.calls.last.request.content) == {
+        "content": "retained",
+        "memoryKey": "namespace-1",
+        "sourceType": "IMPORT",
+        "sourceAgentId": "00000000-0000-4000-8000-000000000001",
+        "sourceReference": "import-job-1",
+        "retentionRegime": "CUSTOM",
+        "retentionDays": 30,
+    }
+    assert "SOC2" in _client().memory.RETENTION_REGIMES
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"source_type": "agent"}, "source_type"),
+        ({"source_type": "TOOL"}, "source_type"),
+        ({"retention_regime": "sox"}, "retention_regime"),
+        ({"retention_regime": "SOX"}, "retention_regime"),
+        ({"retention_days": 0}, "retention_days"),
+        ({"retention_days": 1.5}, "retention_days"),
+        ({"retention_days": True}, "retention_days"),
+        ({"retention_days": 30}, "only valid"),
+        ({"retention_regime": "SOC2", "retention_days": 30}, "only valid"),
+        ({"retention_regime": "CUSTOM"}, "required"),
+    ],
+)
+@respx.mock
+def test_create_rejects_invalid_or_silently_ignored_values(kwargs, message):
+    route = respx.post(MEMORIES)
+
+    with pytest.raises(ValueError, match=message):
+        _client().memory.create("content", **kwargs)
+
+    assert not route.called
+
+
+@pytest.mark.parametrize("content", ["", 123, "x" * 32_769])
+def test_create_rejects_invalid_content_before_network(content):
+    with pytest.raises(ValueError, match="content"):
+        _client().memory.create(content)
+
+
+def test_list_rejects_invalid_source_type_before_network():
+    with pytest.raises(ValueError, match="source_type"):
+        _client().memory.list(source_type="agent")
+
+
+@respx.mock
 def test_list_sends_query_params_and_unwraps_envelope():
     route = respx.get(MEMORIES).mock(
         return_value=httpx.Response(200, json={"data": [MEMORY], "total": 1})
     )
-    rows = _client().memory.list(limit=5, memory_key="conv-1", tag="crm")
+    rows = _client().memory.list(
+        limit=5, memory_key="conv-1", source_type="AGENT", tag="crm"
+    )
     assert rows == [MEMORY]
     req = route.calls.last.request
     assert req.url.params["limit"] == "5"
     assert req.url.params["memoryKey"] == "conv-1"
+    assert req.url.params["sourceType"] == "AGENT"
     assert req.url.params["tag"] == "crm"
 
 
@@ -75,12 +139,25 @@ def test_search_posts_search_memory_dto():
     route = respx.post(f"{MEMORIES}/search").mock(
         return_value=httpx.Response(200, json=[MEMORY])
     )
-    hits = _client().memory.search("contact preference", top_k=5)
+    hits = _client().memory.search("contact preference", memory_key="conv-1", top_k=5)
     assert hits == [MEMORY]
     assert json.loads(route.calls.last.request.content) == {
         "query": "contact preference",
+        "memoryKey": "conv-1",
         "topK": 5,
     }
+
+
+@pytest.mark.parametrize("query", ["", 123, "x" * 4_097])
+def test_search_rejects_invalid_query_before_network(query):
+    with pytest.raises(ValueError, match="query"):
+        _client().memory.search(query)
+
+
+@pytest.mark.parametrize("top_k", [0, 51, True, 1.5])
+def test_search_rejects_invalid_top_k_before_network(top_k):
+    with pytest.raises(ValueError, match="top_k"):
+        _client().memory.search("query", top_k=top_k)
 
 
 @respx.mock
@@ -107,9 +184,7 @@ def test_erase_posts_subject_and_reason():
 
 @respx.mock
 def test_get_and_delete():
-    respx.get(f"{MEMORIES}/mem-1").mock(
-        return_value=httpx.Response(200, json=MEMORY)
-    )
+    respx.get(f"{MEMORIES}/mem-1").mock(return_value=httpx.Response(200, json=MEMORY))
     delete_route = respx.delete(f"{MEMORIES}/mem-1").mock(
         return_value=httpx.Response(204)
     )

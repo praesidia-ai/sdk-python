@@ -15,7 +15,10 @@ Quick start::
     agents = client.agents.list()
 
     # Run an agent task
-    task = client.agents.run("agent-id", input={"message": "Hello, agent!"})
+    task = client.agents.run(
+        "00000000-0000-4000-8000-000000000001",
+        input={"message": "Hello, agent!"},
+    )
     print(task["id"], task["status"])
 
     # Stream the audit log

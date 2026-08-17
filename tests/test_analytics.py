@@ -44,6 +44,57 @@ def test_cost_trends_sends_advanced_query_dto_fields():
     assert "period" not in route.calls.last.request.url.params
 
 
+@respx.mock
+def test_agent_performance_sends_optional_date_range():
+    route = respx.get(f"{ANALYTICS}/advanced/agent-performance").mock(
+        return_value=httpx.Response(200, json={"agents": []})
+    )
+
+    result = _client().analytics.agent_performance(
+        from_date="2026-07-01", to_date="2026-07-07"
+    )
+
+    assert result == {"agents": []}
+    assert dict(route.calls.last.request.url.params) == {
+        "startDate": "2026-07-01",
+        "endDate": "2026-07-07",
+    }
+
+
+@respx.mock
+def test_agent_performance_omits_empty_query():
+    route = respx.get(f"{ANALYTICS}/advanced/agent-performance").mock(
+        return_value=httpx.Response(200, json={})
+    )
+
+    _client().analytics.agent_performance()
+
+    assert not route.calls.last.request.url.params
+
+
+@respx.mock
+def test_top_agents_sends_advanced_query_dto_fields():
+    route = respx.get(f"{ANALYTICS}/advanced/top-agents").mock(
+        return_value=httpx.Response(200, json={"agents": []})
+    )
+
+    _client().analytics.top_agents(
+        from_date="2026-07-01", to_date="2026-07-07", limit=25
+    )
+
+    assert dict(route.calls.last.request.url.params) == {
+        "limit": "25",
+        "startDate": "2026-07-01",
+        "endDate": "2026-07-07",
+    }
+
+
+@pytest.mark.parametrize("limit", [0, 101, True, 1.5])
+def test_top_agents_limit_fails_fast(limit):
+    with pytest.raises(ValueError, match="limit"):
+        _client().analytics.top_agents(limit=limit)
+
+
 @pytest.mark.parametrize("days", [0, 366, True, 2.5])
 def test_analytics_day_windows_fail_fast(days):
     with pytest.raises(ValueError, match="days"):
@@ -58,9 +109,10 @@ def test_analytics_export_matches_csv_only_backend_contract():
         return_value=httpx.Response(200, content=b"id,createdAt\n")
     )
 
-    result = _client().analytics.export(from_date="2026-07-01")
+    result = _client().analytics.export(from_date="2026-07-01", to_date="2026-07-31")
 
     assert result == b"id,createdAt\n"
     assert dict(route.calls.last.request.url.params) == {
-        "startDate": "2026-07-01"
+        "startDate": "2026-07-01",
+        "endDate": "2026-07-31",
     }

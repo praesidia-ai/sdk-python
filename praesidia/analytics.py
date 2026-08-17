@@ -67,9 +67,7 @@ class AnalyticsResource:
             params["startDate"] = from_date
         if to_date is not None:
             params["endDate"] = to_date
-        return self._http.get(
-            f"{self._base}/advanced/cost-trends", params=params
-        )
+        return self._http.get(f"{self._base}/advanced/cost-trends", params=params)
 
     def agent_performance(
         self,
@@ -93,7 +91,9 @@ class AnalyticsResource:
             params["startDate"] = from_date
         if to_date is not None:
             params["endDate"] = to_date
-        return self._http.get(f"{self._base}/advanced/agent-performance", params=params or None)
+        return self._http.get(
+            f"{self._base}/advanced/agent-performance", params=params or None
+        )
 
     def top_agents(
         self,
@@ -114,6 +114,12 @@ class AnalyticsResource:
         Returns:
             Top-agents dict.
         """
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 100
+        ):
+            raise ValueError("limit must be an integer from 1 to 100")
         params: dict[str, Any] = {"limit": limit}
         if from_date is not None:
             params["startDate"] = from_date

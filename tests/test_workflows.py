@@ -43,6 +43,20 @@ def test_workflow_crud_and_pagination_contracts():
 
 
 @respx.mock
+def test_workflow_list_handles_bare_and_legacy_envelopes():
+    route = respx.get(BASE).mock(
+        side_effect=[
+            httpx.Response(200, json=[{"id": "bare"}]),
+            httpx.Response(200, json={"workflows": [{"id": "legacy"}]}),
+        ]
+    )
+    client = _client()
+    assert client.workflows.list() == [{"id": "bare"}]
+    assert client.workflows.list() == [{"id": "legacy"}]
+    assert route.call_count == 2
+
+
+@respx.mock
 def test_trigger_wraps_input_in_start_workflow_run_dto():
     route = respx.post(f"{BASE}/w/runs").mock(
         return_value=httpx.Response(201, json={"id": "r"})
@@ -56,10 +70,29 @@ def test_trigger_wraps_input_in_start_workflow_run_dto():
     }
 
 
-@pytest.mark.parametrize("budget", [-1, True, "1"])
+@respx.mock
+def test_trigger_defaults_to_empty_input_and_accepts_zero_budget():
+    route = respx.post(f"{BASE}/w/runs").mock(
+        return_value=httpx.Response(201, json={"id": "r"})
+    )
+
+    _client().workflows.trigger("w", budget_limit_usd=0)
+
+    assert json.loads(route.calls.last.request.content) == {
+        "initialInput": {},
+        "budgetLimitUsd": 0,
+    }
+
+
+@pytest.mark.parametrize("budget", [-1, True, "1", float("nan"), float("inf")])
 def test_trigger_rejects_invalid_budget(budget):
     with pytest.raises(ValueError, match="budget_limit_usd"):
         _client().workflows.trigger("w", budget_limit_usd=budget)
+
+
+def test_trigger_rejects_non_mapping_input():
+    with pytest.raises(ValueError, match="input"):
+        _client().workflows.trigger("w", input=[])
 
 
 @respx.mock
@@ -77,3 +110,17 @@ def test_workflow_run_list_and_get_contracts():
         return_value=httpx.Response(200, json={"id": "r"})
     )
     assert _client().workflows.get_run("w", "r")["id"] == "r"
+
+
+@respx.mock
+def test_workflow_run_list_handles_bare_and_legacy_envelopes():
+    route = respx.get(f"{BASE}/w/runs").mock(
+        side_effect=[
+            httpx.Response(200, json=[{"id": "bare"}]),
+            httpx.Response(200, json={"runs": [{"id": "legacy"}]}),
+        ]
+    )
+    client = _client()
+    assert client.workflows.list_runs("w") == [{"id": "bare"}]
+    assert client.workflows.list_runs("w") == [{"id": "legacy"}]
+    assert route.call_count == 2

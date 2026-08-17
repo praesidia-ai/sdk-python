@@ -18,7 +18,8 @@ COPY tests ./tests
 RUN pip install "uv==0.5.24" \
  && uv sync --frozen --extra dev \
  && .venv/bin/python -c "from praesidia import Praesidia; print('SDK import OK')" \
- && .venv/bin/pytest -q \
+ && .venv/bin/coverage run -m pytest -q \
+ && .venv/bin/coverage report \
  && uv export --frozen --no-dev --no-emit-project --format requirements-txt --no-hashes --output-file /tmp/runtime-requirements.txt \
  && pip wheel --wheel-dir /wheels -r /tmp/runtime-requirements.txt \
  && uv build --wheel --out-dir /wheels

@@ -42,6 +42,26 @@ def test_connection_list_get_and_create_contracts():
 
 
 @respx.mock
+def test_connection_list_legacy_shapes_and_create_alias():
+    route = respx.get(BASE).mock(
+        side_effect=[
+            httpx.Response(200, json=[{"id": "bare"}]),
+            httpx.Response(200, json={"connections": [{"id": "legacy"}]}),
+        ]
+    )
+    client = _client()
+    assert client.connections.list() == [{"id": "bare"}]
+    assert client.connections.list() == [{"id": "legacy"}]
+    assert route.call_count == 2
+
+    create = respx.post(f"{BASE}/agent").mock(
+        return_value=httpx.Response(201, json={"id": "alias"})
+    )
+    assert client.connections.create({"clientAgentId": "a"})["id"] == "alias"
+    assert json.loads(create.calls.last.request.content) == {"clientAgentId": "a"}
+
+
+@respx.mock
 def test_connection_lifecycle_routes_and_status_enum():
     status = respx.patch(f"{BASE}/c/status").mock(
         return_value=httpx.Response(200, json={"status": "ACTIVE"})

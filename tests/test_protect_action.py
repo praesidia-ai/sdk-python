@@ -26,9 +26,7 @@ def _client() -> Praesidia:
 
 def test_unsupported_protocol_raises_before_any_network_call():
     with pytest.raises(UnsupportedProtectedActionTargetError):
-        _client().agents.protect_action(
-            "srv-1", "search", protocol="http"
-        )
+        _client().agents.protect_action("srv-1", "search", protocol="http")
 
 
 @respx.mock
@@ -160,7 +158,9 @@ def test_http_level_denial_propagates_unchanged():
 @respx.mock
 def test_permit_header_distinct_from_capability_token_header():
     route = respx.post(CALL_URL).mock(
-        return_value=httpx.Response(200, json={"success": True, "content": [], "latencyMs": 1})
+        return_value=httpx.Response(
+            200, json={"success": True, "content": [], "latencyMs": 1}
+        )
     )
 
     _client().agents.protect_action(
@@ -168,11 +168,19 @@ def test_permit_header_distinct_from_capability_token_header():
         "search",
         permit="permit.jwt.token",
         capability_token="capability.jwt.token",
+        task_id="task-1",
+        agent_id="agent-1",
+        chain_id="chain-1",
+        timeout_ms=2_500,
     )
 
     headers = route.calls.last.request.headers
     assert headers["X-Praesidia-Permit"] == "permit.jwt.token"
     assert headers["X-Praesidia-Capability-Token"] == "capability.jwt.token"
+    assert headers["X-Praesidia-Task-Id"] == "task-1"
+    assert headers["X-Praesidia-Agent-Id"] == "agent-1"
+    assert headers["X-Praesidia-Chain-Id"] == "chain-1"
+    assert json.loads(route.calls.last.request.content)["timeoutMs"] == 2_500
 
 
 def test_rejects_invalid_timeout_ms():

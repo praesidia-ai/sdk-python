@@ -377,6 +377,24 @@ jobs.
 
 ## Changelog
 
+### Unreleased — production contract hardening
+
+- **Fixed** compliance report generation validating its polling options only
+  after enqueueing a report; invalid options now fail before any network side
+  effect.
+- **Fixed** agent-memory enum drift against the backend and fail fast on
+  invalid content, search limits, and retention settings that the backend
+  would reject or silently ignore. Retention days now require the `CUSTOM`
+  regime.
+- **Hardened** retry, workflow-budget, chain-header, analytics, audit-export,
+  and OTLP telemetry validation against non-finite, unsafe, or backend-invalid
+  values.
+- **Fixed** isolated release builds producing Core Metadata 2.5 artifacts that
+  Twine 6.2 cannot validate; the backend and release tools are pinned and the
+  wheel/sdist now emit publishable Metadata-Version 2.4.
+- **Expanded** behavioral coverage across every public resource method,
+  authentication mode, legacy response envelope, and typed HTTP error mapping.
+
 ### Unreleased — PA-0026: fix `protect_action`'s deny discriminator (defect in PA01 DX-002)
 
 - **Fixed** `protect_action` misclassifying a downstream tool/transport error as a pre-dispatch

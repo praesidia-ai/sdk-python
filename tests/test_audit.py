@@ -25,9 +25,7 @@ def _paged_server(total_rows: int):
     """respx side_effect mimicking the backend's clamped pagination: at most
     SERVER_PAGE_CAP rows for the requested page, empty once the offset runs
     past the data — exactly the shape that exposed BUGHUNT-SDK-01."""
-    rows = [
-        {"id": f"evt-{i}", "action": "agent.created"} for i in range(total_rows)
-    ]
+    rows = [{"id": f"evt-{i}", "action": "agent.created"} for i in range(total_rows)]
 
     def handler(request: httpx.Request) -> httpx.Response:
         params = request.url.params
@@ -113,6 +111,73 @@ def test_list_does_not_send_resource_type_param():
     # resourceType is not a backend filter — sending it under
     # forbidNonWhitelisted 400'd the WHOLE request. It must never be sent.
     assert "resourceType" not in params
+
+
+@respx.mock
+def test_list_sends_all_supported_filters_and_handles_legacy_logs_envelope():
+    event = {"id": "evt-1"}
+    route = respx.get(AUDIT).mock(
+        return_value=httpx.Response(200, json={"logs": [event]})
+    )
+
+    result = _client().audit.list(
+        from_date="2026-07-01",
+        to_date="2026-07-31",
+        page=2,
+        limit=25,
+        action="agent.created",
+    )
+
+    assert result == [event]
+    assert dict(route.calls.last.request.url.params) == {
+        "page": "2",
+        "limit": "25",
+        "startDate": "2026-07-01",
+        "endDate": "2026-07-31",
+        "action": "agent.created",
+    }
+
+
+@respx.mock
+def test_list_handles_bare_list_response():
+    respx.get(AUDIT).mock(return_value=httpx.Response(200, json=[{"id": "evt-1"}]))
+    assert _client().audit.list() == [{"id": "evt-1"}]
+
+
+@respx.mock
+def test_stream_sends_from_date_and_handles_legacy_logs_envelope():
+    route = respx.get(AUDIT).mock(
+        side_effect=[
+            httpx.Response(200, json={"logs": [{"id": "evt-1"}]}),
+            httpx.Response(200, json={"logs": []}),
+        ]
+    )
+
+    assert list(_client().audit.stream(from_date="2026-07-01")) == [{"id": "evt-1"}]
+    assert route.calls[0].request.url.params["startDate"] == "2026-07-01"
+
+
+@respx.mock
+def test_export_sends_format_and_date_range():
+    route = respx.get(f"{AUDIT}/export").mock(
+        return_value=httpx.Response(200, content=b"id\n")
+    )
+
+    result = _client().audit.export(
+        from_date="2026-07-01", to_date="2026-07-31", format="csv"
+    )
+
+    assert result == b"id\n"
+    assert dict(route.calls.last.request.url.params) == {
+        "format": "csv",
+        "startDate": "2026-07-01",
+        "endDate": "2026-07-31",
+    }
+
+
+def test_export_rejects_unsupported_format_before_network():
+    with pytest.raises(ValueError, match="format"):
+        _client().audit.export(format="xml")
 
 
 def test_list_rejects_resource_type_kwarg():

@@ -12,6 +12,7 @@ duplicate create/charge.
 
 from __future__ import annotations
 
+import math
 import random
 import re
 from dataclasses import dataclass
@@ -64,18 +65,21 @@ def resolve_retry_config(
     if (
         isinstance(value.base_delay_s, bool)
         or not isinstance(value.base_delay_s, (int, float))
+        or not math.isfinite(value.base_delay_s)
         or value.base_delay_s < 0
     ):
         raise ValueError("retry.base_delay_s must be a non-negative number")
     if (
         isinstance(value.max_delay_s, bool)
         or not isinstance(value.max_delay_s, (int, float))
+        or not math.isfinite(value.max_delay_s)
         or value.max_delay_s < value.base_delay_s
     ):
         raise ValueError("retry.max_delay_s must be a number >= retry.base_delay_s")
     if (
         isinstance(value.max_elapsed_s, bool)
         or not isinstance(value.max_elapsed_s, (int, float))
+        or not math.isfinite(value.max_elapsed_s)
         or value.max_elapsed_s < 0
     ):
         raise ValueError("retry.max_elapsed_s must be a non-negative number")
@@ -96,7 +100,7 @@ def parse_retry_after_s(header_value: Optional[str]) -> Optional[float]:
         return None
     try:
         seconds = float(header_value)
-        if seconds >= 0:
+        if math.isfinite(seconds) and seconds >= 0:
             return seconds
     except ValueError:
         pass

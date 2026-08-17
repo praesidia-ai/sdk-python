@@ -50,8 +50,14 @@ def test_resolve_retry_config_accepts_custom():
         RetryConfig(max_attempts=11),
         RetryConfig(max_attempts=1.5),  # type: ignore[arg-type]
         RetryConfig(base_delay_s=-1),
+        RetryConfig(base_delay_s=float("nan")),
+        RetryConfig(base_delay_s=float("inf")),
         RetryConfig(base_delay_s=500, max_delay_s=100),
+        RetryConfig(max_delay_s=float("nan")),
+        RetryConfig(max_delay_s=float("inf")),
         RetryConfig(max_elapsed_s=-1),
+        RetryConfig(max_elapsed_s=float("nan")),
+        RetryConfig(max_elapsed_s=float("inf")),
     ],
 )
 def test_resolve_retry_config_rejects_invalid(cfg):
@@ -98,6 +104,8 @@ def test_parse_retry_after_s_http_date():
 def test_parse_retry_after_s_invalid_returns_none():
     assert parse_retry_after_s(None) is None
     assert parse_retry_after_s("not-a-date-or-number") is None
+    assert parse_retry_after_s("nan") is None
+    assert parse_retry_after_s("inf") is None
 
 
 def test_compute_backoff_s_bounded():

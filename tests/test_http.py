@@ -12,6 +12,14 @@ import pytest
 
 from praesidia import Praesidia
 from praesidia._http import HttpClient, _DOWNLOAD_TIMEOUT, path_segment
+from praesidia.exceptions import (
+    AuthError,
+    ForbiddenError,
+    NotFoundError,
+    PraesidiaError,
+    RateLimitError,
+    ServerError,
+)
 
 
 def test_download_timeout_is_finite_on_every_phase():
@@ -121,3 +129,43 @@ def test_public_client_exposes_matching_package_version():
 
     assert praesidia.__version__ == "0.3.1"
     assert Praesidia(api_key="k", org_id="o")._http._timeout == 30.0
+
+
+@pytest.mark.parametrize(
+    "chain_id",
+    [" chain-1", "chain-1 ", "chain\t1", "chain\x001", 123],
+)
+def test_forward_chain_rejects_values_unsafe_for_http_headers(chain_id):
+    client = Praesidia(api_key="k", org_id="o")
+
+    with pytest.raises(ValueError, match="chain_id"):
+        client.forward_chain(chain_id)
+
+
+@pytest.mark.parametrize(
+    ("status", "exception"),
+    [
+        (400, PraesidiaError),
+        (401, AuthError),
+        (403, ForbiddenError),
+        (404, NotFoundError),
+        (429, RateLimitError),
+        (500, ServerError),
+    ],
+)
+def test_http_statuses_map_to_typed_sdk_errors(status, exception):
+    request = httpx.Request("GET", "https://api.test/resource")
+    response = httpx.Response(status, text="failure", request=request)
+    client = HttpClient(api_key="k", org_id="o", base_url="https://api.test")
+
+    with pytest.raises(exception) as exc_info:
+        client._raise_for_status(response)
+
+    assert exc_info.value.status_code == status
+
+
+def test_get_chain_id_reports_current_forwarded_chain():
+    client = HttpClient(api_key="k", org_id="o", base_url="https://api.test")
+    assert client.get_chain_id() is None
+    client.set_chain_id("chain-1")
+    assert client.get_chain_id() == "chain-1"
