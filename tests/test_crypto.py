@@ -14,6 +14,8 @@ from praesidia._crypto import (
     canonical_json,
     ed25519_public_key_from_jwk,
     ed25519_verify,
+    es256_verify,
+    p256_public_key_from_jwk,
 )
 
 
@@ -66,6 +68,36 @@ def test_jwk_rejects_noncanonical_base64url():
     assert ed25519_public_key_from_jwk(
         {"kty": "OKP", "crv": "Ed25519", "x": valid_x + "!"}
     ) is None
+    # Same decoded bytes as ``...v4c`` under lenient decoders, but non-zero
+    # unused base64 bits make this spelling non-canonical.
+    assert ed25519_public_key_from_jwk(
+        {"kty": "OKP", "crv": "Ed25519", "x": valid_x[:-1] + "d"}
+    ) is None
+
+
+def test_jwk_rejects_algorithm_confusion_and_private_material():
+    valid_x = "EAxCTATcxCZf-LxssFR99e6TaZa1Vj7yPWb6prZPv4c"
+    base = {"kty": "OKP", "crv": "Ed25519", "x": valid_x}
+    assert ed25519_public_key_from_jwk({**base, "alg": "ES256"}) is None
+    assert ed25519_public_key_from_jwk({**base, "use": "enc"}) is None
+    assert ed25519_public_key_from_jwk({**base, "d": "private"}) is None
+
+
+def test_es256_helpers_fail_closed_on_malformed_inputs():
+    valid = {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "xSg2U6IWcdbtUsOx6Re8wDnS_NsEsQmdbSgl5EtpLxE",
+        "y": "M-6XtNyBIRsfx2li1AIOuWp_bYidD9bZpbX31VfuMgc",
+        "alg": "ES256",
+        "use": "sig",
+    }
+    point = p256_public_key_from_jwk(valid)
+    assert point is not None
+    assert p256_public_key_from_jwk({**valid, "alg": "EdDSA"}) is None
+    assert p256_public_key_from_jwk({**valid, "x": "bad"}) is None
+    assert p256_public_key_from_jwk({**valid, "d": "private"}) is None
+    assert es256_verify(b"message", b"not-der", point) is False
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])

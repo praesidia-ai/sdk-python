@@ -128,10 +128,15 @@ those `OrAuthGuard` routes.)
 ## Trust passport — verify a peer agent offline (H3-02f)
 
 Fetch a peer agent's signed trust passport from the **public** trust routes and
-verify the detached Ed25519 proof **locally** — the "verify a peer's reputation
-without trusting Praesidia" client. Offline verification is pure-Python and
-**dependency-free** (a compact RFC 8032 Ed25519 verify + canonical JSON in
-`praesidia._crypto`), so it needs no `cryptography` install.
+verify its detached Ed25519 or KMS-backed P-256/ES256 proof **locally**, without
+an online verification call. Offline verification is pure-Python and
+**dependency-free** (compact Ed25519 + ECDSA-P256 verification and canonical
+JSON in `praesidia._crypto`), so it needs no `cryptography` install.
+
+The supplied JWK is the verification trust anchor. Resolve it from a trusted
+DID document or verification bundle; a signature proves integrity relative to
+that key, but cannot by itself prove that an arbitrary key belongs to the
+passport's claimed issuer.
 
 ```python
 result = client.trust.fetch_and_verify(peer_agent_id)

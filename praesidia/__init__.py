@@ -30,6 +30,8 @@ from ._crypto import (
     canonical_json,
     ed25519_public_key_from_jwk,
     ed25519_verify,
+    es256_verify,
+    p256_public_key_from_jwk,
 )
 from ._jcs_canonical import (
     JcsCanonicalizationError,
@@ -65,6 +67,8 @@ __all__ = [
     "verify_passport",
     "ed25519_verify",
     "ed25519_public_key_from_jwk",
+    "es256_verify",
+    "p256_public_key_from_jwk",
     "canonical_json",
     # H1-02 — OTLP GenAI span builder
     "gen_ai_span",

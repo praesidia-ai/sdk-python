@@ -250,12 +250,17 @@ class AgentsResource:
             raise ValueError(
                 f"type must be one of {self.TASK_TYPES}; got {type!r}"
             )
-        if chain_id is not None and not _UUID_RE.match(chain_id):
+        if chain_id is not None and (
+            not isinstance(chain_id, str) or not _UUID_RE.match(chain_id)
+        ):
             raise ValueError(
                 "chain_id must be a UUID (CreateAgentTaskDto.chainId is "
                 f"@IsUUID); got {chain_id!r}"
             )
-        if parent_task_id is not None and not _UUID_RE.match(parent_task_id):
+        if parent_task_id is not None and (
+            not isinstance(parent_task_id, str)
+            or not _UUID_RE.match(parent_task_id)
+        ):
             raise ValueError("parent_task_id must be an RFC-4122 UUID")
         payload: dict[str, Any] = {
             "connectionId": connection_id,

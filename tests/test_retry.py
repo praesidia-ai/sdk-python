@@ -230,6 +230,23 @@ def test_idempotency_key_rejected_on_every_patch_route(monkeypatch):
         )
 
 
+@pytest.mark.parametrize("key", ["", " key", "key ", "key\r\ninjected: true"])
+def test_unsafe_idempotency_key_is_rejected_before_network(monkeypatch, key):
+    calls = {"n": 0}
+
+    def fake_post(url, **kwargs):
+        calls["n"] += 1
+        return httpx.Response(201, json={}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr("praesidia._http.httpx.post", fake_post)
+    client = HttpClient(
+        api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY
+    )
+    with pytest.raises(ValueError, match="idempotency_key"):
+        client.post("/organizations/o/tasks", json={}, idempotency_key=key)
+    assert calls["n"] == 0
+
+
 def test_idempotency_key_allowed_on_a2a_inbound_routes(monkeypatch):
     def fake_post(url, **kwargs):
         return httpx.Response(201, json={"ok": True}, request=httpx.Request("POST", url))

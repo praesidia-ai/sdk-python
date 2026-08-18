@@ -3,12 +3,11 @@ H3-02f — hand-written offline verification primitives for the trust-passport
 verify client. NOT part of the typed API surface.
 
 Pure-Python, ZERO dependencies (stdlib ``hashlib`` only). Python 3.9's stdlib
-has no Ed25519 primitive, and the SDK's only runtime dependency is ``httpx`` —
-so rather than pull in ``cryptography`` we vendor a compact RFC 8032 Ed25519
-*verify* here (the same "zero non-built-in dependencies" ethos as the
-``@praesidia/audit-verifier`` package). This keeps ``pip install praesidia``
-dependency-light while still letting a third party verify an agent's reputation
-OFFLINE, without trusting Praesidia.
+has neither Ed25519 nor ECDSA verification primitives, and the SDK's only
+runtime dependency is ``httpx`` — so rather than pull in ``cryptography`` we
+vendor compact verification-only implementations for the two algorithms
+be-core emits. This keeps ``pip install praesidia`` dependency-light while a
+third party verifies a passport against a caller-trusted public key.
 
 Byte-for-byte compatible with be-core's signing path:
 - :func:`canonical_json`  mirrors be-core ``canonicalJson`` (AGV-030 / JCS-style)
@@ -17,6 +16,10 @@ Byte-for-byte compatible with be-core's signing path:
 - :func:`ed25519_verify`  RFC 8032 Ed25519 (PureEdDSA over edwards25519, SHA-512).
 - :func:`ed25519_public_key_from_jwk`  decodes an OKP/Ed25519 JWK's base64url
   ``x`` coordinate into the raw 32-byte public key.
+- :func:`es256_verify`  verifies the strict low-s DER ECDSA-P256 signatures
+  returned by AWS KMS (``ECDSA_SHA_256``).
+- :func:`p256_public_key_from_jwk`  validates an EC/P-256 JWK and returns the
+  affine public point.
 """
 
 from __future__ import annotations
@@ -59,6 +62,17 @@ _BX = _x_recover(_BY)
 _B = (_BX % _P, _BY % _P, 1, (_BX * _BY) % _P)  # extended coords (X, Y, Z, T)
 _IDENTITY_ENCODING = bytes([1]) + bytes(31)
 _BASE64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+# ── NIST P-256 / ES256 constants (FIPS 186-4) ──────────────────────────────
+_P256_P = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
+_P256_A = _P256_P - 3
+_P256_B = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
+_P256_N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+_P256_HALF_N = _P256_N >> 1
+_P256_G = (
+    0x6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296,
+    0x4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5,
+)
 
 
 def _edwards_add(p: tuple, q: tuple) -> tuple:
@@ -164,8 +178,10 @@ def ed25519_public_key_from_jwk(jwk: Any) -> Optional[bytes]:
         return None
     if jwk.get("kty") != "OKP" or jwk.get("crv") != "Ed25519":
         return None
+    if not _is_verification_jwk(jwk, "EdDSA"):
+        return None
     x = jwk.get("x")
-    if not isinstance(x, str) or not x:
+    if not isinstance(x, str) or len(x) != 43:
         return None
     try:
         raw = _b64url_decode(x)
@@ -176,11 +192,185 @@ def ed25519_public_key_from_jwk(jwk: Any) -> Optional[bytes]:
     return raw
 
 
+def p256_public_key_from_jwk(jwk: Any) -> Optional[tuple[int, int]]:
+    """
+    Validate an EC/P-256 public JWK and return its affine ``(x, y)`` point.
+
+    Optional ``alg``/``use``/``key_ops`` metadata must describe an ES256
+    verification key. Private-key material and off-curve points are rejected.
+    Returns ``None`` on every malformed input.
+    """
+    if not isinstance(jwk, dict):
+        return None
+    if jwk.get("kty") != "EC" or jwk.get("crv") != "P-256":
+        return None
+    if not _is_verification_jwk(jwk, "ES256"):
+        return None
+    x_text = jwk.get("x")
+    y_text = jwk.get("y")
+    if (
+        not isinstance(x_text, str)
+        or len(x_text) != 43
+        or not isinstance(y_text, str)
+        or len(y_text) != 43
+    ):
+        return None
+    try:
+        x_raw = _b64url_decode(x_text)
+        y_raw = _b64url_decode(y_text)
+    except (ValueError, TypeError):
+        return None
+    if len(x_raw) != 32 or len(y_raw) != 32:
+        return None
+    x = int.from_bytes(x_raw, "big")
+    y = int.from_bytes(y_raw, "big")
+    if x >= _P256_P or y >= _P256_P:
+        return None
+    if (y * y - (pow(x, 3, _P256_P) + _P256_A * x + _P256_B)) % _P256_P:
+        return None
+    return (x, y)
+
+
+def es256_verify(
+    message: bytes,
+    signature: bytes,
+    public_key: tuple[int, int],
+) -> bool:
+    """
+    Verify a KMS-style ES256 signature over ``message``.
+
+    ``signature`` must be canonical ASN.1 DER ``(r, s)`` with low-s enforced,
+    matching be-core's malleability gate. Returns ``False`` (never raises) for
+    malformed signatures, invalid/off-curve public points, or a mismatch.
+    """
+    try:
+        decoded = _decode_p256_der_signature(signature)
+        if decoded is None:
+            return False
+        r, s = decoded
+        if not 1 <= s <= _P256_HALF_N:
+            return False
+        if not _p256_is_on_curve(public_key):
+            return False
+        digest = int.from_bytes(hashlib.sha256(message).digest(), "big")
+        w = pow(s, -1, _P256_N)
+        point = _p256_add(
+            _p256_scalarmult(_P256_G, (digest * w) % _P256_N),
+            _p256_scalarmult(public_key, (r * w) % _P256_N),
+        )
+        return point is not None and point[0] % _P256_N == r
+    except Exception:
+        return False
+
+
+def _is_verification_jwk(jwk: dict[str, Any], algorithm: str) -> bool:
+    if jwk.get("alg", algorithm) != algorithm:
+        return False
+    if jwk.get("use", "sig") != "sig" or "d" in jwk:
+        return False
+    key_ops = jwk.get("key_ops")
+    return key_ops is None or key_ops == ["verify"]
+
+
+def _decode_p256_der_signature(signature: bytes) -> Optional[tuple[int, int]]:
+    if (
+        not isinstance(signature, bytes)
+        or not 8 <= len(signature) <= 72
+        or signature[0] != 0x30
+        or signature[1] != len(signature) - 2
+    ):
+        return None
+    r_read = _read_der_integer(signature, 2)
+    if r_read is None:
+        return None
+    r, offset = r_read
+    s_read = _read_der_integer(signature, offset)
+    if s_read is None:
+        return None
+    s, offset = s_read
+    if offset != len(signature):
+        return None
+    if not 1 <= r < _P256_N or not 1 <= s < _P256_N:
+        return None
+    return (r, s)
+
+
+def _read_der_integer(data: bytes, offset: int) -> Optional[tuple[int, int]]:
+    if offset + 2 > len(data) or data[offset] != 0x02:
+        return None
+    length = data[offset + 1]
+    if not 1 <= length <= 33:
+        return None
+    start = offset + 2
+    end = start + length
+    if end > len(data):
+        return None
+    magnitude = data[start:end]
+    if magnitude[0] & 0x80:
+        return None
+    if len(magnitude) > 1 and magnitude[0] == 0:
+        if not magnitude[1] & 0x80:
+            return None
+        magnitude = magnitude[1:]
+    if len(magnitude) > 32:
+        return None
+    return (int.from_bytes(magnitude, "big"), end)
+
+
+def _p256_is_on_curve(point: tuple[int, int]) -> bool:
+    if not isinstance(point, tuple) or len(point) != 2:
+        return False
+    x, y = point
+    if not isinstance(x, int) or not isinstance(y, int):
+        return False
+    if not 0 <= x < _P256_P or not 0 <= y < _P256_P:
+        return False
+    return (y * y - (pow(x, 3, _P256_P) + _P256_A * x + _P256_B)) % _P256_P == 0
+
+
+def _p256_add(
+    left: Optional[tuple[int, int]],
+    right: Optional[tuple[int, int]],
+) -> Optional[tuple[int, int]]:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    x1, y1 = left
+    x2, y2 = right
+    if x1 == x2:
+        if (y1 + y2) % _P256_P == 0:
+            return None
+        slope = ((3 * x1 * x1 + _P256_A) * pow(2 * y1, -1, _P256_P)) % _P256_P
+    else:
+        slope = ((y2 - y1) * pow((x2 - x1) % _P256_P, -1, _P256_P)) % _P256_P
+    x3 = (slope * slope - x1 - x2) % _P256_P
+    y3 = (slope * (x1 - x3) - y1) % _P256_P
+    return (x3, y3)
+
+
+def _p256_scalarmult(
+    point: tuple[int, int], scalar: int
+) -> Optional[tuple[int, int]]:
+    result: Optional[tuple[int, int]] = None
+    addend: Optional[tuple[int, int]] = point
+    while scalar > 0:
+        if scalar & 1:
+            result = _p256_add(result, addend)
+        addend = _p256_add(addend, addend)
+        scalar >>= 1
+    return result
+
+
 def _b64url_decode(value: str) -> bytes:
     if not _BASE64URL_RE.fullmatch(value):
         raise ValueError("non-canonical base64url")
     padding = "=" * (-len(value) % 4)
-    return base64.b64decode(value + padding, altchars=b"-_", validate=True)
+    decoded = base64.b64decode(value + padding, altchars=b"-_", validate=True)
+    canonical = base64.urlsafe_b64encode(decoded).rstrip(b"=").decode("ascii")
+    if canonical != value:
+        raise ValueError("non-canonical base64url")
+    return decoded
 
 
 def canonical_json(value: Any) -> bytes:

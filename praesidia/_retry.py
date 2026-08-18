@@ -30,8 +30,8 @@ class RetryConfig:
         base_delay_s: Base delay in seconds before the first retry (default 0.25).
         max_delay_s:  Cap on any single computed backoff delay, before a
                       ``Retry-After`` override (default 4.0).
-        max_elapsed_s: Wall-clock budget in seconds across every attempt of
-                       one logical call (default 15.0).
+        max_elapsed_s: Monotonic elapsed-time budget in seconds across one
+                       logical call (default 15.0).
     """
 
     max_attempts: int = 3

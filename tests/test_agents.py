@@ -187,7 +187,9 @@ def test_run_rejects_invalid_type():
     [
         ({"connection_id": "not-a-uuid"}, "connection_id"),
         ({"chain_id": "not-a-uuid"}, "chain_id"),
+        ({"chain_id": 123}, "chain_id"),
         ({"parent_task_id": "not-a-uuid"}, "parent_task_id"),
+        ({"parent_task_id": 123}, "parent_task_id"),
     ],
 )
 def test_run_rejects_invalid_identifiers_before_network(kwargs, message):

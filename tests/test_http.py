@@ -76,6 +76,7 @@ def test_stream_get_respects_explicit_timeout_override(monkeypatch):
         "https://api example.test",
         "https:\\evil.example.test",
         "https://api.example.test:99999",
+        "https://api.example.test/\x00",
     ],
 )
 def test_rejects_unsafe_base_urls(base_url):

@@ -8,6 +8,7 @@ signing path across languages.
 
 from __future__ import annotations
 
+import base64
 import copy
 
 import httpx
@@ -68,6 +69,46 @@ PUBLIC_KEY_JWK = {
     "use": "sig",
     "x": "EAxCTATcxCZf-LxssFR99e6TaZa1Vj7yPWb6prZPv4c",
 }
+P256_PUBLIC_KEY_JWK = {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "xSg2U6IWcdbtUsOx6Re8wDnS_NsEsQmdbSgl5EtpLxE",
+    "y": "M-6XtNyBIRsfx2li1AIOuWp_bYidD9bZpbX31VfuMgc",
+    "use": "sig",
+    "alg": "ES256",
+}
+P256_SIGNATURE_B64 = (
+    "MEQCIHtQ3l2r2JAB9FeCBmCzyZD2VfOansvrvfH0l/1LoPyX"
+    "AiAceQ6W0YewFp4SYoQm4QurVIgZIS+cSoqllyj2VAoJAQ=="
+)
+P256_N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+
+
+def _p256_passport():
+    passport = copy.deepcopy(PASSPORT)
+    passport["proof"]["type"] = "EcdsaSecp256r1Signature2019"
+    passport["proof"]["proofValue"] = P256_SIGNATURE_B64
+    return passport
+
+
+def _encode_der_integer(value):
+    raw = value.to_bytes((value.bit_length() + 7) // 8, "big")
+    if raw[0] & 0x80:
+        raw = b"\x00" + raw
+    return b"\x02" + bytes([len(raw)]) + raw
+
+
+def _high_s_signature():
+    signature = base64.b64decode(P256_SIGNATURE_B64, validate=True)
+    r_length = signature[3]
+    r_start = 4
+    r_end = r_start + r_length
+    s_length = signature[r_end + 1]
+    s_start = r_end + 2
+    r = int.from_bytes(signature[r_start:r_end], "big")
+    s = int.from_bytes(signature[s_start : s_start + s_length], "big")
+    body = _encode_der_integer(r) + _encode_der_integer(P256_N - s)
+    return base64.b64encode(b"\x30" + bytes([len(body)]) + body).decode("ascii")
 
 
 def _client() -> Praesidia:
@@ -91,6 +132,32 @@ def test_verify_passport_rejects_tampered_passport():
     assert result["verified"] is False
     assert result["signatureValid"] is False
     assert result["reason"] == "signature-mismatch"
+
+
+def test_verify_passport_accepts_genuine_kms_p256_signature():
+    result = verify_passport(_p256_passport(), P256_PUBLIC_KEY_JWK)
+    assert result == {
+        "verified": True,
+        "signatureValid": True,
+        "expired": False,
+        "reason": "ok",
+    }
+
+
+def test_verify_passport_rejects_tampered_or_high_s_p256_signature():
+    tampered = _p256_passport()
+    tampered["credentialSubject"]["trustScore"] = 100
+    assert verify_passport(tampered, P256_PUBLIC_KEY_JWK)["reason"] == "signature-mismatch"
+
+    malleable = _p256_passport()
+    malleable["proof"]["proofValue"] = _high_s_signature()
+    assert verify_passport(malleable, P256_PUBLIC_KEY_JWK)["reason"] == "signature-mismatch"
+
+
+def test_verify_passport_rejects_proof_key_algorithm_confusion():
+    passport = _p256_passport()
+    passport["proof"]["type"] = "Ed25519Signature2020"
+    assert verify_passport(passport, P256_PUBLIC_KEY_JWK)["reason"] == "signature-mismatch"
 
 
 def test_verify_passport_fails_closed_on_wrong_key():
@@ -159,6 +226,10 @@ def test_verify_passport_rejects_noncanonical_base64_proof():
     assert result["verified"] is False
     assert result["reason"] == "signature-mismatch"
 
+    oversized = copy.deepcopy(PASSPORT)
+    oversized["proof"]["proofValue"] = "A" * 100
+    assert verify_passport(oversized, PUBLIC_KEY_JWK)["reason"] == "signature-mismatch"
+
 
 def test_ed25519_public_key_from_jwk_roundtrip():
     raw = ed25519_public_key_from_jwk(PUBLIC_KEY_JWK)
@@ -173,7 +244,7 @@ def test_resource_verify_passport_delegates_to_offline_verifier():
 
 def test_verify_passport_reports_valid_signature_on_expired_document(monkeypatch):
     expired = copy.deepcopy(PASSPORT)
-    expired["expirationDate"] = "2000-01-01T00:00:00+00:00"
+    expired["expirationDate"] = "2026-07-07T00:00:00.000Z"
     monkeypatch.setattr("praesidia.trust.ed25519_verify", lambda *_args: True)
 
     result = verify_passport(expired, PUBLIC_KEY_JWK)
@@ -183,6 +254,43 @@ def test_verify_passport_reports_valid_signature_on_expired_document(monkeypatch
         "signatureValid": True,
         "expired": True,
         "reason": "expired",
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("proofPurpose", "authentication"),
+        ("created", "2026-07-06T00:00:01.000Z"),
+        ("keyVersion", 0),
+        ("verificationMethod", "did:web:attacker.example#key-1"),
+    ],
+)
+def test_verify_passport_rejects_tampered_proof_metadata(field, value):
+    passport = copy.deepcopy(PASSPORT)
+    passport["proof"][field] = value
+    result = verify_passport(passport, PUBLIC_KEY_JWK)
+    assert result["signatureValid"] is False
+    assert result["reason"] == "malformed-passport"
+
+
+def test_verify_passport_rejects_malformed_signed_subject():
+    passport = copy.deepcopy(PASSPORT)
+    passport["credentialSubject"]["attestations"]["activeCount"] = -1
+    assert verify_passport(passport, PUBLIC_KEY_JWK)["reason"] == "malformed-passport"
+
+
+def test_verify_passport_never_raises_for_hostile_mapping():
+    class HostileDict(dict):
+        def get(self, *_args, **_kwargs):
+            raise RuntimeError("hostile getter")
+
+    result = verify_passport(HostileDict(), {})
+    assert result == {
+        "verified": False,
+        "signatureValid": False,
+        "expired": False,
+        "reason": "malformed-passport",
     }
 
 

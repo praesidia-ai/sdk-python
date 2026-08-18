@@ -77,7 +77,10 @@ def normalize_base_url(base_url: str) -> str:
     """Return a safe absolute HTTP(S) API base URL without a trailing slash."""
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("base_url must be a non-empty absolute HTTP(S) URL")
-    if base_url != base_url.strip() or any(char.isspace() for char in base_url):
+    if base_url != base_url.strip() or any(
+        char.isspace() or ord(char) < 32 or ord(char) == 127
+        for char in base_url
+    ):
         raise ValueError("base_url must not contain whitespace or control characters")
     if "\\" in base_url:
         raise ValueError("base_url must not contain backslashes")
@@ -118,6 +121,20 @@ def _validate_timeout(timeout: float) -> float:
     if not 0 < value <= _MAX_TIMEOUT:
         raise ValueError(f"timeout must be greater than 0 and at most {_MAX_TIMEOUT}s")
     return value
+
+
+def _validate_idempotency_key(idempotency_key: str) -> str:
+    if (
+        not isinstance(idempotency_key, str)
+        or not idempotency_key
+        or idempotency_key != idempotency_key.strip()
+        or any(ord(char) < 32 or ord(char) == 127 for char in idempotency_key)
+    ):
+        raise ValueError(
+            "idempotency_key must be a non-empty string without surrounding "
+            "whitespace or control characters"
+        )
+    return idempotency_key
 
 
 class HttpClient:
@@ -313,7 +330,8 @@ class HttpClient:
         be-core actually deduplicates server-side; see
         :func:`._retry.assert_idempotency_key_supported`.
         """
-        if idempotency_key:
+        if idempotency_key is not None:
+            idempotency_key = _validate_idempotency_key(idempotency_key)
             assert_idempotency_key_supported("POST", path)
         url = f"{self._base}{path}"
         merged = {**(headers or {}), "Idempotency-Key": idempotency_key} if idempotency_key else headers
@@ -326,7 +344,7 @@ class HttpClient:
                 timeout=self._timeout,
             )
 
-        r = self._send_with_retry(bool(idempotency_key), do)
+        r = self._send_with_retry(idempotency_key is not None, do)
         self._raise_for_status(r)
         return r.json()
 
@@ -349,7 +367,8 @@ class HttpClient:
         rejects a PATCH-level ``idempotency_key`` until a server-side PATCH
         dedup route exists.
         """
-        if idempotency_key:
+        if idempotency_key is not None:
+            idempotency_key = _validate_idempotency_key(idempotency_key)
             assert_idempotency_key_supported("PATCH", path)
         url = f"{self._base}{path}"
         merged = {**(headers or {}), "Idempotency-Key": idempotency_key} if idempotency_key else headers
@@ -362,7 +381,7 @@ class HttpClient:
                 timeout=self._timeout,
             )
 
-        r = self._send_with_retry(bool(idempotency_key), do)
+        r = self._send_with_retry(idempotency_key is not None, do)
         self._raise_for_status(r)
         return r.json()
 
