@@ -13,6 +13,14 @@ name: 🔗 API Contract Drift
 # then made to also read `.py` sources so `sdk-python` does not need its own
 # copy). MONO-003 sibling-checkout pattern mirrors `mcp`'s and `sdk`'s own
 # contract-drift.yml jobs.
+#
+# AUD-0063 — this job is also the ONLY place in CI where a fresh be-core spec
+# is available, so it additionally runs the analytics resource coverage gate
+# (tests/test_analytics_coverage.py) against this job's real
+# `swagger.generated.json`. `ci.yml` runs `pytest` but checks out sdk-python
+# alone, so that test only SKIPS there — this job is what makes it capable
+# of actually failing a PR when be-core adds an analytics route the SDK
+# doesn't cover. Mirrors mcp's/sdk's identical AUD-0062/AUD-0063 steps.
 
 on:
   push:
@@ -114,3 +122,34 @@ jobs:
         run: |
           node sdk/scripts/audit-api-contract.mjs swagger.generated.json \
             --source sdk-python/praesidia --lang py
+
+      # AUD-0063 — the coverage gate below is a pytest test, so this job
+      # needs a Python toolchain too (every prior step here is Node-only,
+      # since the drift scanner reads sdk-python's .py files as TEXT).
+      # Mirrors ci.yml's own setup-python step/version choice.
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: sdk-python/pyproject.toml
+
+      - name: Install sdk-python and dev dependencies
+        working-directory: sdk-python
+        run: pip install -e ".[dev]"
+
+      # This repo's own `ci.yml` never sees a be-core checkout, so run the
+      # live analytics-route coverage check here instead, where
+      # `../../swagger.generated.json` (this job's fresh export, resolved
+      # from tests/) genuinely exists. Run BY PATH (not `-k "<pattern>"`) so
+      # a renamed/deleted test file fails loudly rather than silently
+      # collecting zero tests — same rationale as sdk's/mcp's equivalent
+      # step. AUD_0063_REQUIRE_SWAGGER=true additionally turns "no spec
+      # found" from a skip into a hard failure in THIS job specifically (see
+      # the test file's own doc comment) — this job's only reason to run it
+      # is having a fresh be-core export, so it must never go green having
+      # never read one.
+      - name: AUD-0063 — analytics resource coverage vs be-core
+        working-directory: sdk-python
+        env:
+          AUD_0063_REQUIRE_SWAGGER: 'true'
+        run: pytest tests/test_analytics_coverage.py -v
