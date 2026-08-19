@@ -65,7 +65,7 @@ with open("eu-ai-act-report.pdf", "wb") as fh:
 | `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `protect_action`, `refresh_credential` |
 | `client.workflows` | `WorkflowsResource` | `list`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `get_run` |
 | `client.audit` | `AuditResource` | `list`, `stream`, `export` |
-| `client.analytics` | `AnalyticsResource` | `usage`, `cost_trends`, `agent_performance`, `top_agents`, `export` |
+| `client.analytics` | `AnalyticsResource` | `usage`, `cost_trends`, `agent_performance`, `top_agents`, `export`, `capture_state`, `agent_analytics`, `events`, `activity_log`, `record_event`, `security_metrics`, `usage_heatmap`, `compliance_metrics`, `anomalies`, `cost_by_team`, `model_comparison` |
 | `client.connections` | `ConnectionsResource` | `list`, `get`, `create`, `create_agent`, `create_mcp`, `update_status`, `delete`, `test`, `health` |
 | `client.compliance` | `ComplianceResource` | `request_report`, `get_status`, `get_json`, `get_pdf`, `wait_for_report`, `generate_and_wait` |
 | `client.memory` | `MemoryResource` | `create`, `list`, `search`, `erase`, `get`, `delete` |
@@ -381,6 +381,25 @@ checkouts of `sdk` (owns the scanner), `be-core` (spec source of truth) and
 jobs.
 
 ## Changelog
+
+### Unreleased — AUD-0063: close the analytics resource coverage gap
+
+- **Added** 11 `AnalyticsResource` methods closing be-core's remaining
+  `/organizations/{org_id}/analytics*` routes: `capture_state`,
+  `agent_analytics`, `events`, `activity_log`, `record_event`,
+  `security_metrics`, `usage_heatmap`, `compliance_metrics`, `anomalies`,
+  `cost_by_team`, `model_comparison`. `AnalyticsResource` previously covered
+  5 of be-core's 15 analytics paths; it now covers all of them. Purely
+  additive — no existing method signature changed.
+- **Added** a swagger.json-derived coverage test
+  (`tests/test_analytics_coverage.py`, mirrored in the TypeScript SDK) that
+  fails on any `/organizations/{org_id}/analytics*` operation this resource
+  does not implement, so a future be-added route is caught here instead of
+  silently missing the SDK.
+- `record_event` is a bare, never-retried POST (not in be-core's
+  `Idempotency-Key` allowlist) and requires `ANALYTICS_CREATE` — no mintable
+  API-key scope exists for it, so it needs a JWT bearer. Every other new
+  method is an idempotent GET, retried per the existing policy.
 
 ### Unreleased — production contract hardening
 
