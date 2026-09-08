@@ -7,14 +7,46 @@ whole family with a single except clause if needed.
 
 from __future__ import annotations
 
+from typing import Any
+
 
 class PraesidiaError(Exception):
-    """Base class for all Praesidia SDK errors."""
+    """Base class for all Praesidia SDK errors.
 
-    def __init__(self, message: str, status_code: int | None = None) -> None:
+    SCAN2-007 -- ``message``/``status_code`` keep their original meaning and
+    format for backwards compatibility: any caller that already reads them
+    keeps working unchanged. ``code``/``request_id``/``details``/
+    ``retry_after``/``retryable`` are new, purely additive, keyword-only
+    attributes read from be's structured error envelope
+    (``be/src/common/filters/http-exception.filter.ts``) when the response
+    body parses as a JSON object; each is ``None``/``False`` when the body
+    doesn't carry that field (or isn't JSON at all -- a caller must not
+    assume they are populated). ``body`` is the full raw parsed envelope (or
+    ``None`` if the response wasn't valid JSON), so a field be adds later is
+    never silently dropped even by an SDK version that predates it.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        *,
+        code: str | None = None,
+        request_id: str | None = None,
+        details: Any = None,
+        retry_after: float | None = None,
+        retryable: bool = False,
+        body: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.message = message
+        self.code = code
+        self.request_id = request_id
+        self.details = details
+        self.retry_after = retry_after
+        self.retryable = retryable
+        self.body = body
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"{self.__class__.__name__}(status_code={self.status_code!r}, message={self.message!r})"
@@ -23,36 +55,36 @@ class PraesidiaError(Exception):
 class AuthError(PraesidiaError):
     """Raised when the API returns HTTP 401 (missing or invalid credentials)."""
 
-    def __init__(self, message: str) -> None:
-        super().__init__(message, status_code=401)
+    def __init__(self, message: str, **envelope_kwargs: Any) -> None:
+        super().__init__(message, status_code=401, **envelope_kwargs)
 
 
 class ForbiddenError(PraesidiaError):
     """Raised when the API returns HTTP 403 (insufficient permissions)."""
 
-    def __init__(self, message: str) -> None:
-        super().__init__(message, status_code=403)
+    def __init__(self, message: str, **envelope_kwargs: Any) -> None:
+        super().__init__(message, status_code=403, **envelope_kwargs)
 
 
 class NotFoundError(PraesidiaError):
     """Raised when the API returns HTTP 404."""
 
-    def __init__(self, message: str) -> None:
-        super().__init__(message, status_code=404)
+    def __init__(self, message: str, **envelope_kwargs: Any) -> None:
+        super().__init__(message, status_code=404, **envelope_kwargs)
 
 
 class RateLimitError(PraesidiaError):
     """Raised when the API returns HTTP 429 (rate limit exceeded)."""
 
-    def __init__(self, message: str) -> None:
-        super().__init__(message, status_code=429)
+    def __init__(self, message: str, **envelope_kwargs: Any) -> None:
+        super().__init__(message, status_code=429, **envelope_kwargs)
 
 
 class ServerError(PraesidiaError):
     """Raised when the API returns an unexpected 5xx response."""
 
-    def __init__(self, message: str, status_code: int) -> None:
-        super().__init__(message, status_code=status_code)
+    def __init__(self, message: str, status_code: int, **envelope_kwargs: Any) -> None:
+        super().__init__(message, status_code=status_code, **envelope_kwargs)
 
 
 class ProtectedActionDeniedError(PraesidiaError):

@@ -7,6 +7,7 @@ future release via httpx.AsyncClient without changing the resource API.
 
 from __future__ import annotations
 
+import json
 import time
 from threading import RLock
 from typing import Any, Callable, Optional, Union
@@ -135,6 +136,23 @@ def _validate_idempotency_key(idempotency_key: str) -> str:
             "whitespace or control characters"
         )
     return idempotency_key
+
+
+def _parse_error_envelope(text: str) -> dict[str, Any] | None:
+    """
+    SCAN2-007 -- best-effort parse of be's structured JSON error envelope
+    (``be/src/common/filters/http-exception.filter.ts``). Returns ``None``
+    for a non-JSON, empty, or non-object body (a plain-text upstream/proxy
+    error, for example) rather than raising -- an unparseable error body
+    must never mask the real HTTP error with a JSON decode error.
+    """
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 class HttpClient:
@@ -434,17 +452,26 @@ class HttpClient:
 
     def _raise_for_status(self, r: httpx.Response) -> None:
         """Map HTTP error codes to typed SDK exceptions."""
+        envelope = _parse_error_envelope(r.text)
+        envelope_kwargs: dict[str, Any] = {
+            "code": envelope.get("code") if envelope else None,
+            "request_id": envelope.get("requestId") if envelope else None,
+            "details": envelope.get("details") if envelope else None,
+            "retry_after": envelope.get("retryAfter") if envelope else None,
+            "retryable": is_retryable_status(r.status_code),
+            "body": envelope,
+        }
         if r.status_code == 401:
-            raise AuthError(r.text)
+            raise AuthError(r.text, **envelope_kwargs)
         if r.status_code == 403:
-            raise ForbiddenError(r.text)
+            raise ForbiddenError(r.text, **envelope_kwargs)
         if r.status_code == 404:
-            raise NotFoundError(r.text)
+            raise NotFoundError(r.text, **envelope_kwargs)
         if r.status_code == 429:
-            raise RateLimitError(r.text)
+            raise RateLimitError(r.text, **envelope_kwargs)
         if r.status_code >= 500:
-            raise ServerError(r.text, r.status_code)
+            raise ServerError(r.text, r.status_code, **envelope_kwargs)
         try:
             r.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            raise PraesidiaError(str(exc), status_code=r.status_code) from exc
+            raise PraesidiaError(str(exc), status_code=r.status_code, **envelope_kwargs) from exc

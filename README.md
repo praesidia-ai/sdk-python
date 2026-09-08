@@ -329,6 +329,29 @@ except RateLimitError:
 `ProtectedActionDeniedError` and `UnsupportedProtectedActionTargetError` (PA01 DX-002) are raised
 only by `client.agents.protect_action` — see [above](#protect-a-dispatch--protect_action-pa01-dx-002).
 
+### be's structured error envelope (SCAN2-007)
+
+Any non-2xx response from the Praesidia API raises one of the typed exceptions above. `.message`/
+`.status_code` keep their original meaning for backwards compatibility, and every exception also
+exposes be's structured error envelope as typed attributes so you don't have to string-match
+`.message`:
+
+```python
+try:
+    client.agents.list()
+except PraesidiaError as err:
+    print(err.status_code)   # HTTP status, e.g. 429
+    print(err.code)          # be's machine error code, e.g. "RATE_LIMITED" (may be None)
+    print(err.request_id)    # for support correlation (may be None)
+    print(err.details)       # validation/field errors, shape varies by route (may be None)
+    print(err.retry_after)   # seconds to wait on a 429/503, if be sent one (may be None)
+    print(err.retryable)     # True for 429/5xx -- whether retrying is worth it at all
+    print(err.body)          # the full raw parsed envelope, or None if the body wasn't JSON
+```
+
+`code`/`request_id`/`details`/`retry_after`/`body` are `None` whenever be's response wasn't a JSON
+object (e.g. an intermediary proxy's plain-text error) — never assume they are populated.
+
 ## Local development
 
 ```bash
