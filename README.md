@@ -62,11 +62,11 @@ with open("eu-ai-act-report.pdf", "wb") as fh:
 
 | Resource | Class | Key methods |
 |----------|-------|-------------|
-| `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `protect_action`, `refresh_credential` |
-| `client.workflows` | `WorkflowsResource` | `list`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `get_run` |
+| `client.agents` | `AgentsResource` | `list`, `list_page`, `list_all`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `protect_action`, `refresh_credential` |
+| `client.workflows` | `WorkflowsResource` | `list`, `list_page`, `list_all`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `list_runs_page`, `list_runs_all`, `get_run` |
 | `client.audit` | `AuditResource` | `list`, `stream`, `export` |
 | `client.analytics` | `AnalyticsResource` | `usage`, `cost_trends`, `agent_performance`, `top_agents`, `export`, `capture_state`, `agent_analytics`, `events`, `activity_log`, `record_event`, `security_metrics`, `usage_heatmap`, `compliance_metrics`, `anomalies`, `cost_by_team`, `model_comparison` |
-| `client.connections` | `ConnectionsResource` | `list`, `get`, `create`, `create_agent`, `create_mcp`, `update_status`, `delete`, `test`, `health` |
+| `client.connections` | `ConnectionsResource` | `list`, `list_page`, `list_all`, `get`, `create`, `create_agent`, `create_mcp`, `update_status`, `delete`, `test`, `health` |
 | `client.compliance` | `ComplianceResource` | `request_report`, `get_status`, `get_json`, `get_pdf`, `wait_for_report`, `generate_and_wait` |
 | `client.memory` | `MemoryResource` | `create`, `list`, `search`, `erase`, `get`, `delete` |
 | `client.telemetry` | `TelemetryResource` | `emit`, `emit_gen_ai_span`, `emit_gen_ai_spans`, `build_gen_ai_resource_spans` |
@@ -306,6 +306,33 @@ only for the three allow-listed routes above (in practice: task
 submission) — or wait for a resource-level `idempotency_key` parameter (not
 yet threaded through every resource method — the transport-level primitive
 is what this release adds).
+
+## Pagination (SCAN2-011)
+
+`client.agents.list`, `client.connections.list`, `client.workflows.list`, and
+`client.workflows.list_runs` return only the requested page as a bare list — their exact prior
+signature, kept for backwards compatibility. There is no way to tell from that list alone whether
+more rows exist beyond the page. Two additive methods exist alongside each for callers who need to
+know:
+
+- **`<method>_page(...)`** — same request, but returns be's full pagination envelope:
+  `{"data": [...], "total": N, "meta": {"page", "limit", "total", "totalPages", "hasNextPage", "hasPrevPage"}}`.
+- **`<method>_all(...)`** — a generator that auto-paginates through every page and yields every
+  row, so "give me all of them" is correct by default:
+
+```python
+# First page only, exactly as before:
+first_page = client.agents.list()
+
+# Full envelope, so you can tell if there's more:
+page = client.agents.list_page()
+if page["meta"]["hasNextPage"]:
+    ...
+
+# Every agent, across every page:
+for agent in client.agents.list_all():
+    print(agent["id"])
+```
 
 ## Error handling
 

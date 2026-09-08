@@ -8,7 +8,7 @@ Covers the ``/organizations/{org_id}/agents`` and
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Iterator
 
 from ._http import (
     AGENT_ID_HEADER,
@@ -19,6 +19,7 @@ from ._http import (
     HttpClient,
     path_segment,
 )
+from ._pagination import normalize_paged_envelope, paginate_all
 from .exceptions import (
     ProtectedActionDeniedError,
     UnsupportedProtectedActionTargetError,
@@ -81,6 +82,12 @@ class AgentsResource:
         """
         Return a paginated list of agents for the organisation.
 
+        SCAN2-011 -- returns only the requested page, exactly as before
+        (backwards compatible); there is no way to tell from this return
+        value alone whether more rows exist beyond this page. Use
+        :meth:`list_page` for the full envelope (``total``/``meta``) or
+        :meth:`list_all` to auto-paginate through every agent.
+
         Args:
             page:  1-based page number (default: 1).
             limit: Maximum results per page (default: 20).
@@ -88,11 +95,20 @@ class AgentsResource:
         Returns:
             A list of agent dicts as returned by the API.
         """
+        return self.list_page(page=page, limit=limit)["data"]
+
+    def list_page(self, page: int = 1, limit: int = 20) -> dict[str, Any]:
+        """Like :meth:`list`, but returns be's full pagination envelope (SCAN2-011)."""
         result = self._http.get(self._base, params={"page": page, "limit": limit})
-        # The API may return a pagination envelope or a plain list.
-        if isinstance(result, list):
-            return result
-        return result.get("data", result.get("agents", []))
+        return normalize_paged_envelope(result, "agents")
+
+    def list_all(self, *, limit: int = 20) -> Iterator[dict[str, Any]]:
+        """
+        Auto-paginate through every agent, across every page (SCAN2-011) --
+        "give me all of them" is correct by default rather than correct only
+        if the caller remembers to page.
+        """
+        yield from paginate_all(lambda page: self.list_page(page=page, limit=limit))
 
     def get(self, agent_id: str) -> dict[str, Any]:
         """

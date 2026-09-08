@@ -7,9 +7,10 @@ Covers the ``/organizations/{org_id}/workflows`` management endpoints.
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Iterator
 
 from ._http import HttpClient, path_segment
+from ._pagination import normalize_paged_envelope, paginate_all
 
 
 class WorkflowsResource:
@@ -31,6 +32,10 @@ class WorkflowsResource:
         """
         Return a paginated list of workflows.
 
+        SCAN2-011 -- returns only the requested page, exactly as before
+        (backwards compatible). Use :meth:`list_page` for the full envelope
+        or :meth:`list_all` to auto-paginate through every workflow.
+
         Args:
             page:  1-based page number (default: 1).
             limit: Maximum results per page (default: 20).
@@ -38,10 +43,16 @@ class WorkflowsResource:
         Returns:
             A list of workflow dicts.
         """
+        return self.list_page(page=page, limit=limit)["data"]
+
+    def list_page(self, page: int = 1, limit: int = 20) -> dict[str, Any]:
+        """Like :meth:`list`, but returns be's full pagination envelope (SCAN2-011)."""
         result = self._http.get(self._base, params={"page": page, "limit": limit})
-        if isinstance(result, list):
-            return result
-        return result.get("data", result.get("workflows", []))
+        return normalize_paged_envelope(result, "workflows")
+
+    def list_all(self, *, limit: int = 20) -> Iterator[dict[str, Any]]:
+        """Auto-paginate through every workflow, across every page (SCAN2-011)."""
+        yield from paginate_all(lambda page: self.list_page(page=page, limit=limit))
 
     def get(self, workflow_id: str) -> dict[str, Any]:
         """
@@ -144,6 +155,10 @@ class WorkflowsResource:
         """
         List execution runs for a workflow.
 
+        SCAN2-011 -- returns only the requested page, exactly as before
+        (backwards compatible). Use :meth:`list_runs_page` for the full
+        envelope or :meth:`list_runs_all` to auto-paginate through every run.
+
         Args:
             workflow_id: UUID of the workflow.
             page:        1-based page number.
@@ -152,13 +167,31 @@ class WorkflowsResource:
         Returns:
             A list of run dicts.
         """
+        return self.list_runs_page(workflow_id, page=page, limit=limit)["data"]
+
+    def list_runs_page(
+        self,
+        workflow_id: str,
+        page: int = 1,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Like :meth:`list_runs`, but returns be's full pagination envelope (SCAN2-011)."""
         result = self._http.get(
             f"{self._base}/{path_segment(workflow_id, 'workflow_id')}/runs",
             params={"page": page, "limit": limit},
         )
-        if isinstance(result, list):
-            return result
-        return result.get("data", result.get("runs", []))
+        return normalize_paged_envelope(result, "runs")
+
+    def list_runs_all(
+        self,
+        workflow_id: str,
+        *,
+        limit: int = 20,
+    ) -> Iterator[dict[str, Any]]:
+        """Auto-paginate through every run of a workflow, across every page (SCAN2-011)."""
+        yield from paginate_all(
+            lambda page: self.list_runs_page(workflow_id, page=page, limit=limit)
+        )
 
     def get_run(self, workflow_id: str, run_id: str) -> dict[str, Any]:
         """

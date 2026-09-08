@@ -6,9 +6,10 @@ Covers the ``/organizations/{org_id}/connections`` management endpoints.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterator
 
 from ._http import HttpClient, path_segment
+from ._pagination import normalize_paged_envelope, paginate_all
 
 
 class ConnectionsResource:
@@ -33,6 +34,10 @@ class ConnectionsResource:
         """
         Return a paginated list of connections for the organisation.
 
+        SCAN2-011 -- returns only the requested page, exactly as before
+        (backwards compatible). Use :meth:`list_page` for the full envelope
+        or :meth:`list_all` to auto-paginate through every connection.
+
         Args:
             page:  1-based page number (default: 1).
             limit: Maximum results per page (default: 20).
@@ -40,10 +45,16 @@ class ConnectionsResource:
         Returns:
             A list of connection dicts.
         """
+        return self.list_page(page=page, limit=limit)["data"]
+
+    def list_page(self, page: int = 1, limit: int = 20) -> dict[str, Any]:
+        """Like :meth:`list`, but returns be's full pagination envelope (SCAN2-011)."""
         result = self._http.get(self._base, params={"page": page, "limit": limit})
-        if isinstance(result, list):
-            return result
-        return result.get("data", result.get("connections", []))
+        return normalize_paged_envelope(result, "connections")
+
+    def list_all(self, *, limit: int = 20) -> Iterator[dict[str, Any]]:
+        """Auto-paginate through every connection, across every page (SCAN2-011)."""
+        yield from paginate_all(lambda page: self.list_page(page=page, limit=limit))
 
     def get(self, connection_id: str) -> dict[str, Any]:
         """
