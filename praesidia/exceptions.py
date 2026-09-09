@@ -100,6 +100,36 @@ class ResponseTooLargeError(PraesidiaError):
         self.limit_bytes = limit_bytes
 
 
+class GuardrailBlockedError(PraesidiaError):
+    """
+    TOP-0008 — raised by ``Guard.guard_input``/``guard_output``/``run`` when
+    content is blocked by one or more guardrails (local rule-based or
+    remote). An input block is raised before the wrapped call runs; in
+    strict mode an output block is raised after the call runs and its
+    failed audit task is persisted, but the blocked output is never
+    returned to the caller. ``fail_open`` affects connectivity failures
+    only, never a content-block decision. Mirrors the TS SDK's
+    ``GuardrailBlockedError`` (``sdk/src/errors.ts``).
+    """
+
+    def __init__(self, triggered: list[dict[str, Any]]) -> None:
+        if len(triggered) == 1:
+            summary = f"{triggered[0]['guardrailName']} ({triggered[0]['severity']})"
+        else:
+            summary = f"{len(triggered)} guardrails"
+        super().__init__(f"Content blocked by {summary}")
+        self.triggered = triggered
+
+
+class PraesidiaConfigError(PraesidiaError):
+    """
+    TOP-0008 — raised when ``Guard`` is used without a valid configuration
+    (missing API key or org id, or missing connection id) and the requested
+    operation requires a connected Praesidia account. Mirrors the TS SDK's
+    ``PraesidiaConfigError`` (``sdk/src/errors.ts``).
+    """
+
+
 class ProtectedActionDeniedError(PraesidiaError):
     """
     PA01 DX-002 — raised by ``AgentsResource.protect_action`` when the

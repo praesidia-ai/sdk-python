@@ -104,6 +104,103 @@ bound in memory.
 | `client.telemetry` | `TelemetryResource` | `emit`, `emit_gen_ai_span`, `emit_gen_ai_spans`, `build_gen_ai_resource_spans` |
 | `client.trust` | `TrustResource` | `fetch_passport`, `fetch_verify_bundle`, `verify_passport`, `fetch_and_verify` |
 
+## Guard — guardrail checks + audit logging, with an offline fallback (TOP-0008)
+
+`Guard` is a batteries-included convenience wrapper — the Python equivalent of `sdk`'s
+(TypeScript) `PraesidiaGuard` — for the common "check input, run my agent, check output, log an
+audit task" loop. It works with **zero configuration**: with no API key it runs bundled
+rule-based guardrail patterns locally, covering prompt injection, PII (SSN / credit-card-shaped
+digit runs), hate speech, and violence/threats, with **zero network calls**.
+
+```python
+from praesidia import Guard
+
+guard = Guard()  # no env vars -> local/offline mode
+result = guard.run(lambda: call_my_llm(prompt), input=prompt)
+print(result["output"])
+```
+
+### Modes
+
+- **Local mode (no account needed)** — when `PRAESIDIA_API_KEY`/`PRAESIDIA_ORG_ID` are not set
+  (or not passed to the constructor), every check runs
+  [`praesidia.local_rules.run_local_rules`](praesidia/local_rules.py) synchronously, with zero API
+  calls. `CheckResult["local"]` is `True`.
+- **Connected mode (free Praesidia account)** — set `PRAESIDIA_API_KEY` + `PRAESIDIA_ORG_ID` (and
+  optionally `PRAESIDIA_AGENT_ID` / `PRAESIDIA_CONNECTION_ID` / `PRAESIDIA_BASE_URL`, or pass them
+  as constructor kwargs) to check content against `POST /organizations/:org_id/guardrails/validate`
+  and persist audit tasks. `PRAESIDIA_CONNECTION_ID` (a `CreateAgentTaskDto`-required UUID) is
+  needed for `run`/`log_task`/`begin_task` to actually persist a task; without one the audit
+  submit is skipped (or raises in `strict` mode) — it never silently 400s.
+
+### `Guard(...)`
+
+```python
+guard = Guard(
+    api_key="pk_...",           # falls back to PRAESIDIA_API_KEY
+    org_id="org-uuid",          # falls back to PRAESIDIA_ORG_ID
+    agent_id="agent-uuid",      # falls back to PRAESIDIA_AGENT_ID
+    connection_id="conn-uuid",  # falls back to PRAESIDIA_CONNECTION_ID; required to persist audit tasks
+    base_url="https://api.praesidia.ai",  # falls back to PRAESIDIA_BASE_URL
+    strict=False,     # True -> re-raise network errors (default: degrade gracefully)
+    fail_open=False,  # True -> silently swallow network errors (default: warn + local fallback)
+)
+```
+
+### `guard.run(fn, *, input, ...)` and `@guard.protect(...)` — the idiomatic decorator form
+
+`run()` is a direct behavioural port of `sdk`'s `guard.run(fn, opts)`: it checks input (raising
+`GuardrailBlockedError` and never calling `fn` on a block), calls `fn()`, checks output, and
+records one best-effort audit task, returning
+`{"output", "taskId", "inputCheck", "outputCheck"}`.
+
+`protect()` is the Python-idiomatic alternative — a **decorator** rather than a callback closure,
+since Python can forward a wrapped function's own arguments where TS's callback shape cannot:
+
+```python
+@guard.protect(task_type="chat")
+def call_llm(prompt: str) -> str:
+    return openai_call(prompt)
+
+reply = call_llm("hello")  # guarded input/output + audited transparently
+```
+
+### `guard.check_input(content, ...)` / `guard.check_output(content, ...)` → `CheckResult` dict
+
+Standalone checks without running a function. `guard_input`/`guard_output` wrap these and raise
+`GuardrailBlockedError` on a block (`guard_output` only by default when `strict=True`, or pass
+`throw_on_block=True`).
+
+### `guard.begin_task(...)` → `TaskHandle` — also a context manager
+
+Direct port of `beginTask`/`TaskHandle.complete`/`.fail` (memoized: the first `complete`/`fail`
+call wins, later calls replay the same outcome without a second write). Idiomatic-Python addition
+over the TS shape: `TaskHandle` doubles as a context manager, so an exception raised inside the
+`with` block calls `fail()` automatically instead of requiring a manual `try`/`except`/`finally`:
+
+```python
+with guard.begin_task(input=prompt, task_type="chat") as task:
+    output = call_my_llm(prompt)
+    task.complete(output)
+# an exception here calls task.fail(exc) once, then re-raises
+```
+
+### `guard.log_task(task)` / `guard.forward_chain(chain_id)`
+
+Manual audit-task logging and chain-trace propagation — same semantics as `sdk`'s
+`guard.logTask`/`guard.forwardChain`.
+
+### Not on `Guard` — use `Praesidia` directly
+
+`Guard` intentionally does **not** re-expose `protect_action` or `refresh_credential`: they
+already have tested homes on `Praesidia.agents.protect_action` (see
+[Protect a dispatch](#protect-a-dispatch--protect_action-pa01-dx-002) below) and
+`Praesidia.refresh_credential` — duplicating them on `Guard` would just be two ways to reach the
+same code with no behavioural difference. This is an intentional, documented surface difference
+from `sdk`'s single `PraesidiaGuard` class, which owns every management primitive on one object.
+`sdk`'s `guard.trackToolCall` (grade-D best-effort tool-call telemetry) has **no Python SDK
+equivalent at all** yet — a pre-existing gap independent of this feature, not addressed here.
+
 ## Inspect protected actions and export signed evidence
 
 Create a **separate review client** with a personal, user-backed `pk_` key
@@ -500,6 +597,22 @@ checkouts of `sdk` (owns the scanner), `be-core` (spec source of truth) and
 jobs.
 
 ## Changelog
+
+### Unreleased — TOP-0008: `Guard` convenience wrapper + offline local-rules guardrail fallback
+
+- **Added** `praesidia.Guard` (`praesidia/guard.py`) and
+  `praesidia.local_rules.run_local_rules` (`praesidia/local_rules.py`), the Python port of `sdk`'s
+  `PraesidiaGuard`/`runLocalRules` (`sdk/src/guard.ts`, `sdk/src/local-rules.ts`). Closes the gap
+  where Python integrators had `protected_http`/`integrations.protected_tool` but no convenience
+  wrapper and no offline guardrail fallback — see [Guard](#guard--guardrail-checks--audit-logging-with-an-offline-fallback-top-0008)
+  above for the full surface, including the Python-idiomatic `@guard.protect(...)` decorator and
+  `TaskHandle` context-manager addition over the TS callback-closure shape.
+- Local-rule patterns are compiled with `re.ASCII` — JS's `\d`/`\w`/`\b` are always ASCII-only
+  regardless of flags, while Python's `re` module defaults to Unicode-aware; without `re.ASCII` a
+  non-ASCII digit run (e.g. Eastern Arabic-Indic digits) would trip the SSN/credit-card patterns
+  in Python but never in the TS SDK. See `tests/test_local_rules.py`'s parity table, verified
+  against a live run of `sdk`'s compiled `runLocalRules`.
+- Purely additive — no existing method signature changed.
 
 ### Unreleased — AUD-0063: close the analytics resource coverage gap
 

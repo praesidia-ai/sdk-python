@@ -43,11 +43,15 @@ from ._jcs_canonical import (
 from ._retry import RetryConfig
 from .agents import tool_call_headers_from_task
 from .client import Praesidia
+from .guard import Guard, TaskHandle
 from .identity import IdentityClient, IdentityError
+from .local_rules import run_local_rules
 from .exceptions import (
     AuthError,
     ForbiddenError,
+    GuardrailBlockedError,
     NotFoundError,
+    PraesidiaConfigError,
     PraesidiaError,
     ProtectedActionDeniedError,
     RateLimitError,
@@ -70,6 +74,12 @@ __all__ = [
     "ResponseTooLargeError",
     "ServerError",
     "tool_call_headers_from_task",
+    # TOP-0008 -- Guard convenience wrapper + offline local-rules guardrail fallback
+    "Guard",
+    "TaskHandle",
+    "GuardrailBlockedError",
+    "PraesidiaConfigError",
+    "run_local_rules",
     # H3-02f — standalone offline trust-passport verification (no account needed)
     "verify_passport",
     "ed25519_verify",
