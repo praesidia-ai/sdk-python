@@ -26,6 +26,8 @@ Quick start::
         print(event)
 """
 
+__version__ = "0.4.1"
+
 from ._crypto import (
     canonical_json,
     ed25519_public_key_from_jwk,
@@ -41,6 +43,7 @@ from ._jcs_canonical import (
 from ._retry import RetryConfig
 from .agents import tool_call_headers_from_task
 from .client import Praesidia
+from .identity import IdentityClient, IdentityError
 from .exceptions import (
     AuthError,
     ForbiddenError,
@@ -48,6 +51,7 @@ from .exceptions import (
     PraesidiaError,
     ProtectedActionDeniedError,
     RateLimitError,
+    ResponseTooLargeError,
     ServerError,
     UnsupportedProtectedActionTargetError,
 )
@@ -55,12 +59,15 @@ from .telemetry import gen_ai_span
 from .trust import verify_passport
 
 __all__ = [
+    "IdentityClient",
+    "IdentityError",
     "Praesidia",
     "PraesidiaError",
     "AuthError",
     "ForbiddenError",
     "NotFoundError",
     "RateLimitError",
+    "ResponseTooLargeError",
     "ServerError",
     "tool_call_headers_from_task",
     # H3-02f — standalone offline trust-passport verification (no account needed)
@@ -83,4 +90,4 @@ __all__ = [
     "JcsCanonicalizationError",
 ]
 
-__version__ = "0.3.1"
+from .protected_http import ProtectedHttpResource, verify_http_receipt, verify_protected_http_result

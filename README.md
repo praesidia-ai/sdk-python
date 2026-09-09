@@ -12,7 +12,33 @@ trust-passport verification via the Praesidia REST API.
 pip install praesidia
 ```
 
+This README describes the current source checkout. A registry release may not
+contain every method shown here. For unreleased features, use the matching
+reviewed wheel supplied by your deployment operator, or build this checkout
+with `python -m build` and install the resulting local `.whl` file.
+A successful local build does not publish a PyPI release.
+
 Requires Python 3.9+ and [`httpx`](https://www.python-httpx.org/) (installed automatically).
+
+## Managed runtime tools (0.4.1 source)
+
+Optional native adapters now cover CrewAI, OpenAI Agents Python, Google ADK,
+Microsoft Agent Framework Python, Agno and LangGraph. A separate local package
+adds a Nous Hermes Agent managed tool and explicit strict-tool profile. Effects
+use the authoritative protected HTTP prepare/checkpoint/resume API; unrelated
+runtime effects are not implicitly intercepted. See [runtime integration profiles,
+versions, restart CLI and evidence boundaries](docs/runtime-integrations.md).
+
+## Organization runtime installations
+
+Create an installation in the app’s **Agent runtimes** setup and complete its
+one-use challenge from the host with a personal or delegated user credential.
+Set `PRAESIDIA_RUNTIME_INSTALLATION_ID`, or pass `runtime_installation_id` to
+`Praesidia`. The SDK commits this ID into protected HTTP checkpoints and durable
+managed-tool state. Conflicting explicit installation IDs fail before HTTP.
+Disabling an installation fences new bound execution; authenticated checkpoint
+readback remains available. Connection state records credential possession at
+verification time, rather than host attestation or unrestricted runtime coverage.
 
 ## Quick start
 
@@ -20,7 +46,7 @@ Requires Python 3.9+ and [`httpx`](https://www.python-httpx.org/) (installed aut
 from praesidia import Praesidia
 
 client = Praesidia(
-    api_key="sk-...",        # from Praesidia dashboard → Settings → API Keys
+    api_key="pk_...",        # personal management key from Profile → API Keys
     org_id="your-org-id",   # organisation UUID
     base_url="https://api.praesidia.ai",  # default; omit for hosted API
     timeout=30.0,             # per-operation request timeout; max 300 seconds
@@ -58,19 +84,77 @@ with open("eu-ai-act-report.pdf", "wb") as fh:
     fh.write(pdf)
 ```
 
+Responses are read through bounded streams: JSON responses are limited to
+16 MiB, error bodies to 64 KiB, and bulk downloads to 128 MiB. A response that
+exceeds its limit raises `ResponseTooLargeError` before it can grow without
+bound in memory.
+
 ## Resources
 
 | Resource | Class | Key methods |
 |----------|-------|-------------|
-| `client.agents` | `AgentsResource` | `list`, `list_page`, `list_all`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `protect_action`, `refresh_credential` |
-| `client.workflows` | `WorkflowsResource` | `list`, `list_page`, `list_all`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `list_runs_page`, `list_runs_all`, `get_run` |
-| `client.audit` | `AuditResource` | `list`, `stream`, `export` |
+| `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `protect_action`, `refresh_credential` |
+| `client.workflows` | `WorkflowsResource` | `list`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `get_run` |
+| `client.audit` | `AuditResource` | `list`, `stream`, `export`, `export_bundle` |
+| `client.proof` | `ProofResource` | `list`, `get`, `events`, `capture_scope`, `coverage_summary` |
 | `client.analytics` | `AnalyticsResource` | `usage`, `cost_trends`, `agent_performance`, `top_agents`, `export`, `capture_state`, `agent_analytics`, `events`, `activity_log`, `record_event`, `security_metrics`, `usage_heatmap`, `compliance_metrics`, `anomalies`, `cost_by_team`, `model_comparison` |
-| `client.connections` | `ConnectionsResource` | `list`, `list_page`, `list_all`, `get`, `create`, `create_agent`, `create_mcp`, `update_status`, `delete`, `test`, `health` |
+| `client.connections` | `ConnectionsResource` | `list`, `get`, `create`, `create_agent`, `create_mcp`, `update_status`, `delete`, `test`, `health` |
 | `client.compliance` | `ComplianceResource` | `request_report`, `get_status`, `get_json`, `get_pdf`, `wait_for_report`, `generate_and_wait` |
 | `client.memory` | `MemoryResource` | `create`, `list`, `search`, `erase`, `get`, `delete` |
 | `client.telemetry` | `TelemetryResource` | `emit`, `emit_gen_ai_span`, `emit_gen_ai_spans`, `build_gen_ai_resource_spans` |
 | `client.trust` | `TrustResource` | `fetch_passport`, `fetch_verify_bundle`, `verify_passport`, `fetch_and_verify` |
+
+## Inspect protected actions and export signed evidence
+
+Create a **separate review client** with a personal, user-backed `pk_` key
+carrying `audit:read`. Protected-action reads require the user's
+`protected_actions.view` permission and the workspace's `proof.actions`
+feature. Organization, service-account, and application keys do not qualify;
+runtime access to a tool does not grant organization-wide evidence access.
+
+```python
+import os
+from pathlib import Path
+from praesidia import Praesidia
+
+review = Praesidia(
+    api_key=os.environ["PRAESIDIA_REVIEW_API_KEY"],
+    org_id=os.environ["PRAESIDIA_ORG_ID"],
+)
+# Use the actionId returned by agents.protect_action(), or proof.list().
+action_id = os.environ["PRAESIDIA_ACTION_ID"]
+action = review.proof.get(action_id)
+events = review.proof.events(action_id)
+print(action["closure"], action["verificationStatus"], len(events))
+scope = review.proof.capture_scope()
+coverage = review.proof.coverage_summary()
+page = review.proof.list(closure="OUTCOME_UNKNOWN", limit=20)
+
+# Also requires owner/compliance-officer role and COMPLIANCE_VIEW permission.
+bundle = review.audit.export_bundle(
+    from_date="2026-09-01T00:00:00Z", to_date="2026-09-02T00:00:00Z",
+)
+Path("audit-bundle.zip").write_bytes(bundle)
+```
+
+`proof.list()` accepts `agent_id`, `task_id`, `chain_id`, `state`, `closure`,
+`from_date`, `to_date`, `page`, and `limit` (1–100), preserving the full
+`data`/`total`/`meta` response. The lower time bound is inclusive and the upper
+bound exclusive. `events()` preserves decimal sequence strings, signatures,
+and redacted `None` payloads without coercing or interpreting them.
+
+`audit.export_bundle()` downloads a signed ZIP; `audit.export()` still exports
+ordinary JSON/CSV logs. Signed windows must be greater than zero and at most
+90 days. Dates are `YYYY-MM-DD` (UTC) or explicit-timezone ISO timestamps with
+up to three fractional-second digits. The existing finite transport timeout
+and 128 MiB download cap apply; oversized downloads raise `ResponseTooLargeError`.
+
+A successful read or download **is not verification**. `SUCCEEDED` describes
+an operational outcome and can coexist with incomplete evidence. The
+projection's `evidenceGrade` is server-declared. Run the obtained offline
+verifier with an independently trusted deployment platform key, inspect all
+component results, and retain evidence gaps. This management API is separate
+from native MCP OAuth, A2A bindings, or standardized SCITT receipts.
 
 ## Agent memory (H2-06e)
 
@@ -112,6 +196,19 @@ client.telemetry.emit_gen_ai_span(
 Bounds mirror the server (≤100 resourceSpans, ≤2 MB body, 120 req/min). Auth is
 an ORGANIZATION API key; the endpoint accepts it as `Authorization: Bearer`
 (what the client sends) or `X-API-Key`.
+
+Generated spans pin OpenTelemetry semantic conventions **1.37.0** and emit
+`gen_ai.provider.name`. Set `traceparent` to a valid W3C parent and use
+`task_id` / `action_id` for correlation. Trace metadata does not authorize an
+action or prove its execution.
+
+Content capture is off by default. `capture_content=True` requires an explicit
+`redact_content` callback; secret attributes remain excluded. Raw `emit` is an
+explicit pass-through API, so apply your exporter privacy policy first.
+Backend ingestion retains only bounded metadata before queueing. Run the real
+collector acceptance from the sibling infra repository with
+`node scripts/verify-telemetry-interoperability.mjs` after building the TypeScript
+SDK and preparing this repository's `.venv`.
 
 ## Authentication (AUDIT-SDK-04)
 
@@ -307,33 +404,6 @@ submission) — or wait for a resource-level `idempotency_key` parameter (not
 yet threaded through every resource method — the transport-level primitive
 is what this release adds).
 
-## Pagination (SCAN2-011)
-
-`client.agents.list`, `client.connections.list`, `client.workflows.list`, and
-`client.workflows.list_runs` return only the requested page as a bare list — their exact prior
-signature, kept for backwards compatibility. There is no way to tell from that list alone whether
-more rows exist beyond the page. Two additive methods exist alongside each for callers who need to
-know:
-
-- **`<method>_page(...)`** — same request, but returns be's full pagination envelope:
-  `{"data": [...], "total": N, "meta": {"page", "limit", "total", "totalPages", "hasNextPage", "hasPrevPage"}}`.
-- **`<method>_all(...)`** — a generator that auto-paginates through every page and yields every
-  row, so "give me all of them" is correct by default:
-
-```python
-# First page only, exactly as before:
-first_page = client.agents.list()
-
-# Full envelope, so you can tell if there's more:
-page = client.agents.list_page()
-if page["meta"]["hasNextPage"]:
-    ...
-
-# Every agent, across every page:
-for agent in client.agents.list_all():
-    print(agent["id"])
-```
-
 ## Error handling
 
 All SDK errors derive from `PraesidiaError`:
@@ -356,28 +426,27 @@ except RateLimitError:
 `ProtectedActionDeniedError` and `UnsupportedProtectedActionTargetError` (PA01 DX-002) are raised
 only by `client.agents.protect_action` — see [above](#protect-a-dispatch--protect_action-pa01-dx-002).
 
-### be's structured error envelope (SCAN2-007)
+## Not covered by this SDK
 
-Any non-2xx response from the Praesidia API raises one of the typed exceptions above. `.message`/
-`.status_code` keep their original meaning for backwards compatibility, and every exception also
-exposes be's structured error envelope as typed attributes so you don't have to string-match
-`.message`:
+The following `be` API surfaces have no client methods here, intentionally — they are
+org-admin / dashboard configuration screens consumed by the Praesidia UI, not primitives an
+agent-runtime caller needs:
 
-```python
-try:
-    client.agents.list()
-except PraesidiaError as err:
-    print(err.status_code)   # HTTP status, e.g. 429
-    print(err.code)          # be's machine error code, e.g. "RATE_LIMITED" (may be None)
-    print(err.request_id)    # for support correlation (may be None)
-    print(err.details)       # validation/field errors, shape varies by route (may be None)
-    print(err.retry_after)   # seconds to wait on a 429/503, if be sent one (may be None)
-    print(err.retryable)     # True for 429/5xx -- whether retrying is worth it at all
-    print(err.body)          # the full raw parsed envelope, or None if the body wasn't JSON
-```
+- **`governance-controls`** (catalog/create/patch/review/runs) — the governance-policy admin
+  catalog.
+- **`mcp-servers/inventory`** (list/refresh/review/dependencies) — the MCP tool-inventory review
+  surface.
+- **`runtime-installations`** management (create/patch/challenge/disable/list/verify) — only the
+  opaque, already-provisioned `runtime_installation_id` is accepted (see
+  [Organization runtime installations](#organization-runtime-installations) above); creating and
+  verifying an installation is done once, in the app.
+- **`identity`** provider/binding/consent/grant/revocation CRUD — only `IdentityClient`'s
+  `exchange` / `down_exchange` / `introspect` (token-exchange and introspection) are covered.
+- **`agents/oauth/browser`** admin endpoints (authorize/approve/deny/browser-client CRUD) — only
+  the token-exchange side effect is consumed, via `identity` above.
 
-`code`/`request_id`/`details`/`retry_after`/`body` are `None` whenever be's response wasn't a JSON
-object (e.g. an intermediary proxy's plain-text error) — never assume they are populated.
+This matches `sdk`'s (TypeScript) coverage exactly (no TS↔Python gap). If any of these should
+become SDK-callable, treat it as a new feature request, not a bug in this list.
 
 ## Local development
 
@@ -494,6 +563,26 @@ jobs.
 - **Added** `jcs_canonicalize`/`jcs_commitment`/`JcsCanonicalizationError` (RFC 8785 JCS) —
   byte-compared against the shared `sdk`/`be`/`audit-verifier` golden fixtures.
 
+### 0.4.1 — organization runtime installation binding (unpublished)
+
+Adds explicit `runtime_installation_id` and `PRAESIDIA_RUNTIME_INSTALLATION_ID`
+binding to protected HTTP checkpoints and managed-tool durable state. Conflicting
+installation IDs fail before network access. The backend can now disable future
+bound execution while preserving authenticated checkpoint readback.
+
+### 0.4.0 — managed protected runtime tools (unpublished)
+
+- Added reusable exact-request managed tools and six optional native framework
+  adapters; native state is a recovery cursor, never approval authority.
+- Added a separately installable Hermes plugin with native durable state,
+  session/call binding and explicit default blocking of unrelated tools.
+- Preserved pending/denied/expired/partial/unknown distinctions and once-only
+  resume handling; no native effect callable or approval Boolean is accepted.
+- Added actual framework tool, native approval serialization, and separate
+  process restart tests plus a CLI for full-backend acceptance without model keys.
+- Base dependencies and Python 3.9+ management compatibility remain unchanged;
+  exact supported optional runtime versions are documented separately.
+
 ### 0.3.1 — R-SDK-1: allow-list the routes `idempotency_key` may retry
 
 - **Fixed** `idempotency_key` retry is now allow-listed to the routes
@@ -553,3 +642,9 @@ jobs.
 SDK version tracks the Praesidia API version; a minor bump before 1.0 may also
 carry an SDK-level breaking change (see the Changelog above). See `CHANGELOG.md`
 in the repo root.
+
+### Durable protected HTTP execution
+
+`client.protected_http` exposes `prepare`, `checkpoint`, `resume`, `revoke` and `acknowledge`. Install `praesidia[langgraph]` on Python 3.10+ to use `praesidia.integrations.langgraph.protected_http_graph` with a durable checkpointer. The wake-up value never substitutes for a distinct human approval in Praesidia.
+
+See `examples/protected_http_langgraph.py` for separate-process preparation and resume against a real backend, including independent target receipt verification and caller acknowledgment. The versioned wire contract is documented in the [TypeScript SDK protected HTTP guide](https://github.com/praesidia-ai/sdk/blob/main/docs/protected-http.md). Unknown outcomes must be inspected through checkpoint readback; resume is never transparently retried.

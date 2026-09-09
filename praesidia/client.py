@@ -27,6 +27,8 @@ from .audit import AuditResource
 from .compliance import ComplianceResource
 from .connections import ConnectionsResource
 from .memory import MemoryResource
+from .proof import ProofResource
+from .protected_http import ProtectedHttpResource
 from .telemetry import TelemetryResource
 from .trust import TrustResource
 from .workflows import WorkflowsResource
@@ -64,6 +66,7 @@ class Praesidia:
         connections: :class:`~praesidia.connections.ConnectionsResource`
         compliance:  :class:`~praesidia.compliance.ComplianceResource`
         memory:      :class:`~praesidia.memory.MemoryResource`
+        proof:       :class:`~praesidia.proof.ProofResource`
         telemetry:   :class:`~praesidia.telemetry.TelemetryResource`
         trust:       :class:`~praesidia.trust.TrustResource`
 
@@ -96,6 +99,7 @@ class Praesidia:
         base_url: str = _DEFAULT_BASE_URL,
         timeout: float = 30.0,
         retry: Union[RetryConfig, bool, None] = None,
+        runtime_installation_id: str | None = None,
     ) -> None:
         self._http = HttpClient(
             api_key=api_key,
@@ -111,6 +115,8 @@ class Praesidia:
         self.connections = ConnectionsResource(self._http)
         self.compliance = ComplianceResource(self._http)
         self.memory = MemoryResource(self._http)
+        self.proof = ProofResource(self._http)
+        self.protected_http = ProtectedHttpResource(self._http, runtime_installation_id)
         self.telemetry = TelemetryResource(self._http)
         self.trust = TrustResource(self._http)
 

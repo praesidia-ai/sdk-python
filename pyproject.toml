@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "praesidia"
-version = "0.3.1"
+version = "0.4.1"
 description = "Python management SDK for the Praesidia AI agent platform"
 readme = "README.md"
 license = { text = "MIT" }
@@ -15,6 +15,21 @@ requires-python = ">=3.9"
 dependencies = ["httpx>=0.27.0,<1"]
 
 [project.optional-dependencies]
+langgraph = ["langgraph>=1.0,<2; python_version >= '3.10'", "langgraph-checkpoint-sqlite>=3,<4; python_version >= '3.10'"]
+crewai = ["crewai==1.15.20; python_version >= '3.10' and python_version < '3.14'"]
+openai-agents = ["openai-agents==0.20.0; python_version >= '3.10'"]
+google-adk = ["google-adk==2.8.0; python_version >= '3.10'"]
+microsoft-agent-framework = ["agent-framework-core==1.17.0; python_version >= '3.10'"]
+agno = ["agno==3.0.6; python_version >= '3.10'"]
+frameworks = [
+    "crewai==1.15.20; python_version >= '3.10' and python_version < '3.14'",
+    "openai-agents==0.20.0; python_version >= '3.10'",
+    "google-adk==2.8.0; python_version >= '3.10'",
+    "agent-framework-core==1.17.0; python_version >= '3.10'",
+    "agno==3.0.6; python_version >= '3.10'",
+    "langgraph==1.2.11; python_version >= '3.10'",
+    "langgraph-checkpoint-sqlite==3.1.1; python_version >= '3.10'",
+]
 dev = [
     "coverage>=7.6.0,<8",
     "pytest>=8.0.0",
@@ -31,8 +46,14 @@ Repository = "https://github.com/praesidia-ai/sdk-python"
 [tool.hatch.build.targets.wheel]
 packages = ["praesidia"]
 
+[tool.hatch.build.targets.sdist]
+# In an isolated Git worktree, .git is a metadata file rather than a directory.
+# Never ship checkout paths or Git metadata in a source distribution.
+exclude = ["/.git", "/.git/**"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["framework: actual optional runtime tool invocation (requires the relevant framework extra)"]
 
 [tool.coverage.run]
 branch = true

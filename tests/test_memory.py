@@ -64,6 +64,7 @@ def test_create_uses_exact_backend_memory_enums():
         "retained",
         memory_key="namespace-1",
         source_type="IMPORT",
+        access_source_id="00000000-0000-4000-8000-000000000002",
         source_agent_id="00000000-0000-4000-8000-000000000001",
         source_reference="import-job-1",
         retention_regime="CUSTOM",
@@ -74,6 +75,7 @@ def test_create_uses_exact_backend_memory_enums():
         "content": "retained",
         "memoryKey": "namespace-1",
         "sourceType": "IMPORT",
+        "accessSourceId": "00000000-0000-4000-8000-000000000002",
         "sourceAgentId": "00000000-0000-4000-8000-000000000001",
         "sourceReference": "import-job-1",
         "retentionRegime": "CUSTOM",
@@ -192,3 +194,15 @@ def test_get_and_delete():
     assert client.memory.get("mem-1")["id"] == "mem-1"
     assert client.memory.delete("mem-1") is None
     assert delete_route.called
+
+
+@respx.mock
+def test_source_authority_contract_and_revision_conflict():
+    sources = f"{BASE_URL}/organizations/{ORG_ID}/memory-sources"
+    route = respx.post(sources + "/synchronize").mock(return_value=httpx.Response(201, json={"id": "source-1", "revision": 5}))
+    respx.get(sources).mock(return_value=httpx.Response(200, json=[{"id": "source-1"}]))
+    client = _client()
+    result = client.memory.synchronize_source(source_reference="doc/1", content_version="v2", authority_url="https://authority.example.test/check", authority_public_key="public-key", allowed_user_ids=["reader-id"], valid_until="2026-09-05T12:10:00Z", expected_revision=4, state="active")
+    assert result == {"id": "source-1", "revision": 5}
+    assert json.loads(route.calls.last.request.content) == {"sourceReference": "doc/1", "contentVersion": "v2", "authorityUrl": "https://authority.example.test/check", "authorityPublicKey": "public-key", "allowedUserIds": ["reader-id"], "validUntil": "2026-09-05T12:10:00Z", "expectedRevision": 4, "state": "active"}
+    assert client.memory.list_sources() == [{"id": "source-1"}]

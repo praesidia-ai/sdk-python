@@ -12,14 +12,18 @@ ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY praesidia ./praesidia
 COPY tests ./tests
-# Install with dev extras, run the import smoke + full pytest suite, then build
+COPY test-fixtures ./test-fixtures
+COPY examples ./examples
+COPY .github/workflows/publish.yml ./.github/workflows/publish.yml
+# Install with dev extras, run import + base SDK compatibility tests, then build
 # the exact runtime wheelhouse. The final stage consumes /wheels, which makes
 # this gate load-bearing (an unreferenced test stage is pruned by BuildKit).
+# Required CI frameworks job separately enforces full-source 90% coverage on
+# Python3.11, where the pinned native runtimes are supported and installed.
 RUN pip install "uv==0.5.24" \
- && uv sync --frozen --extra dev \
+ && uv sync --frozen --extra dev --extra langgraph \
  && .venv/bin/python -c "from praesidia import Praesidia; print('SDK import OK')" \
- && .venv/bin/coverage run -m pytest -q \
- && .venv/bin/coverage report \
+ && .venv/bin/python -m pytest -q \
  && uv export --frozen --no-dev --no-emit-project --format requirements-txt --no-hashes --output-file /tmp/runtime-requirements.txt \
  && pip wheel --wheel-dir /wheels -r /tmp/runtime-requirements.txt \
  && uv build --wheel --out-dir /wheels

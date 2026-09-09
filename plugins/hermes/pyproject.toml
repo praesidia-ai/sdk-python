@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "praesidia-hermes"
+version = "0.1.1"
+description = "Hermes managed protected HTTP tool and explicit tool boundary"
+requires-python = ">=3.11"
+dependencies = ["praesidia==0.4.1"]
+readme = "README.md"
+license = {file = "LICENSE"}
+
+[project.entry-points."hermes_agent.plugins"]
+praesidia = "praesidia_hermes"
+
+[tool.hatch.build.targets.wheel]
+packages = ["praesidia_hermes"]

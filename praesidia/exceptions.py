@@ -87,6 +87,19 @@ class ServerError(PraesidiaError):
         super().__init__(message, status_code=status_code, **envelope_kwargs)
 
 
+class ResponseTooLargeError(PraesidiaError):
+    """Raised before an upstream response can exceed the SDK's memory cap."""
+
+    def __init__(self, path: str, limit_bytes: int, status_code: int) -> None:
+        super().__init__(
+            f"Praesidia response body for {path} exceeds the "
+            f"{limit_bytes}-byte limit",
+            status_code=status_code,
+        )
+        self.path = path
+        self.limit_bytes = limit_bytes
+
+
 class ProtectedActionDeniedError(PraesidiaError):
     """
     PA01 DX-002 — raised by ``AgentsResource.protect_action`` when the

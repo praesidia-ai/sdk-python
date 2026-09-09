@@ -7,11 +7,19 @@ server fails fast instead of hanging the client forever.
 
 from __future__ import annotations
 
+import gzip
+
 import httpx
 import pytest
 
-from praesidia import Praesidia
-from praesidia._http import HttpClient, _DOWNLOAD_TIMEOUT, path_segment
+from praesidia import Praesidia, ResponseTooLargeError
+from praesidia._http import (
+    HttpClient,
+    _DOWNLOAD_TIMEOUT,
+    _MAX_ERROR_RESPONSE_BYTES,
+    _MAX_JSON_RESPONSE_BYTES,
+    path_segment,
+)
 from praesidia.exceptions import (
     AuthError,
     ForbiddenError,
@@ -20,6 +28,16 @@ from praesidia.exceptions import (
     RateLimitError,
     ServerError,
 )
+
+
+def _patch_bounded_request(monkeypatch, method, fake_request):
+    def bounded(_self, actual_method, url, **kwargs):
+        assert actual_method == method
+        kwargs.pop("path")
+        kwargs.pop("success_limit")
+        return fake_request(url, **kwargs)
+
+    monkeypatch.setattr(HttpClient, "_request_bounded", bounded)
 
 
 def test_download_timeout_is_finite_on_every_phase():
@@ -39,7 +57,7 @@ def test_stream_get_passes_finite_timeout(monkeypatch):
         captured.update(kwargs)
         return httpx.Response(200, content=b"ok")
 
-    monkeypatch.setattr("praesidia._http.httpx.get", fake_get)
+    _patch_bounded_request(monkeypatch, "GET", fake_get)
     client = HttpClient(api_key="k", org_id="o", base_url="http://test.local")
     client.stream_get("/reports/rep-1/pdf")
 
@@ -55,7 +73,7 @@ def test_stream_get_respects_explicit_timeout_override(monkeypatch):
         captured.update(kwargs)
         return httpx.Response(200, content=b"ok")
 
-    monkeypatch.setattr("praesidia._http.httpx.get", fake_get)
+    _patch_bounded_request(monkeypatch, "GET", fake_get)
     client = HttpClient(api_key="k", org_id="o", base_url="http://test.local")
     override = httpx.Timeout(5.0)
     client.stream_get("/x", timeout=override)
@@ -110,12 +128,126 @@ def test_general_requests_use_configured_timeout(monkeypatch):
         captured.update(kwargs)
         return httpx.Response(200, json={}, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr("praesidia._http.httpx.get", fake_get)
+    _patch_bounded_request(monkeypatch, "GET", fake_get)
     client = HttpClient(
         api_key="k", org_id="o", base_url="http://test.local", timeout=7.5
     )
     client.get("/health")
     assert captured["timeout"] == 7.5
+
+
+def test_bounded_request_rejects_declared_body_before_reading(monkeypatch):
+    response = httpx.Response(
+        200,
+        headers={"Content-Length": str(_MAX_JSON_RESPONSE_BYTES + 1)},
+        stream=httpx.ByteStream(b"{}"),
+        request=httpx.Request("GET", "https://api.test/large"),
+    )
+
+    class StreamContext:
+        def __enter__(self):
+            return response
+
+        def __exit__(self, *_args):
+            response.close()
+
+    monkeypatch.setattr(httpx, "stream", lambda *_args, **_kwargs: StreamContext())
+    client = HttpClient(api_key="k", org_id="o", base_url="https://api.test")
+
+    with pytest.raises(ResponseTooLargeError, match="16777216-byte limit") as exc:
+        client.get("/large")
+
+    assert exc.value.status_code == 200
+    assert exc.value.path == "/large"
+
+
+def test_bounded_request_counts_streamed_bytes_without_content_length(monkeypatch):
+    class ChunkStream(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b"123"
+            yield b"45"
+
+    response = httpx.Response(
+        200,
+        stream=ChunkStream(),
+        request=httpx.Request("GET", "https://api.test/stream"),
+    )
+
+    class StreamContext:
+        def __enter__(self):
+            return response
+
+        def __exit__(self, *_args):
+            response.close()
+
+    monkeypatch.setattr(httpx, "stream", lambda *_args, **_kwargs: StreamContext())
+    client = HttpClient(api_key="k", org_id="o", base_url="https://api.test")
+
+    with pytest.raises(ResponseTooLargeError, match="4-byte limit"):
+        client._request_bounded(
+            "GET",
+            "https://api.test/stream",
+            path="/stream",
+            success_limit=4,
+        )
+
+
+def test_error_response_uses_smaller_body_limit(monkeypatch):
+    response = httpx.Response(
+        502,
+        headers={"Content-Length": str(_MAX_ERROR_RESPONSE_BYTES + 1)},
+        stream=httpx.ByteStream(b"failure"),
+        request=httpx.Request("GET", "https://api.test/failure"),
+    )
+
+    class StreamContext:
+        def __enter__(self):
+            return response
+
+        def __exit__(self, *_args):
+            response.close()
+
+    monkeypatch.setattr(httpx, "stream", lambda *_args, **_kwargs: StreamContext())
+    client = HttpClient(api_key="k", org_id="o", base_url="https://api.test")
+
+    with pytest.raises(ResponseTooLargeError, match="65536-byte limit") as exc:
+        client.get("/failure")
+
+    assert exc.value.status_code == 502
+
+
+def test_bounded_request_normalizes_headers_after_stream_decompression(monkeypatch):
+    compressed = gzip.compress(b'{"ok":true}')
+    response = httpx.Response(
+        200,
+        headers={
+            "Content-Encoding": "gzip",
+            "Content-Length": str(len(compressed)),
+        },
+        stream=httpx.ByteStream(compressed),
+        request=httpx.Request("GET", "https://api.test/compressed"),
+    )
+
+    class StreamContext:
+        def __enter__(self):
+            return response
+
+        def __exit__(self, *_args):
+            response.close()
+
+    monkeypatch.setattr(httpx, "stream", lambda *_args, **_kwargs: StreamContext())
+    client = HttpClient(api_key="k", org_id="o", base_url="https://api.test")
+
+    result = client._request_bounded(
+        "GET",
+        "https://api.test/compressed",
+        path="/compressed",
+        success_limit=1024,
+    )
+
+    assert result.json() == {"ok": True}
+    assert "content-encoding" not in result.headers
+    assert result.headers["content-length"] == str(len(result.content))
 
 
 def test_path_segments_are_encoded_and_unsafe_values_rejected():
@@ -128,7 +260,7 @@ def test_path_segments_are_encoded_and_unsafe_values_rejected():
 def test_public_client_exposes_matching_package_version():
     import praesidia
 
-    assert praesidia.__version__ == "0.3.1"
+    assert praesidia.__version__ == "0.4.1"
     assert Praesidia(api_key="k", org_id="o")._http._timeout == 30.0
 
 

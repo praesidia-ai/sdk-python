@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from importlib.metadata import version
 
 import httpx
 import pytest
@@ -141,6 +142,12 @@ def test_build_resource_spans_without_service_name_omits_resource_identity():
     span = gen_ai_span("bot")
     result = _client().telemetry.build_gen_ai_resource_spans([span])
     assert "resource" not in result[0]
+
+
+def test_otlp_scope_uses_published_sdk_version():
+    span = gen_ai_span("bot")
+    result = _client().telemetry.build_gen_ai_resource_spans([span])
+    assert result[0]["scopeSpans"][0]["scope"]["version"] == version("praesidia")
 
 
 def test_telemetry_service_name_matches_backend_identity_bounds():

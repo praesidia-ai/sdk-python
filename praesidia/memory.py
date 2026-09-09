@@ -39,6 +39,27 @@ class MemoryResource:
         self._http = http
         self._base = f"/organizations/{http.org_id}/memories"
 
+    def synchronize_source(self, *, source_reference: str, content_version: str,
+                           allowed_user_ids: list[str], valid_until: str,
+                           authority_url: str, authority_public_key: str,
+                           state: str, expected_revision: int) -> dict[str, Any]:
+        """Synchronize a connector-owned document ACL, version or revocation.
+
+        Lease validity must come from a current upstream authorization check and
+        cannot exceed 15 minutes. A deleted source is terminal.
+        """
+        return self._http.post(
+            f"/organizations/{self._http.org_id}/memory-sources/synchronize",
+            json={"sourceReference": source_reference, "contentVersion": content_version,
+                  "authorityUrl": authority_url, "authorityPublicKey": authority_public_key,
+                  "allowedUserIds": allowed_user_ids, "validUntil": valid_until,
+                  "state": state, "expectedRevision": expected_revision},
+        )
+
+    def list_sources(self) -> list[dict[str, Any]]:
+        """Return the latest 100 source authorizations owned by this connector user."""
+        return self._http.get(self._base.removesuffix("memories") + "memory-sources")
+
     def create(
         self,
         content: str,
@@ -49,6 +70,7 @@ class MemoryResource:
         source_type: Optional[str] = None,
         source_agent_id: Optional[str] = None,
         source_reference: Optional[str] = None,
+        access_source_id: Optional[str] = None,
         retention_regime: Optional[str] = None,
         retention_days: Optional[int] = None,
     ) -> dict[str, Any]:
@@ -80,6 +102,8 @@ class MemoryResource:
             raise ValueError(
                 "content must be a non-empty string of at most 32768 characters"
             )
+        if source_type == "IMPORT" and not access_source_id:
+            raise ValueError("Imported memory requires access_source_id")
         if source_type is not None and source_type not in self.SOURCE_TYPES:
             raise ValueError(
                 f"source_type must be one of {self.SOURCE_TYPES}; got {source_type!r}"
@@ -118,6 +142,8 @@ class MemoryResource:
             payload["sourceType"] = source_type
         if source_agent_id is not None:
             payload["sourceAgentId"] = source_agent_id
+        if access_source_id is not None:
+            payload["accessSourceId"] = access_source_id
         if source_reference is not None:
             payload["sourceReference"] = source_reference
         if retention_regime is not None:
@@ -142,6 +168,8 @@ class MemoryResource:
         Returns:
             A list of memory dicts (unwrapped from the pagination envelope).
         """
+        if source_type == "IMPORT" and not access_source_id:
+            raise ValueError("Imported memory requires access_source_id")
         if source_type is not None and source_type not in self.SOURCE_TYPES:
             raise ValueError(
                 f"source_type must be one of {self.SOURCE_TYPES}; got {source_type!r}"

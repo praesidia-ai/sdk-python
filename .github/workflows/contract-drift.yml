@@ -84,23 +84,6 @@ jobs:
         working-directory: be-core
         run: npm ci
 
-      # Boot-only OpenAPI emit needs every SQS queue's URL env var satisfied
-      # (sqsConfig's fail-loud `routedButNoUrl` guard) — mirrors be-core's own
-      # contract-drift.yml step verbatim, see mcp's/sdk's identical step.
-      - name: 🌱 Seed SQS queue URLs (default=sqs boot guard)
-        working-directory: be-core
-        run: |
-          for n in agent-tasks agent-tasks-dlq workflow-continuation \
-            workflow-continuation-dlq workflow-generation workflow-schedule \
-            budget-actions team-quotas webhooks siem webhooks-dlq siem-dlq \
-            audit-anchor slack-notifications agent-deploy \
-            lifecycle-hook-processor eval-runs discovery-ingest auditor-report \
-            executive-report executive-report-dlq redteam-runs intent-model-eval \
-            telemetry-ingest; do
-            var="SQS_QUEUE_URL_$(echo "$n" | tr 'a-z-' 'A-Z_')"
-            echo "${var}=http://localhost:9324/000000000000/${n}" >> "$GITHUB_ENV"
-          done
-
       - name: Export current OpenAPI from be-core
         working-directory: be-core
         env:

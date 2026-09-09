@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from praesidia._http import HttpClient
+from praesidia.exceptions import NotFoundError
 from praesidia._retry import (
     DEFAULT_RETRY_CONFIG,
     RetryConfig,
@@ -23,6 +24,18 @@ from praesidia._retry import (
 
 # Small, fast policy so specs run instantly and deterministically.
 FAST_RETRY = RetryConfig(max_attempts=3, base_delay_s=0.001, max_delay_s=0.002, max_elapsed_s=5.0)
+
+
+def _patch_bounded_request(monkeypatch, method, fake_request):
+    """Route transport-focused tests through the new bounded request seam."""
+
+    def bounded(_self, actual_method, url, **kwargs):
+        assert actual_method == method
+        kwargs.pop("path")
+        kwargs.pop("success_limit")
+        return fake_request(url, **kwargs)
+
+    monkeypatch.setattr(HttpClient, "_request_bounded", bounded)
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +142,7 @@ def test_get_retries_on_503_then_succeeds(monkeypatch):
             return httpx.Response(503, request=httpx.Request("GET", url))
         return httpx.Response(200, json={"ok": True}, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr("praesidia._http.httpx.get", fake_get)
+    _patch_bounded_request(monkeypatch, "GET", fake_get)
     client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
     assert client.get("/health") == {"ok": True}
     assert calls["n"] == 2
@@ -146,7 +159,7 @@ def test_get_honours_retry_after_on_429(monkeypatch):
             )
         return httpx.Response(200, json={"ok": True}, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr("praesidia._http.httpx.get", fake_get)
+    _patch_bounded_request(monkeypatch, "GET", fake_get)
     client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
     assert client.get("/health") == {"ok": True}
     assert calls["n"] == 2
@@ -161,10 +174,42 @@ def test_delete_retries_on_transient_500(monkeypatch):
             return httpx.Response(500, request=httpx.Request("DELETE", url))
         return httpx.Response(204, request=httpx.Request("DELETE", url))
 
-    monkeypatch.setattr("praesidia._http.httpx.delete", fake_delete)
+    _patch_bounded_request(monkeypatch, "DELETE", fake_delete)
     client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
     client.delete("/resource/1")
     assert calls["n"] == 2
+
+
+def test_delete_retry_404_means_first_ambiguous_attempt_committed(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_delete(url, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectError(
+                "connection reset after commit", request=httpx.Request("DELETE", url)
+            )
+        return httpx.Response(404, request=httpx.Request("DELETE", url))
+
+    _patch_bounded_request(monkeypatch, "DELETE", fake_delete)
+    client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
+    assert client.delete("/resource/1") is None
+    assert calls["n"] == 2
+
+
+def test_delete_initial_404_remains_not_found(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_delete(url, **kwargs):
+        calls["n"] += 1
+        return httpx.Response(404, request=httpx.Request("DELETE", url))
+
+    _patch_bounded_request(monkeypatch, "DELETE", fake_delete)
+    client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
+    with pytest.raises(NotFoundError) as exc:
+        client.delete("/resource/typo")
+    assert exc.value.status_code == 404
+    assert calls["n"] == 1
 
 
 def test_bare_post_is_never_retried(monkeypatch):
@@ -174,7 +219,7 @@ def test_bare_post_is_never_retried(monkeypatch):
         calls["n"] += 1
         return httpx.Response(503, request=httpx.Request("POST", url))
 
-    monkeypatch.setattr("praesidia._http.httpx.post", fake_post)
+    _patch_bounded_request(monkeypatch, "POST", fake_post)
     client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
     with pytest.raises(Exception):
         client.post("/tasks", json={"input": {}})
@@ -194,7 +239,7 @@ def test_post_with_idempotency_key_is_retried_and_sends_header(monkeypatch):
             201, json={"created": True}, request=httpx.Request("POST", url)
         )
 
-    monkeypatch.setattr("praesidia._http.httpx.post", fake_post)
+    _patch_bounded_request(monkeypatch, "POST", fake_post)
     client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
     result = client.post(
         "/organizations/o/tasks", json={"input": {}}, idempotency_key="idem-123"
@@ -214,7 +259,7 @@ def test_idempotency_key_rejected_on_a_route_be_core_does_not_dedup(monkeypatch)
         calls["n"] += 1
         return httpx.Response(201, json={"id": "x"}, request=httpx.Request("POST", url))
 
-    monkeypatch.setattr("praesidia._http.httpx.post", fake_post)
+    _patch_bounded_request(monkeypatch, "POST", fake_post)
     client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
     with pytest.raises(ValueError, match="does not honour Idempotency-Key"):
         client.post("/organizations/o/agents", json={"name": "a"}, idempotency_key="idem-123")
@@ -238,7 +283,7 @@ def test_unsafe_idempotency_key_is_rejected_before_network(monkeypatch, key):
         calls["n"] += 1
         return httpx.Response(201, json={}, request=httpx.Request("POST", url))
 
-    monkeypatch.setattr("praesidia._http.httpx.post", fake_post)
+    _patch_bounded_request(monkeypatch, "POST", fake_post)
     client = HttpClient(
         api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY
     )
@@ -251,7 +296,7 @@ def test_idempotency_key_allowed_on_a2a_inbound_routes(monkeypatch):
     def fake_post(url, **kwargs):
         return httpx.Response(201, json={"ok": True}, request=httpx.Request("POST", url))
 
-    monkeypatch.setattr("praesidia._http.httpx.post", fake_post)
+    _patch_bounded_request(monkeypatch, "POST", fake_post)
     client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
     assert client.post("/a2a/tasks", json={}, idempotency_key="k") == {"ok": True}
     assert client.post(
@@ -266,7 +311,7 @@ def test_gives_up_after_max_attempts(monkeypatch):
         calls["n"] += 1
         return httpx.Response(503, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr("praesidia._http.httpx.get", fake_get)
+    _patch_bounded_request(monkeypatch, "GET", fake_get)
     client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
     with pytest.raises(Exception):
         client.get("/health")
@@ -280,7 +325,7 @@ def test_retry_false_disables_retries(monkeypatch):
         calls["n"] += 1
         return httpx.Response(503, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr("praesidia._http.httpx.get", fake_get)
+    _patch_bounded_request(monkeypatch, "GET", fake_get)
     client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=False)
     with pytest.raises(Exception):
         client.get("/health")
@@ -296,7 +341,7 @@ def test_network_level_failure_is_retried(monkeypatch):
             raise httpx.ConnectError("connection reset", request=httpx.Request("GET", url))
         return httpx.Response(200, json={"ok": True}, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr("praesidia._http.httpx.get", fake_get)
+    _patch_bounded_request(monkeypatch, "GET", fake_get)
     client = HttpClient(api_key="k", org_id="o", base_url="http://test.local", retry=FAST_RETRY)
     assert client.get("/health") == {"ok": True}
     assert calls["n"] == 2

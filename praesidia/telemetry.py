@@ -23,9 +23,11 @@ route and on every ``OrAuthGuard`` route too.
 from __future__ import annotations
 
 import os
+import re
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
+from . import __version__
 from ._http import HttpClient
 
 #: Top-level OTLP/HTTP GenAI trace ingest endpoint.
@@ -38,7 +40,10 @@ OTLP_MAX_BODY_BYTES = 2 * 1024 * 1024
 
 #: OpenTelemetry GenAI semantic-convention attribute keys the be-core receiver
 #: reads (kept in lock-step so a span materialises into an OBSERVED agent).
+GENAI_SEMCONV_VERSION = "1.37.0"
+
 _GENAI = {
+    "provider_name": "gen_ai.provider.name",
     "system": "gen_ai.system",
     "request_model": "gen_ai.request.model",
     "response_model": "gen_ai.response.model",
@@ -50,7 +55,7 @@ _GENAI = {
 }
 _SERVICE_NAME_ATTR = "service.name"
 _SPAN_KIND_CLIENT = 3  # SPAN_KIND_CLIENT — a GenAI inference call is a client span
-_SDK_SCOPE_VERSION = "0.1.0"
+_SDK_SCOPE_VERSION = __version__
 _MAX_AGENT_IDENTITY_LENGTH = 255
 _MAX_ATTRIBUTE_VALUE_LENGTH = 512
 
@@ -104,6 +109,11 @@ def gen_ai_span(
     name: Optional[str] = None,
     duration_ms: int = 0,
     extra_attributes: Optional[list[dict[str, Any]]] = None,
+    traceparent: Optional[str] = None,
+    task_id: Optional[str] = None,
+    action_id: Optional[str] = None,
+    capture_content: bool = False,
+    redact_content: Optional[Callable[[str], str]] = None,
 ) -> dict[str, Any]:
     """
     Synthesize ONE OTLP GenAI-convention span from simple inputs. Attribute keys
@@ -145,6 +155,7 @@ def gen_ai_span(
     if agent_id is not None:
         attributes.append(_str_attr(_GENAI["agent_id"], agent_id))
     if system is not None:
+        attributes.append(_str_attr(_GENAI["provider_name"], system))
         attributes.append(_str_attr(_GENAI["system"], system))
     if request_model is not None:
         attributes.append(_str_attr(_GENAI["request_model"], request_model))
@@ -156,14 +167,20 @@ def gen_ai_span(
         attributes.append(_int_attr(_GENAI["input_tokens"], input_tokens))
     if output_tokens is not None:
         attributes.append(_int_attr(_GENAI["output_tokens"], output_tokens))
-    if extra_attributes:
-        attributes.extend(extra_attributes)
+    for key, value in (("praesidia.task.id", task_id), ("praesidia.action.id", action_id)):
+        identity = _validated_text(value, key, _MAX_AGENT_IDENTITY_LENGTH)
+        if identity is not None:
+            attributes.append(_str_attr(key, identity))
+    reserved = set(_GENAI.values()) | {"praesidia.task.id", "praesidia.action.id"}
+    attributes.extend(_safe_extra_attributes(extra_attributes or [], reserved, capture_content, redact_content))
+    parent = parse_traceparent(traceparent)
 
     start_ns = time.time_ns()
     span_name = name or f"{operation_name or 'chat'} {request_model or ''}".strip()
     return {
-        "traceId": os.urandom(16).hex(),
+        "traceId": parent["traceId"] if parent else os.urandom(16).hex(),
         "spanId": os.urandom(8).hex(),
+        **({"parentSpanId": parent["parentSpanId"], "flags": parent["flags"]} if parent else {}),
         "name": span_name,
         "kind": _SPAN_KIND_CLIENT,
         "startTimeUnixNano": str(start_ns),
@@ -238,6 +255,7 @@ class TelemetryResource:
                         "name": "praesidia-python",
                         "version": _SDK_SCOPE_VERSION,
                     },
+                    "schemaUrl": f"https://opentelemetry.io/schemas/{GENAI_SEMCONV_VERSION}",
                     "spans": spans,
                 }
             ]
@@ -258,3 +276,54 @@ class TelemetryResource:
         arguments as :func:`gen_ai_span`. Returns the ingest ack.
         """
         return self.emit_gen_ai_spans([gen_ai_span(agent_name, **kwargs)])
+
+
+def parse_traceparent(value: Any) -> Optional[dict[str, Any]]:
+    """W3C Trace Context: ignore invalid context, retain valid parentage."""
+    if not isinstance(value, str) or len(value) > 512:
+        return None
+    match = re.fullmatch(r"([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})(.*)", value)
+    if not match:
+        return None
+    version, trace_id, parent_id, flags, tail = match.groups()
+    if version == "ff" or not int(trace_id, 16) or not int(parent_id, 16):
+        return None
+    if (version == "00" and tail) or (version != "00" and tail and not tail.startswith("-")):
+        return None
+    return {"traceId": trace_id, "parentSpanId": parent_id, "flags": int(flags, 16) & 1}
+
+
+_CONTENT_KEY = re.compile(r"(?:^gen_ai\.(?:input\.messages|output\.messages|system_instructions|prompt|completion|retrieval\.(?:documents|query\.text))$|(?:^|[._-])(?:content|body|prompt|completion|messages)(?:$|[._-]))", re.I)
+_SECRET_KEY = re.compile(r"(?:authorization|api[._-]?key|password|secret|cookie|access[._-]?token|refresh[._-]?token)", re.I)
+
+
+def _safe_extra_attributes(attributes: list[dict[str, Any]], reserved: set[str], capture: bool, redact: Optional[Callable[[str], str]]) -> list[dict[str, Any]]:
+    if not isinstance(capture, bool):
+        raise ValueError("capture_content must be a boolean")
+    if capture and not callable(redact):
+        raise ValueError("capture_content requires redact_content")
+    result = []
+    for attribute in attributes:
+        key = attribute.get("key")
+        value = attribute.get("value")
+        if not isinstance(key, str) or not key or len(key) > 128 or not isinstance(value, dict):
+            raise ValueError("invalid extra attribute")
+        if key in reserved:
+            raise ValueError("extra_attributes cannot override reserved identity or correlation keys")
+        if _SECRET_KEY.search(key):
+            continue
+        if _CONTENT_KEY.search(key):
+            if not capture:
+                continue
+            raw = value.get("stringValue")
+            if not isinstance(raw, str):
+                raise ValueError("captured content must be a string attribute")
+            assert redact is not None
+            redacted = redact(raw)
+            if not isinstance(redacted, str) or len(redacted.encode("utf-8")) > 16384:
+                raise ValueError("redact_content must return a string of at most 16384 bytes")
+            result.append(_str_attr(key, redacted))
+        else:
+            result.append(attribute)
+        reserved.add(key)
+    return result

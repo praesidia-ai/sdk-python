@@ -29,11 +29,15 @@ from .exceptions import (
     NotFoundError,
     PraesidiaError,
     RateLimitError,
+    ResponseTooLargeError,
     ServerError,
 )
 
 _DEFAULT_TIMEOUT = 30.0  # seconds
 _MAX_TIMEOUT = 300.0  # seconds
+_MAX_JSON_RESPONSE_BYTES = 16 * 1024 * 1024
+_MAX_ERROR_RESPONSE_BYTES = 64 * 1024
+_MAX_DOWNLOAD_RESPONSE_BYTES = 128 * 1024 * 1024
 
 #: BUGHUNT-SDK-06 — timeout budget for bulk download/export calls
 #: (``stream_get``: report PDF, audit export, analytics export). httpx
@@ -308,6 +312,47 @@ class HttpClient:
     # Public verbs
     # ------------------------------------------------------------------
 
+    def _request_bounded(
+        self,
+        method: str,
+        url: str,
+        *,
+        path: str,
+        success_limit: int,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Execute one request while enforcing a decoded response-byte cap."""
+        with httpx.stream(method, url, **kwargs) as streamed:
+            limit = (
+                _MAX_ERROR_RESPONSE_BYTES
+                if streamed.status_code >= 400
+                else success_limit
+            )
+            declared = streamed.headers.get("content-length")
+            if declared is not None and declared.isdigit() and int(declared) > limit:
+                raise ResponseTooLargeError(path, limit, streamed.status_code)
+
+            body = bytearray()
+            for chunk in streamed.iter_bytes():
+                if len(body) + len(chunk) > limit:
+                    raise ResponseTooLargeError(path, limit, streamed.status_code)
+                body.extend(chunk)
+
+            # ``iter_bytes`` yields decoded bytes. Do not retain wire-level
+            # compression/length headers on the reconstructed buffered response
+            # or a later iterator could attempt to decode the body a second time.
+            response_headers = streamed.headers.copy()
+            response_headers.pop("content-encoding", None)
+            response_headers.pop("transfer-encoding", None)
+            response_headers["content-length"] = str(len(body))
+            return httpx.Response(
+                streamed.status_code,
+                headers=response_headers,
+                content=bytes(body),
+                request=streamed.request,
+                extensions=streamed.extensions,
+            )
+
     def get(
         self,
         path: str,
@@ -319,8 +364,11 @@ class HttpClient:
         url = f"{self._base}{path}"
 
         def do() -> httpx.Response:
-            return httpx.get(
+            return self._request_bounded(
+                "GET",
                 url,
+                path=path,
+                success_limit=_MAX_JSON_RESPONSE_BYTES,
                 headers=self._merged_headers(headers, include_auth=include_auth),
                 params=params,
                 timeout=self._timeout,
@@ -355,8 +403,11 @@ class HttpClient:
         merged = {**(headers or {}), "Idempotency-Key": idempotency_key} if idempotency_key else headers
 
         def do() -> httpx.Response:
-            return httpx.post(
+            return self._request_bounded(
+                "POST",
                 url,
+                path=path,
+                success_limit=_MAX_JSON_RESPONSE_BYTES,
                 headers=self._merged_headers(merged),
                 json=json,
                 timeout=self._timeout,
@@ -392,8 +443,11 @@ class HttpClient:
         merged = {**(headers or {}), "Idempotency-Key": idempotency_key} if idempotency_key else headers
 
         def do() -> httpx.Response:
-            return httpx.patch(
+            return self._request_bounded(
+                "PATCH",
                 url,
+                path=path,
+                success_limit=_MAX_JSON_RESPONSE_BYTES,
                 headers=self._merged_headers(merged),
                 json=json,
                 timeout=self._timeout,
@@ -406,13 +460,26 @@ class HttpClient:
     def delete(self, path: str) -> None:
         """Send a DELETE request (no response body expected). Always idempotent -- retried per policy."""
         url = f"{self._base}{path}"
+        attempts = 0
 
         def do() -> httpx.Response:
-            return httpx.delete(
-                url, headers=self._merged_headers(None), timeout=self._timeout
+            nonlocal attempts
+            attempts += 1
+            return self._request_bounded(
+                "DELETE",
+                url,
+                path=path,
+                success_limit=_MAX_ERROR_RESPONSE_BYTES,
+                headers=self._merged_headers(None),
+                timeout=self._timeout,
             )
 
         r = self._send_with_retry(True, do)
+        # A retry can observe 404 after the first DELETE committed but its
+        # response was lost. That is successful convergence. Keep an initial
+        # 404 as a genuine not-found error so caller mistakes stay visible.
+        if r.status_code == 404 and attempts > 1:
+            return
         self._raise_for_status(r)
 
     def stream_get(
@@ -422,23 +489,26 @@ class HttpClient:
         timeout: httpx.Timeout | float | None = None,
     ) -> httpx.Response:
         """
-        Buffered GET for bulk download/export endpoints (report PDF, audit
-        export, analytics export). Always idempotent -- retried per policy.
+        Bounded buffered GET for bulk download/export endpoints (report PDF,
+        audit export, analytics export). Always idempotent -- retried per policy.
 
         BUGHUNT-SDK-06 — uses a generous but finite per-operation timeout
         (``_DOWNLOAD_TIMEOUT``) rather than ``timeout=None``. httpx's
         ``read`` timeout is the idle-between-chunks budget, NOT a total
         cap, so it does not truncate a large-but-progressing export while
         still failing fast on a stalled peer. Pass ``timeout=`` to override
-        for an unusually long or short transfer. (Despite the name this
-        reads the whole body into ``.content``; a future true-streaming
-        variant can switch to ``httpx.stream()``.)
+        for an unusually long or short transfer. The body is consumed through
+        ``httpx.stream()`` and rejected above the explicit download-byte cap
+        before it can grow without bound in memory.
         """
         url = f"{self._base}{path}"
 
         def do() -> httpx.Response:
-            return httpx.get(
+            return self._request_bounded(
+                "GET",
                 url,
+                path=path,
+                success_limit=_MAX_DOWNLOAD_RESPONSE_BYTES,
                 headers=self._merged_headers(None),
                 params=params,
                 timeout=_DOWNLOAD_TIMEOUT if timeout is None else timeout,

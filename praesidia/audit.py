@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any, Iterator
 
 from ._http import HttpClient
+from ._evidence import evidence_date_range
 
 
 class AuditResource:
@@ -21,6 +22,19 @@ class AuditResource:
     def __init__(self, http: HttpClient) -> None:
         self._http = http
         self._base = f"/organizations/{http.org_id}/audit-logs"
+        self._bundle_path = f"/organizations/{http.org_id}/audit/bundle"
+
+    def export_bundle(self, *, from_date: str, to_date: str) -> bytes:
+        """Download a signed ZIP for offline verification (at most 90 days).
+
+        Requires audit:read and owner/compliance-officer access with COMPLIANCE_VIEW.
+        This is separate from the JSON/CSV log export. The bounded transport caps
+        downloads at 128 MiB. A successful download does not verify the evidence.
+        """
+        evidence_date_range(from_date, to_date, bundle=True)
+        response = self._http.stream_get(self._bundle_path, params={"from": from_date, "to": to_date})
+        self._http._raise_for_status(response)
+        return response.content
 
     def list(
         self,

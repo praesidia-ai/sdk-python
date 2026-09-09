@@ -38,22 +38,22 @@ jobs:
           cache: pip
 
       - name: Install SDK and dev dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,langgraph]"
 
       - name: Verify SDK import
         run: python -c "from praesidia import Praesidia; print('SDK import OK')"
 
-      - name: Run unit tests
-        run: |
-          coverage run -m pytest tests/ -v
-          coverage report
+      # Full-source coverage is enforced by the required Python3.11 frameworks
+      # job, where optional native runtimes are actually installed/supported.
+      - name: Run base SDK compatibility tests
+        run: python -m pytest tests/ -v
 
       - name: Verify installed dependency consistency
         run: pip check
 
-      # One matrix leg is sufficient: the resolved application dependency set
-      # is shared, and auditing every Python version only repeats the same OSV
-      # query. Pin the scanner itself so the gate is reproducible.
+      # Audit the base SDK + LangGraph dependency profile. Optional framework
+      # profiles have distinct dependencies; this is not an advisory-clean claim
+      # for the CrewAI/Chroma profile documented in runtime-integrations.md. Pin the scanner itself so the gate is reproducible.
       - name: Audit dependencies against current advisories
         if: matrix.python-version == '3.14'
         run: |
@@ -67,9 +67,51 @@ jobs:
           python -m build
           twine check dist/*
 
+  frameworks:
+    name: Native managed tools and restart contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OTEL_SDK_DISABLED: 'true'
+      CREWAI_DISABLE_TELEMETRY: 'true'
+      CREWAI_TRACING_ENABLED: 'false'
+      PRAESIDIA_REQUIRE_FRAMEWORKS: '1'
+      PRAESIDIA_REQUIRE_HERMES: '1'
+      PRAESIDIA_HERMES_SOURCE: ${{ github.workspace }}/upstream/hermes
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.11'
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 0390ace8179f4cf75bd3941e590dd74e638672b6
+          path: upstream/hermes
+          persist-credentials: false
+      - name: Install locked optional frameworks and local Hermes entry point
+        run: |
+          pip install uv==0.5.24
+          uv sync --frozen --extra dev --extra frameworks
+          uv pip install --no-deps -e ./plugins/hermes
+      - name: Actual native tools, durable approval and process restarts
+        run: |
+          .venv/bin/coverage run -m pytest tests/ -q
+          .venv/bin/coverage report
+          uv pip check
+      - name: Audit native framework dependency profile
+        # Current CrewAI1.15.20 -> ChromaDB1.1.1 advisories are intentionally
+        # not ignored. This gate stays failing until an upstream resolution or
+        # separately reviewed dependency change; base audit is a different scope.
+        run: |
+          uv pip install pip-audit==2.9.0
+          .venv/bin/pip-audit --local --skip-editable --progress-spinner off
+
   image:
     name: Reproducible image smoke
-    needs: check
+    needs: [check, frameworks]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

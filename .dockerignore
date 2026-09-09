@@ -11,5 +11,4 @@ venv
 .coverage
 htmlcov
 .git
-.github
 .DS_Store
