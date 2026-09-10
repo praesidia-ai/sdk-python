@@ -31,7 +31,41 @@ from typing import Any
 #: `re.ASCII` is required for behavioural parity -- without it, e.g. Eastern
 #: Arabic-Indic digits would trip the SSN/credit-card patterns in Python but
 #: never in the TS SDK.
+#:
+#: REOPENED close-out finding [BLOCKING 1] -- this reasoning does NOT extend
+#: to `\s`. Unlike `\d`/`\w`/`\b`, JS's `\s` IS Unicode-aware: it matches NBSP
+#: (U+00A0), the Unicode "space separator" category (U+1680, U+2000-U+200A,
+#: U+202F, U+205F, U+3000), U+2028/U+2029, and U+FEFF. `re.ASCII` narrows
+#: Python's `\s` to strictly the ASCII subset ([ \t\n\r\f\v]) -- narrower than
+#: JS's, in the dangerous direction: a single non-breaking space between
+#: "ignore" and "previous" defeats every `\s`-based prompt-injection pattern
+#: below in Python while the TS guard still blocks it. Dropping `re.ASCII`
+#: entirely would fix `\s` but reopen the `\d`/`\w`/`\b` divergence. Instead,
+#: translate JS's Unicode-only whitespace code points to a plain ASCII space
+#: (`_normalize_whitespace_for_matching`) BEFORE running the (still
+#: `re.ASCII`-compiled) patterns against the content -- a length-preserving,
+#: one-to-one substitution, so match spans still index correctly back into
+#: the original string for the reported evidence text.
 _ASCII = re.ASCII
+
+#: The members of JS's regex `\s` class that are NOT in Python's `re.ASCII`
+#: `\s` class (see MDN's `\s` reference for the canonical code-point list).
+_JS_UNICODE_ONLY_WHITESPACE = (
+    "\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009"
+    "\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
+_WHITESPACE_TRANSLATION = str.maketrans({ch: " " for ch in _JS_UNICODE_ONLY_WHITESPACE})
+
+
+def _normalize_whitespace_for_matching(content: str) -> str:
+    """
+    Translate the Unicode-only members of JS's `\\s` class to a plain ASCII
+    space, so an `re.ASCII`-compiled `\\s` pattern matches them too. This is
+    a one-to-one code-point substitution (never changes string length), so a
+    match's `.start()`/`.end()` on the normalized string are still valid
+    offsets into the original `content`.
+    """
+    return content.translate(_WHITESPACE_TRANSLATION)
 
 
 def _pattern(source: str, *, ignore_case: bool = False) -> re.Pattern[str]:
@@ -129,15 +163,21 @@ def run_local_rules(content: str) -> dict[str, Any]:
     ``CheckResult``-shaped dict (``passed``, ``triggered``, ``local: True``).
     """
     triggered: list[dict[str, Any]] = []
+    # REOPENED close-out finding [BLOCKING 1] -- match against a whitespace-
+    # normalized copy so the re.ASCII-compiled `\s` patterns see JS's wider
+    # whitespace class too, but slice the ORIGINAL `content` for the
+    # reported evidence text (the substitution is one-to-one, so offsets
+    # from `normalized` are still valid into `content`).
+    normalized = _normalize_whitespace_for_matching(content)
 
     for rule in _LOCAL_RULES:
         matched_patterns: list[str] = []
         matched_keywords: list[str] = []
 
         for pattern in rule.patterns:
-            match = pattern.search(content)
+            match = pattern.search(normalized)
             if match:
-                matched_patterns.append(match.group(0))
+                matched_patterns.append(content[match.start() : match.end()])
 
         lower = content.lower()
         for keyword in rule.keywords:
