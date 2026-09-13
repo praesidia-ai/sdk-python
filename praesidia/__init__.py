@@ -60,7 +60,7 @@ from .exceptions import (
     UnsupportedProtectedActionTargetError,
 )
 from .telemetry import gen_ai_span
-from .trust import verify_passport
+from .trust import jwk_thumbprint, jwk_thumbprint_hex, verify_passport
 
 __all__ = [
     "IdentityClient",
@@ -82,6 +82,9 @@ __all__ = [
     "run_local_rules",
     # H3-02f — standalone offline trust-passport verification (no account needed)
     "verify_passport",
+    # SEC-2026-09-12 MCPSDK-04 — pin the key fetch_and_verify must trust.
+    "jwk_thumbprint",
+    "jwk_thumbprint_hex",
     "ed25519_verify",
     "ed25519_public_key_from_jwk",
     "es256_verify",

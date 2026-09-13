@@ -332,18 +332,45 @@ DID document or verification bundle; a signature proves integrity relative to
 that key, but cannot by itself prove that an arbitrary key belongs to the
 passport's claimed issuer.
 
+**`fetch_and_verify` requires a trust anchor.** The verify route is public and
+unauthenticated and returns the passport *and* the key, so checking one against
+the other proves nothing — anyone able to answer that request can mint both.
+Pass the key (or its fingerprint) that you obtained some other way:
+
 ```python
-result = client.trust.fetch_and_verify(peer_agent_id)
+result = client.trust.fetch_and_verify(
+    peer_agent_id,
+    trusted_keys=[issuer_jwk],        # sequence, or a mapping keyed by kid/issuer
+    # expected_fingerprint="sha256:…" # alternative: pin the RFC 7638 thumbprint
+)
 if result["verified"] and result["passport"]["credentialSubject"]["trustScore"] >= 70:
     ...  # signed reputation is genuine and fresh — trust the peer
 
+# With NO anchor the signature is still checked, but the call refuses to call
+# the outcome an assurance:
+unpinned = client.trust.fetch_and_verify(peer_agent_id)
+# {"verified": False, "reason": "unpinned_key", "signatureValid": True, ...}
+
+# Print the thumbprint of a key you trust, to pin it elsewhere:
+from praesidia import jwk_thumbprint, jwk_thumbprint_hex
+jwk_thumbprint(issuer_jwk)  # base64url; jwk_thumbprint_hex() for hex
+
 # Or verify a passport handed to you out-of-band — no client / account needed:
 from praesidia import verify_passport
-result = verify_passport(passport, public_key_jwk)
+result = verify_passport(passport, my_trusted_jwk)
 # result["reason"] ∈ ok | missing-proof | malformed-public-key
 #                    | malformed-passport | signature-mismatch
 #                    | invalid-expiration | expired
+#                    | unpinned_key | untrusted_key | fingerprint_mismatch
 ```
+
+| `fetch_and_verify` anchor | Outcome |
+|---|---|
+| none | `verified: False`, `reason: "unpinned_key"`, `signatureValid` truthful |
+| `trusted_keys` contains the signing key | `verified: True` (subject to expiry) |
+| `trusted_keys` without the signing key | `verified: False`, `reason: "untrusted_key"` |
+| `expected_fingerprint` matches the served key | verified normally against that key |
+| `expected_fingerprint` differs | `verified: False`, `reason: "fingerprint_mismatch"` |
 
 ## Agent credential refresh
 

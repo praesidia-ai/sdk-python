@@ -18,6 +18,8 @@ import respx
 from praesidia import (
     Praesidia,
     ed25519_public_key_from_jwk,
+    jwk_thumbprint,
+    jwk_thumbprint_hex,
     verify_passport,
 )
 
@@ -308,7 +310,11 @@ def test_fetch_and_verify_hits_public_route_and_verifies():
     route = respx.get(f"{BASE_URL}/trust/passport/agent-1/verify").mock(
         return_value=httpx.Response(200, json=bundle)
     )
-    result = _client().trust.fetch_and_verify("agent-1")
+    # MCPSDK-04 — this assertion used to pass with NO anchor, which was the
+    # bug: the key came from the same response. It now needs a pinned key.
+    result = _client().trust.fetch_and_verify(
+        "agent-1", trusted_keys=[PUBLIC_KEY_JWK]
+    )
     assert route.called
     assert "Authorization" not in route.calls.last.request.headers
     assert result["verified"] is True
@@ -325,3 +331,158 @@ def test_fetch_passport_returns_signed_credential():
     assert route.called
     assert "Authorization" not in route.calls.last.request.headers
     assert passport["proof"]["type"] == "Ed25519Signature2020"
+
+
+# ── fetch_and_verify trust anchor (SEC-2026-09-12 MCPSDK-04) ─────────────────
+
+OTHER_KEY_JWK = {
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "use": "sig",
+    # A different, unrelated Ed25519 public key.
+    "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+}
+
+
+def _mock_bundle(passport=None, public_key_jwk=None):
+    respx.get(f"{BASE_URL}/trust/passport/agent-1/verify").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "passport": passport if passport is not None else PASSPORT,
+                "publicKeyJwk": (
+                    public_key_jwk if public_key_jwk is not None else PUBLIC_KEY_JWK
+                ),
+                "didDocumentUrl": (
+                    "https://api.praesidia.ai/agents/agent-1/did.json"
+                ),
+            },
+        )
+    )
+    return _client().trust
+
+
+@respx.mock
+def test_fetch_and_verify_without_anchor_is_not_an_assurance():
+    # The key came from the same unauthenticated GET as the passport, so the
+    # signature check proves integrity only — never authenticity.
+    result = _mock_bundle().fetch_and_verify("agent-1")
+    assert result["verified"] is False
+    assert result["reason"] == "unpinned_key"
+    # ...but the signature state stays truthful.
+    assert result["signatureValid"] is True
+    assert result["expired"] is False
+    assert result["publicKeyJwk"] == PUBLIC_KEY_JWK
+
+
+@respx.mock
+def test_fetch_and_verify_without_anchor_still_reports_broken_signature():
+    tampered = copy.deepcopy(PASSPORT)
+    tampered["credentialSubject"]["trustScore"] = 99
+    result = _mock_bundle(passport=tampered).fetch_and_verify("agent-1")
+    assert result["verified"] is False
+    assert result["signatureValid"] is False
+    assert result["reason"] == "signature-mismatch"
+
+
+@respx.mock
+def test_fetch_and_verify_with_matching_trusted_key():
+    result = _mock_bundle().fetch_and_verify(
+        "agent-1", trusted_keys=[PUBLIC_KEY_JWK]
+    )
+    assert result["verified"] is True
+    assert result["signatureValid"] is True
+    assert result["expired"] is False
+    assert result["reason"] == "ok"
+
+
+@respx.mock
+def test_fetch_and_verify_accepts_mapping_of_trusted_keys():
+    result = _mock_bundle().fetch_and_verify(
+        "agent-1",
+        trusted_keys={"key-0": OTHER_KEY_JWK, "key-1": PUBLIC_KEY_JWK},
+    )
+    assert result["verified"] is True
+    assert result["reason"] == "ok"
+
+
+@respx.mock
+def test_fetch_and_verify_rejects_key_outside_the_anchor():
+    # The attacker controls the response: passport + matching key are both
+    # theirs. Under the old code this returned verified: True.
+    result = _mock_bundle().fetch_and_verify(
+        "agent-1", trusted_keys=[OTHER_KEY_JWK]
+    )
+    assert result["verified"] is False
+    assert result["signatureValid"] is False
+    assert result["reason"] == "untrusted_key"
+
+
+@respx.mock
+def test_fetch_and_verify_empty_trusted_keys_is_a_failed_anchor():
+    result = _mock_bundle().fetch_and_verify("agent-1", trusted_keys=[])
+    assert result["verified"] is False
+    assert result["reason"] == "untrusted_key"
+
+
+@respx.mock
+def test_fetch_and_verify_keeps_expiry_reason_under_a_trusted_key(monkeypatch):
+    expired = copy.deepcopy(PASSPORT)
+    expired["expirationDate"] = "2026-07-07T00:00:00.000Z"
+    # Same shortcut as the standalone expiry test: the fixture signature covers
+    # expirationDate, so stub the signature check rather than re-signing.
+    monkeypatch.setattr("praesidia.trust.ed25519_verify", lambda *_args: True)
+
+    result = _mock_bundle(passport=expired).fetch_and_verify(
+        "agent-1", trusted_keys=[PUBLIC_KEY_JWK]
+    )
+
+    assert result["verified"] is False
+    assert result["signatureValid"] is True
+    assert result["expired"] is True
+    assert result["reason"] == "expired"
+
+
+@respx.mock
+def test_fetch_and_verify_accepts_matching_expected_fingerprint():
+    for fingerprint in (
+        jwk_thumbprint(PUBLIC_KEY_JWK),
+        jwk_thumbprint_hex(PUBLIC_KEY_JWK),
+        f"sha256:{jwk_thumbprint_hex(PUBLIC_KEY_JWK)}",
+    ):
+        result = _mock_bundle().fetch_and_verify(
+            "agent-1", expected_fingerprint=fingerprint
+        )
+        assert result["verified"] is True, fingerprint
+        assert result["reason"] == "ok"
+
+
+@respx.mock
+def test_fetch_and_verify_rejects_unpinned_fingerprint():
+    result = _mock_bundle().fetch_and_verify(
+        "agent-1", expected_fingerprint=jwk_thumbprint(OTHER_KEY_JWK)
+    )
+    assert result["verified"] is False
+    assert result["reason"] == "fingerprint_mismatch"
+    # The served key does sign this passport — that is exactly why the
+    # self-referential check was worthless.
+    assert result["signatureValid"] is True
+
+
+def test_jwk_thumbprint_is_rfc7638_and_none_for_unusable_keys():
+    import hashlib
+    import json
+
+    expected = hashlib.sha256(
+        json.dumps(
+            {"crv": "Ed25519", "kty": "OKP", "x": PUBLIC_KEY_JWK["x"]},
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).digest()
+    assert jwk_thumbprint(PUBLIC_KEY_JWK) == base64.urlsafe_b64encode(
+        expected
+    ).decode("ascii").rstrip("=")
+    assert jwk_thumbprint_hex(PUBLIC_KEY_JWK) == expected.hex()
+    assert jwk_thumbprint(P256_PUBLIC_KEY_JWK) is not None
+    assert jwk_thumbprint({"kty": "RSA", "n": "x", "e": "AQAB"}) is None
