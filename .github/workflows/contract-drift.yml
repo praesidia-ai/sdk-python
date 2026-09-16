@@ -41,13 +41,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout sdk-python (the PR under test)
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           path: sdk-python
 
       - name: Checkout sdk (owns the shared contract-drift scanner, CD-0006)
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           repository: praesidia-ai/sdk
@@ -55,7 +55,7 @@ jobs:
           token: ${{ secrets.SDK_READ_TOKEN || github.token }}
 
       - name: Checkout be-core (spec source of truth)
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           repository: praesidia-ai/be-core
@@ -63,7 +63,7 @@ jobs:
           token: ${{ secrets.BE_CORE_READ_TOKEN || github.token }}
 
       - name: Checkout queue-core (be-core's local package sibling)
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           repository: praesidia-ai/queue-core
