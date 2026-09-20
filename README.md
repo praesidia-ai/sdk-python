@@ -94,6 +94,7 @@ bound in memory.
 | Resource | Class | Key methods |
 |----------|-------|-------------|
 | `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `protect_action`, `refresh_credential` |
+| `client.ai_systems` | `AiSystemsResource` | `list`/`get`/`create`/`update`/`archive`/`restore`, `list_assets`/`adopt_asset`, `attach_asset`/`detach_asset`, `create_relationship`/`list_relationships` (each `list*` also has a `*_page`/`*_all` sibling) |
 | `client.workflows` | `WorkflowsResource` | `list`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `get_run` |
 | `client.audit` | `AuditResource` | `list`, `stream`, `export`, `export_bundle` |
 | `client.proof` | `ProofResource` | `list`, `get`, `events`, `capture_scope`, `coverage_summary` |
@@ -103,6 +104,52 @@ bound in memory.
 | `client.memory` | `MemoryResource` | `create`, `list`, `search`, `erase`, `get`, `delete` |
 | `client.telemetry` | `TelemetryResource` | `emit`, `emit_gen_ai_span`, `emit_gen_ai_spans`, `build_gen_ai_resource_spans` |
 | `client.trust` | `TrustResource` | `fetch_passport`, `fetch_verify_bundle`, `verify_passport`, `fetch_and_verify` |
+
+## AI Systems / assets / relationship graph (SDK-0002, parity with be's AISYS-0002 and `sdk`'s SDK-0001)
+
+`client.ai_systems` manages the AI System inventory, the AI Asset catalog (agents, models, MCP
+servers, data sources, ...), the membership linking assets to systems, and the relationship graph
+(edges) between assets.
+
+```python
+from praesidia import Praesidia
+
+client = Praesidia(api_key="sk-...", org_id="...")
+system = client.ai_systems.create({"name": "Support triage bot", "criticality": "high"})
+asset = client.ai_systems.adopt_asset({"entityType": "agent", "entityId": agent_id, "aiSystemId": system["id"]})
+client.ai_systems.attach_asset(system["id"], {"assetId": asset["id"], "role": "primary"})
+client.ai_systems.create_relationship({
+    "sourceAssetId": asset["id"],
+    "targetAssetId": other_asset_id,
+    "relationshipType": "CALLS",
+})
+```
+
+| Method | Returns | Endpoint |
+|---|---|---|
+| `list(**filters)` | `list[dict]` | `GET .../ai-systems` |
+| `get(ai_system_id)` | `dict` | `GET .../ai-systems/:id` |
+| `create(data)` | `dict` | `POST .../ai-systems` |
+| `update(ai_system_id, data)` | `dict` | `PATCH .../ai-systems/:id` |
+| `archive(ai_system_id)` | `dict` | `POST .../ai-systems/:id/archive` |
+| `restore(ai_system_id)` | `dict` | `POST .../ai-systems/:id/restore` |
+| `list_assets(**filters)` | `list[dict]` | `GET .../ai-assets` |
+| `adopt_asset(data)` | `dict` | `POST .../ai-assets/adopt` (idempotent) |
+| `attach_asset(ai_system_id, data)` | `dict` | `POST .../ai-systems/:id/assets` |
+| `detach_asset(ai_system_id, asset_id)` | `None` | `DELETE .../ai-systems/:id/assets/:assetId` |
+| `create_relationship(data)` | `dict` | `POST .../asset-relationships` |
+| `list_relationships(**filters)` | `list[dict]` | `GET .../asset-relationships` |
+
+Every `list*`/`list_assets`/`list_relationships` also has a `*_page` (full pagination envelope) and
+`*_all` (auto-paginating generator) sibling, matching the `list_page`/`list_all` convention above
+(SCAN2-011). List filters are keyword-only and validated client-side against be's enums
+(`ValueError` on an unknown value); `include_archived` is sent as the lowercase string
+`"true"`/`"false"` since be's DTOs declare it `@IsBooleanString`, not a real boolean.
+
+> **Not covered** (mirrors `sdk`'s SDK-0001 exclusions exactly, all exist on be's contract): AI
+> System `owners`/`lifecycle` PATCH sub-routes, AI System `delete` (soft-delete), direct AI Asset
+> `create`/`update`/`archive`/`restore`, multi-hop graph `traverse` (AISYS-0003, not yet on
+> `be/openapi.json`), and per-relationship `get`/`update`/`archive`/`restore`/role-change.
 
 ## Guard — guardrail checks + audit logging, with an offline fallback (TOP-0008)
 
@@ -624,6 +671,19 @@ checkouts of `sdk` (owns the scanner), `be-core` (spec source of truth) and
 jobs.
 
 ## Changelog
+
+### Unreleased — SDK-0002: AI System / asset / relationship graph resource
+
+- **Added** `AiSystemsResource` (`praesidia/ai_systems.py`), exposed as `client.ai_systems`,
+  parity with `sdk`'s (TypeScript) `PraesidiaAiSystems` (SDK-0001) and be-core's AISYS-0002
+  module: AI System CRUD (`list`/`get`/`create`/`update`/`archive`/`restore`), AI Asset
+  read/adopt (`list_assets`/`adopt_asset`), AI System ↔ Asset membership
+  (`attach_asset`/`detach_asset`), and asset relationship create/list
+  (`create_relationship`/`list_relationships`). Every list method follows the SCAN2-011
+  `list`/`*_page`/`*_all` convention. See
+  [AI Systems / assets / relationship graph](#ai-systems--assets--relationship-graph-sdk-0002-parity-with-bes-aisys-0002-and-sdks-sdk-0001)
+  for the exact method table and documented exclusions (unchanged from SDK-0001). No breaking
+  changes — new resource only, no existing export or signature touched.
 
 ### Unreleased — TOP-0008: `Guard` convenience wrapper + offline local-rules guardrail fallback
 

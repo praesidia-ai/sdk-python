@@ -22,6 +22,7 @@ from typing import Union
 from ._http import HttpClient
 from ._retry import RetryConfig
 from .agents import AgentsResource
+from .ai_systems import AiSystemsResource
 from .analytics import AnalyticsResource
 from .audit import AuditResource
 from .compliance import ComplianceResource
@@ -60,6 +61,7 @@ class Praesidia:
 
     Attributes:
         agents:      :class:`~praesidia.agents.AgentsResource`
+        ai_systems:  :class:`~praesidia.ai_systems.AiSystemsResource`
         workflows:   :class:`~praesidia.workflows.WorkflowsResource`
         audit:       :class:`~praesidia.audit.AuditResource`
         analytics:   :class:`~praesidia.analytics.AnalyticsResource`
@@ -109,6 +111,7 @@ class Praesidia:
             retry=retry,
         )
         self.agents = AgentsResource(self._http)
+        self.ai_systems = AiSystemsResource(self._http)
         self.workflows = WorkflowsResource(self._http)
         self.audit = AuditResource(self._http)
         self.analytics = AnalyticsResource(self._http)

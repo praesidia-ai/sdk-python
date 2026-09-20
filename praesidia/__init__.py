@@ -42,6 +42,9 @@ from ._jcs_canonical import (
 )
 from ._retry import RetryConfig
 from .agents import tool_call_headers_from_task
+# SDK-0002 — AI System / asset / relationship graph parity with be's
+# AISYS-0002 and the TS SDK's ai_systems resource (SDK-0001).
+from .ai_systems import AiSystemsResource
 from .client import Praesidia
 from .guard import Guard, TaskHandle
 from .identity import IdentityClient, IdentityError
@@ -66,6 +69,7 @@ __all__ = [
     "IdentityClient",
     "IdentityError",
     "Praesidia",
+    "AiSystemsResource",
     "PraesidiaError",
     "AuthError",
     "ForbiddenError",
