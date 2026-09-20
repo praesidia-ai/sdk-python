@@ -94,7 +94,7 @@ bound in memory.
 | Resource | Class | Key methods |
 |----------|-------|-------------|
 | `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `protect_action`, `refresh_credential` |
-| `client.ai_systems` | `AiSystemsResource` | `list`/`get`/`create`/`update`/`archive`/`restore`, `list_assets`/`adopt_asset`, `attach_asset`/`detach_asset`, `create_relationship`/`list_relationships` (each `list*` also has a `*_page`/`*_all` sibling) |
+| `client.ai_systems` | `AiSystemsResource` | `list`/`get`/`create`/`update`/`archive`/`restore`/`delete`/`update_owners`/`transition_lifecycle`, `list_assets`/`create_asset`/`get_asset`/`update_asset`/`archive_asset`/`restore_asset`/`adopt_asset`, `attach_asset`/`detach_asset`/`change_asset_role`, `create_relationship`/`get_relationship`/`update_relationship`/`archive_relationship`/`restore_relationship`/`list_relationships` (each `list*` also has a `*_page`/`*_all` sibling) |
 | `client.workflows` | `WorkflowsResource` | `list`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `get_run` |
 | `client.audit` | `AuditResource` | `list`, `stream`, `export`, `export_bundle` |
 | `client.proof` | `ProofResource` | `list`, `get`, `events`, `capture_scope`, `coverage_summary` |
@@ -105,7 +105,7 @@ bound in memory.
 | `client.telemetry` | `TelemetryResource` | `emit`, `emit_gen_ai_span`, `emit_gen_ai_spans`, `build_gen_ai_resource_spans` |
 | `client.trust` | `TrustResource` | `fetch_passport`, `fetch_verify_bundle`, `verify_passport`, `fetch_and_verify` |
 
-## AI Systems / assets / relationship graph (SDK-0002, parity with be's AISYS-0002 and `sdk`'s SDK-0001)
+## AI Systems / assets / relationship graph (SDK-0002/SDK-0004, parity with be's AISYS-0002 and `sdk`'s SDK-0001/SDK-0003)
 
 `client.ai_systems` manages the AI System inventory, the AI Asset catalog (agents, models, MCP
 servers, data sources, ...), the membership linking assets to systems, and the relationship graph
@@ -131,13 +131,26 @@ client.ai_systems.create_relationship({
 | `get(ai_system_id)` | `dict` | `GET .../ai-systems/:id` |
 | `create(data)` | `dict` | `POST .../ai-systems` |
 | `update(ai_system_id, data)` | `dict` | `PATCH .../ai-systems/:id` |
+| `update_owners(ai_system_id, data)` | `dict` | `PATCH .../ai-systems/:id/owners` |
+| `transition_lifecycle(ai_system_id, lifecycle_status)` | `dict` | `PATCH .../ai-systems/:id/lifecycle` |
 | `archive(ai_system_id)` | `dict` | `POST .../ai-systems/:id/archive` |
 | `restore(ai_system_id)` | `dict` | `POST .../ai-systems/:id/restore` |
+| `delete(ai_system_id)` | `None` | `DELETE .../ai-systems/:id` (soft-delete) |
 | `list_assets(**filters)` | `list[dict]` | `GET .../ai-assets` |
+| `create_asset(data)` | `dict` | `POST .../ai-assets` |
+| `get_asset(asset_id)` | `dict` | `GET .../ai-assets/:id` |
+| `update_asset(asset_id, data)` | `dict` | `PATCH .../ai-assets/:id` |
+| `archive_asset(asset_id)` | `dict` | `POST .../ai-assets/:id/archive` |
+| `restore_asset(asset_id)` | `dict` | `POST .../ai-assets/:id/restore` |
 | `adopt_asset(data)` | `dict` | `POST .../ai-assets/adopt` (idempotent) |
 | `attach_asset(ai_system_id, data)` | `dict` | `POST .../ai-systems/:id/assets` |
+| `change_asset_role(ai_system_id, asset_id, role)` | `dict` | `PATCH .../ai-systems/:id/assets/:assetId/role` |
 | `detach_asset(ai_system_id, asset_id)` | `None` | `DELETE .../ai-systems/:id/assets/:assetId` |
 | `create_relationship(data)` | `dict` | `POST .../asset-relationships` |
+| `get_relationship(relationship_id)` | `dict` | `GET .../asset-relationships/:id` |
+| `update_relationship(relationship_id, data)` | `dict` | `PATCH .../asset-relationships/:id` |
+| `archive_relationship(relationship_id)` | `dict` | `POST .../asset-relationships/:id/archive` |
+| `restore_relationship(relationship_id)` | `dict` | `POST .../asset-relationships/:id/restore` |
 | `list_relationships(**filters)` | `list[dict]` | `GET .../asset-relationships` |
 
 Every `list*`/`list_assets`/`list_relationships` also has a `*_page` (full pagination envelope) and
@@ -145,11 +158,13 @@ Every `list*`/`list_assets`/`list_relationships` also has a `*_page` (full pagin
 (SCAN2-011). List filters are keyword-only and validated client-side against be's enums
 (`ValueError` on an unknown value); `include_archived` is sent as the lowercase string
 `"true"`/`"false"` since be's DTOs declare it `@IsBooleanString`, not a real boolean.
+`transition_lifecycle`'s `lifecycle_status` is validated the same way; `change_asset_role`'s `role`
+is not (matches `attach_asset`'s `role`, per `AiSystemAssetRole` being hand-copied rather than
+derived from the entity's `as const` array — be 400s on an unknown value).
 
-> **Not covered** (mirrors `sdk`'s SDK-0001 exclusions exactly, all exist on be's contract): AI
-> System `owners`/`lifecycle` PATCH sub-routes, AI System `delete` (soft-delete), direct AI Asset
-> `create`/`update`/`archive`/`restore`, multi-hop graph `traverse` (AISYS-0003, not yet on
-> `be/openapi.json`), and per-relationship `get`/`update`/`archive`/`restore`/role-change.
+> **Not covered** (SDK-0004; all exist on be's contract): multi-hop graph `traverse` (AISYS-0003)
+> — not yet on `be/openapi.json`, and `CONTRACT.md` (run `IDEA-2026-09-20-ai-system-graph`) carries
+> no `## AISYS-0003` heading as of this build.
 
 ## Guard — guardrail checks + audit logging, with an offline fallback (TOP-0008)
 
@@ -671,6 +686,18 @@ checkouts of `sdk` (owns the scanner), `be-core` (spec source of truth) and
 jobs.
 
 ## Changelog
+
+### Unreleased — SDK-0004: full CONTRACT parity for the AI System / asset / relationship graph
+
+- **Added** to `AiSystemsResource` (`praesidia/ai_systems.py`): AI System `update_owners`,
+  `transition_lifecycle`, `delete`; AI Asset `create_asset`/`get_asset`/`update_asset`/
+  `archive_asset`/`restore_asset`; membership `change_asset_role`; relationship
+  `get_relationship`/`update_relationship`/`archive_relationship`/`restore_relationship`. Closes
+  the SDK-0002 exclusions except multi-hop graph `traverse` (AISYS-0003 — still not on
+  `be/openapi.json`). See
+  [AI Systems / assets / relationship graph](#ai-systems--assets--relationship-graph-sdk-0002sdk-0004-parity-with-bes-aisys-0002-and-sdks-sdk-0001sdk-0003)
+  for the full method table. No breaking changes — additive methods only, no existing signature
+  touched.
 
 ### Unreleased — SDK-0002: AI System / asset / relationship graph resource
 

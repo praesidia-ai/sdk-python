@@ -1,4 +1,4 @@
-"""Backend-contract tests for every Python AI Systems SDK method (SDK-0002)."""
+"""Backend-contract tests for every Python AI Systems SDK method (SDK-0002, SDK-0004)."""
 
 from __future__ import annotations
 
@@ -46,6 +46,24 @@ def test_ai_system_crud_and_pagination_contracts():
     restore = respx.post(f"{SYSTEMS}/s/restore").mock(return_value=httpx.Response(200, json={"id": "s"}))
     _client().ai_systems.restore("s")
     assert restore.called
+
+
+@respx.mock
+def test_ai_system_owners_lifecycle_and_delete_contracts():
+    owners = respx.patch(f"{SYSTEMS}/s/owners").mock(return_value=httpx.Response(200, json={"id": "s"}))
+    _client().ai_systems.update_owners("s", {"ownerType": "user", "ownerId": "u1"})
+    assert json.loads(owners.calls.last.request.content) == {"ownerType": "user", "ownerId": "u1"}
+
+    lifecycle = respx.patch(f"{SYSTEMS}/s/lifecycle").mock(return_value=httpx.Response(200, json={"id": "s"}))
+    _client().ai_systems.transition_lifecycle("s", "production")
+    assert json.loads(lifecycle.calls.last.request.content) == {"lifecycleStatus": "production"}
+
+    with pytest.raises(ValueError):
+        _client().ai_systems.transition_lifecycle("s", "not-a-status")
+
+    delete = respx.delete(f"{SYSTEMS}/s").mock(return_value=httpx.Response(204))
+    _client().ai_systems.delete("s")
+    assert delete.called
 
 
 @respx.mock
@@ -113,6 +131,31 @@ def test_ai_system_list_rejects_invalid_enum(kwargs):
 
 
 @respx.mock
+def test_ai_asset_crud_contracts():
+    create = respx.post(ASSETS).mock(return_value=httpx.Response(201, json={"id": "a"}))
+    _client().ai_systems.create_asset({"name": "Internal audit vendor", "assetType": "VENDOR"})
+    assert json.loads(create.calls.last.request.content) == {
+        "name": "Internal audit vendor",
+        "assetType": "VENDOR",
+    }
+
+    respx.get(f"{ASSETS}/a").mock(return_value=httpx.Response(200, json={"id": "a"}))
+    assert _client().ai_systems.get_asset("a")["id"] == "a"
+
+    update = respx.patch(f"{ASSETS}/a").mock(return_value=httpx.Response(200, json={"id": "a"}))
+    _client().ai_systems.update_asset("a", {"name": "Updated"})
+    assert json.loads(update.calls.last.request.content) == {"name": "Updated"}
+
+    archive = respx.post(f"{ASSETS}/a/archive").mock(return_value=httpx.Response(200, json={"id": "a"}))
+    _client().ai_systems.archive_asset("a")
+    assert archive.called
+
+    restore = respx.post(f"{ASSETS}/a/restore").mock(return_value=httpx.Response(200, json={"id": "a"}))
+    _client().ai_systems.restore_asset("a")
+    assert restore.called
+
+
+@respx.mock
 def test_ai_asset_list_and_adopt_contracts():
     respx.get(ASSETS).mock(return_value=httpx.Response(200, json={"data": [{"id": "a"}]}))
     assert _client().ai_systems.list_assets(page=1, limit=5) == [{"id": "a"}]
@@ -177,6 +220,12 @@ def test_ai_system_asset_membership_contracts():
     _client().ai_systems.attach_asset("s", {"assetId": "a", "role": "primary"})
     assert json.loads(attach.calls.last.request.content) == {"assetId": "a", "role": "primary"}
 
+    role = respx.patch(f"{SYSTEMS}/s/assets/a/role").mock(
+        return_value=httpx.Response(200, json={"id": "m", "role": "supporting"})
+    )
+    _client().ai_systems.change_asset_role("s", "a", "supporting")
+    assert json.loads(role.calls.last.request.content) == {"role": "supporting"}
+
     detach = respx.delete(f"{SYSTEMS}/s/assets/a").mock(return_value=httpx.Response(204))
     _client().ai_systems.detach_asset("s", "a")
     assert detach.called
@@ -213,6 +262,30 @@ def test_asset_relationship_create_and_list_contracts():
         "relationshipType": "CALLS",
         "includeArchived": "true",
     }
+
+
+@respx.mock
+def test_asset_relationship_get_update_archive_restore_contracts():
+    respx.get(f"{RELATIONSHIPS}/r").mock(return_value=httpx.Response(200, json={"id": "r"}))
+    assert _client().ai_systems.get_relationship("r")["id"] == "r"
+
+    update = respx.patch(f"{RELATIONSHIPS}/r").mock(
+        return_value=httpx.Response(200, json={"id": "r", "version": 2})
+    )
+    _client().ai_systems.update_relationship("r", {"confidence": 0.5})
+    assert json.loads(update.calls.last.request.content) == {"confidence": 0.5}
+
+    archive = respx.post(f"{RELATIONSHIPS}/r/archive").mock(
+        return_value=httpx.Response(200, json={"id": "r"})
+    )
+    _client().ai_systems.archive_relationship("r")
+    assert archive.called
+
+    restore = respx.post(f"{RELATIONSHIPS}/r/restore").mock(
+        return_value=httpx.Response(200, json={"id": "r"})
+    )
+    _client().ai_systems.restore_relationship("r")
+    assert restore.called
 
 
 @respx.mock

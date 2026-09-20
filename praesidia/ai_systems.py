@@ -48,12 +48,14 @@ class AiSystemsResource:
     ``/asset-relationships``. Requires the ``AI_SYSTEMS`` feature and the
     ``AI_SYSTEMS_*`` / ``AI_ASSETS_*`` permission families.
 
-    Not covered (out of SDK-0001/SDK-0002's scope, all exist on be's
-    contract): AI System ``owners``/``lifecycle`` PATCH sub-routes, AI
-    System ``delete`` (soft-delete), direct AI Asset ``create``/``update``/
-    ``archive``/``restore``, multi-hop graph ``traverse`` (AISYS-0003, not
-    yet on ``be/openapi.json``), and per-relationship ``get``/``update``/
-    ``archive``/``restore``/role-change.
+    SDK-0004 adds AI System ``owners``/``lifecycle`` PATCH sub-routes,
+    ``delete`` (soft-delete), direct AI Asset ``create``/``get``/``update``/
+    ``archive``/``restore``, membership ``change_asset_role``, and
+    per-relationship ``get``/``update``/``archive``/``restore``.
+
+    Still not covered: multi-hop graph ``traverse`` (AISYS-0003) — not yet
+    on ``be/openapi.json`` and ``CONTRACT.md`` carries no ``## AISYS-0003``
+    heading as of this build.
     """
 
     #: `entities/ai-system.entity.ts`'s `AI_SYSTEM_CRITICALITIES`.
@@ -216,6 +218,43 @@ class AiSystemsResource:
             f"{self._systems_base}/{path_segment(ai_system_id, 'ai_system_id')}/restore", json={}
         )
 
+    def update_owners(self, ai_system_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Update any subset of the four owner pairs. PATCH .../ai-systems/:id/owners.
+
+        Args:
+            data: any of ``ownerType``/``ownerId``, ``technicalOwnerType``/
+                  ``technicalOwnerId``, ``securityOwnerType``/``securityOwnerId``,
+                  ``complianceOwnerType``/``complianceOwnerId`` (``UpdateAiSystemOwnersDto``,
+                  each ``*Type`` in :attr:`OWNER_TYPES`; ``None`` clears a pair).
+        """
+        return self._http.patch(
+            f"{self._systems_base}/{path_segment(ai_system_id, 'ai_system_id')}/owners", json=data
+        )
+
+    def transition_lifecycle(self, ai_system_id: str, lifecycle_status: str) -> dict[str, Any]:
+        """
+        Move an AI System to a new lifecycle status. PATCH .../ai-systems/:id/lifecycle.
+
+        Raises:
+            ValueError: ``lifecycle_status`` is not in :attr:`LIFECYCLE_STATUSES`.
+
+        be 400s with ``Invalid AI System lifecycle transition: '<from>' -> '<to>'``
+        on a structurally valid but illegal move (e.g. ``retired`` -> ``production``).
+        """
+        if lifecycle_status not in self.LIFECYCLE_STATUSES:
+            raise ValueError(
+                f"lifecycle_status must be one of {self.LIFECYCLE_STATUSES}; got {lifecycle_status!r}"
+            )
+        return self._http.patch(
+            f"{self._systems_base}/{path_segment(ai_system_id, 'ai_system_id')}/lifecycle",
+            json={"lifecycleStatus": lifecycle_status},
+        )
+
+    def delete(self, ai_system_id: str) -> None:
+        """Soft-delete an AI System (sets ``deletedAt``). DELETE .../ai-systems/:id."""
+        self._http.delete(f"{self._systems_base}/{path_segment(ai_system_id, 'ai_system_id')}")
+
     # ------------------------------------------------------------------
     # AI Assets
     # ------------------------------------------------------------------
@@ -309,6 +348,42 @@ class AiSystemsResource:
             )
         )
 
+    def create_asset(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Create an AI Asset with no backing runtime entity (e.g. ``VENDOR``,
+        ``CREDENTIAL``, ``MODEL_ENDPOINT`` — discovered/tracked metadata
+        only). POST .../ai-assets. To register an asset that IS a real
+        agent/application/MCP server/model/workflow/eval dataset row, use
+        :meth:`adopt_asset` instead.
+
+        Args:
+            data: ``{"name": ..., "assetType": ..., "source"?: ...,
+                   "discoveryStatus"?: ..., "environment"?: ...,
+                   "ownerType"?: ..., "ownerId"?: ..., "metadata"?: ...}``
+                  (``CreateAiAssetDto``).
+        """
+        return self._http.post(self._assets_base, json=data)
+
+    def get_asset(self, asset_id: str) -> dict[str, Any]:
+        """Fetch a single AI Asset by ID. GET .../ai-assets/:id."""
+        return self._http.get(f"{self._assets_base}/{path_segment(asset_id, 'asset_id')}")
+
+    def update_asset(self, asset_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Partially update an AI Asset's descriptive fields. PATCH .../ai-assets/:id.
+        ``assetType``/``source``/``discoveryStatus`` are immutable/behaviour-owned
+        and not accepted here (``UpdateAiAssetDto``).
+        """
+        return self._http.patch(f"{self._assets_base}/{path_segment(asset_id, 'asset_id')}", json=data)
+
+    def archive_asset(self, asset_id: str) -> dict[str, Any]:
+        """Archive an AI Asset. POST .../ai-assets/:id/archive."""
+        return self._http.post(f"{self._assets_base}/{path_segment(asset_id, 'asset_id')}/archive", json={})
+
+    def restore_asset(self, asset_id: str) -> dict[str, Any]:
+        """Restore an archived AI Asset. POST .../ai-assets/:id/restore."""
+        return self._http.post(f"{self._assets_base}/{path_segment(asset_id, 'asset_id')}/restore", json={})
+
     def adopt_asset(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         Adopt an existing entity (agent, application, MCP server, ...) into
@@ -346,6 +421,22 @@ class AiSystemsResource:
             f"/assets/{path_segment(asset_id, 'asset_id')}"
         )
 
+    def change_asset_role(self, ai_system_id: str, asset_id: str, role: str) -> dict[str, Any]:
+        """
+        Change an attached AI Asset's role on an AI System.
+        PATCH .../ai-systems/:id/assets/:assetId/role.
+
+        Args:
+            role: ``primary``/``supporting``/``dependency``/``external``
+                  (``AiSystemAssetRole`` — not client-side validated, matching
+                  :meth:`attach_asset`; be 400s on an unknown value).
+        """
+        return self._http.patch(
+            f"{self._systems_base}/{path_segment(ai_system_id, 'ai_system_id')}"
+            f"/assets/{path_segment(asset_id, 'asset_id')}/role",
+            json={"role": role},
+        )
+
     # ------------------------------------------------------------------
     # Asset relationships (graph edges)
     # ------------------------------------------------------------------
@@ -361,6 +452,37 @@ class AiSystemsResource:
                    ..., "metadata"?: ...}`` (``CreateAssetRelationshipDto``).
         """
         return self._http.post(self._relationships_base, json=data)
+
+    def get_relationship(self, relationship_id: str) -> dict[str, Any]:
+        """Fetch a single asset relationship by ID. GET .../asset-relationships/:id."""
+        return self._http.get(
+            f"{self._relationships_base}/{path_segment(relationship_id, 'relationship_id')}"
+        )
+
+    def update_relationship(self, relationship_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Update a relationship's ``relationshipType``/``source``/``confidence``/
+        ``metadata`` (not its endpoints -- move an endpoint by archiving this
+        edge and creating a new one). PATCH .../asset-relationships/:id.
+        Bumps ``version`` and appends an ``asset_relationship_history`` row.
+        """
+        return self._http.patch(
+            f"{self._relationships_base}/{path_segment(relationship_id, 'relationship_id')}", json=data
+        )
+
+    def archive_relationship(self, relationship_id: str) -> dict[str, Any]:
+        """Archive an asset relationship. POST .../asset-relationships/:id/archive."""
+        return self._http.post(
+            f"{self._relationships_base}/{path_segment(relationship_id, 'relationship_id')}/archive",
+            json={},
+        )
+
+    def restore_relationship(self, relationship_id: str) -> dict[str, Any]:
+        """Restore an archived asset relationship. POST .../asset-relationships/:id/restore."""
+        return self._http.post(
+            f"{self._relationships_base}/{path_segment(relationship_id, 'relationship_id')}/restore",
+            json={},
+        )
 
     def list_relationships(
         self,
