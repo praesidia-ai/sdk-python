@@ -53,9 +53,9 @@ class AiSystemsResource:
     ``archive``/``restore``, membership ``change_asset_role``, and
     per-relationship ``get``/``update``/``archive``/``restore``.
 
-    Still not covered: multi-hop graph ``traverse`` (AISYS-0003) — not yet
-    on ``be/openapi.json`` and ``CONTRACT.md`` carries no ``## AISYS-0003``
-    heading as of this build.
+    SDK-0006 adds the multi-hop graph :meth:`traverse` (AISYS-0003) and the
+    AI System :meth:`summary` aggregation (AISYS-0004), now both on
+    ``be/openapi.json``.
     """
 
     #: `entities/ai-system.entity.ts`'s `AI_SYSTEM_CRITICALITIES`.
@@ -88,6 +88,8 @@ class AiSystemsResource:
         "USES", "CALLS", "ACCESSES", "CONTAINS", "DELEGATES_TO", "HOSTED_BY",
         "READS", "HAS_PERMISSION", "GOVERNED_BY",
     )
+    #: `TraverseAssetGraphQueryDto`'s `direction` enum (AISYS-0003).
+    TRAVERSE_DIRECTIONS = ("downstream", "upstream", "both")
 
     def __init__(self, http: HttpClient) -> None:
         self._http = http
@@ -254,6 +256,22 @@ class AiSystemsResource:
     def delete(self, ai_system_id: str) -> None:
         """Soft-delete an AI System (sets ``deletedAt``). DELETE .../ai-systems/:id."""
         self._http.delete(f"{self._systems_base}/{path_segment(ai_system_id, 'ai_system_id')}")
+
+    def summary(self, ai_system_id: str) -> dict[str, Any]:
+        """
+        Thin cross-section aggregation for one AI System.
+        GET .../ai-systems/:id/summary (AISYS-0004).
+
+        Returns ``{"compliance", "risk", "evaluations", "cost", "evidence":
+        {"available": bool, "reason"?, "counts"?, "updatedAt"?}, "unlinkedAssets":
+        int}`` (``AiSystemSummaryResponseDto``). A section's ``available`` is
+        ``False`` (with a ``reason``) when be cannot filter that section by
+        this system's asset entity ids at all -- not necessarily an empty
+        result.
+        """
+        return self._http.get(
+            f"{self._systems_base}/{path_segment(ai_system_id, 'ai_system_id')}/summary"
+        )
 
     # ------------------------------------------------------------------
     # AI Assets
@@ -566,3 +584,62 @@ class AiSystemsResource:
                 limit=limit,
             )
         )
+
+    def traverse(
+        self,
+        asset_id: str,
+        *,
+        direction: str = "downstream",
+        max_depth: int | None = None,
+        asset_types: list[str] | None = None,
+        relationship_types: list[str] | None = None,
+        include_archived: bool | None = None,
+    ) -> dict[str, Any]:
+        """
+        Multi-hop traversal of the asset relationship graph from an anchor
+        asset. GET .../asset-relationships/graph/traverse (AISYS-0003).
+
+        Args:
+            asset_id: UUID of the anchor asset to traverse from.
+            direction: one of :attr:`TRAVERSE_DIRECTIONS` (default
+                       ``"downstream"``), client-side validated.
+            max_depth: requested hop cap (server default 3; server-clamped
+                       to ``AI_SYSTEM_GRAPH_MAX_DEPTH``, default 6 -- a
+                       request above the cap is lowered, not rejected, and
+                       ``stats.depthClamped`` reports it).
+            asset_types: filter to these asset types (see :attr:`ASSET_TYPES`),
+                         applied inside the recursive leg -- a filtered-out
+                         node also prunes everything beyond it. Not
+                         client-side validated: be's asset-type enum has grown
+                         past this SDK's constant before (AISYS-0003 Evidence).
+            relationship_types: filter to these relationship types (see
+                                 :attr:`RELATIONSHIP_TYPES`), same pruning
+                                 behaviour and same "not client-side validated"
+                                 rationale.
+            include_archived: include archived assets/relationships in the
+                               traversal (server default ``False``).
+
+        Returns:
+            ``{"nodes": [...], "edges": [...], "stats": {...}}``
+            (``AssetGraphTraversalResponseDto``).
+
+        Raises:
+            ValueError: ``direction`` is not one of :attr:`TRAVERSE_DIRECTIONS`.
+
+        be 404s if ``asset_id`` is not found in this org, and 413s if the
+        traversal result exceeds ``AI_SYSTEM_GRAPH_MAX_NODES``.
+        """
+        if direction not in self.TRAVERSE_DIRECTIONS:
+            raise ValueError(
+                f"direction must be one of {self.TRAVERSE_DIRECTIONS}; got {direction!r}"
+            )
+        params: dict[str, Any] = {"assetId": asset_id, "direction": direction}
+        if max_depth is not None:
+            params["maxDepth"] = max_depth
+        if asset_types:
+            params["assetTypes"] = list(asset_types)
+        if relationship_types:
+            params["relationshipTypes"] = list(relationship_types)
+        if include_archived is not None:
+            params["includeArchived"] = "true" if include_archived else "false"
+        return self._http.get(f"{self._relationships_base}/graph/traverse", params=params)

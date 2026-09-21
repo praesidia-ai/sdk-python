@@ -316,3 +316,64 @@ def test_asset_relationship_list_all_auto_paginates():
 def test_asset_relationship_list_rejects_invalid_enum():
     with pytest.raises(ValueError):
         _client().ai_systems.list_relationships_page(relationship_type="NOT_A_TYPE")
+
+
+@respx.mock
+def test_traverse_contracts_and_query_encoding():
+    route = respx.get(f"{RELATIONSHIPS}/graph/traverse").mock(
+        return_value=httpx.Response(
+            200, json={"nodes": [], "edges": [], "stats": {"depth": 3, "nodeCount": 0, "edgeCount": 0, "depthClamped": False, "truncated": False}}
+        )
+    )
+    result = _client().ai_systems.traverse(
+        "a1",
+        direction="upstream",
+        max_depth=5,
+        asset_types=["AGENT", "MODEL"],
+        relationship_types=["CALLS"],
+        include_archived=True,
+    )
+    assert result["stats"]["nodeCount"] == 0
+    params = route.calls.last.request.url.params
+    assert params["assetId"] == "a1"
+    assert params["direction"] == "upstream"
+    assert params["maxDepth"] == "5"
+    assert params.get_list("assetTypes") == ["AGENT", "MODEL"]
+    assert params.get_list("relationshipTypes") == ["CALLS"]
+    assert params["includeArchived"] == "true"
+
+
+@respx.mock
+def test_traverse_defaults_omit_optional_params():
+    route = respx.get(f"{RELATIONSHIPS}/graph/traverse").mock(
+        return_value=httpx.Response(
+            200, json={"nodes": [], "edges": [], "stats": {"depth": 3, "nodeCount": 0, "edgeCount": 0, "depthClamped": False, "truncated": False}}
+        )
+    )
+    _client().ai_systems.traverse("a1")
+    assert dict(route.calls.last.request.url.params) == {"assetId": "a1", "direction": "downstream"}
+
+
+def test_traverse_rejects_invalid_direction():
+    with pytest.raises(ValueError):
+        _client().ai_systems.traverse("a1", direction="not-a-direction")
+
+
+@respx.mock
+def test_ai_system_summary_contract():
+    respx.get(f"{SYSTEMS}/s/summary").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "compliance": {"available": True, "counts": {"low_risk": 1}},
+                "risk": {"available": True, "counts": {}},
+                "evaluations": {"available": True, "counts": {}},
+                "cost": {"available": False, "reason": "AISYS-0025"},
+                "evidence": {"available": True, "counts": {}},
+                "unlinkedAssets": 2,
+            },
+        )
+    )
+    result = _client().ai_systems.summary("s")
+    assert result["unlinkedAssets"] == 2
+    assert result["cost"] == {"available": False, "reason": "AISYS-0025"}
