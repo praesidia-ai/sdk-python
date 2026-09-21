@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import httpx
 import pytest
 import respx
 
 from praesidia import Praesidia
+from praesidia.ai_systems import AiSystemsResource
 
 BASE_URL = "http://test.local"
 ORG_ID = "org-1"
@@ -357,6 +359,34 @@ def test_traverse_defaults_omit_optional_params():
 def test_traverse_rejects_invalid_direction():
     with pytest.raises(ValueError):
         _client().ai_systems.traverse("a1", direction="not-a-direction")
+
+
+def test_traverse_rejects_invalid_asset_type():
+    with pytest.raises(ValueError):
+        _client().ai_systems.traverse("a1", asset_types=["NOT_A_TYPE"])
+
+
+def test_traverse_rejects_invalid_relationship_type():
+    with pytest.raises(ValueError):
+        _client().ai_systems.traverse("a1", relationship_types=["NOT_A_RELATIONSHIP"])
+
+
+def test_asset_and_relationship_types_match_openapi():
+    """SDK-0007 — fails if be's enum widens/shrinks again without an SDK sync.
+
+    Reads the sibling-checkout `be/openapi.json` (never regenerated here) and
+    compares its `AiAsset.assetType` / `AssetRelationship.relationshipType`
+    enums against `AiSystemsResource.ASSET_TYPES` / `RELATIONSHIP_TYPES`.
+    """
+    spec_path = Path(__file__).resolve().parents[2] / "be" / "openapi.json"
+    spec = json.loads(spec_path.read_text())
+    schemas = spec["components"]["schemas"]
+    openapi_asset_types = set(schemas["AiAsset"]["properties"]["assetType"]["enum"])
+    openapi_relationship_types = set(
+        schemas["AssetRelationship"]["properties"]["relationshipType"]["enum"]
+    )
+    assert set(AiSystemsResource.ASSET_TYPES) == openapi_asset_types
+    assert set(AiSystemsResource.RELATIONSHIP_TYPES) == openapi_relationship_types
 
 
 @respx.mock

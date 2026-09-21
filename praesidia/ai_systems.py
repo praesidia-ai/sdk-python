@@ -72,21 +72,26 @@ class AiSystemsResource:
         "suspended",
         "retired",
     )
-    #: `entities/ai-asset.entity.ts`'s `AI_ASSET_TYPES` (20 values).
+    #: `entities/ai-asset.entity.ts`'s `AI_ASSET_TYPES` (23 values, SDK-0007
+    #: synced with DB-0300's widened enum; kept in sync via
+    #: `tests/test_ai_systems.py::test_asset_and_relationship_types_match_openapi`).
     ASSET_TYPES = (
         "APPLICATION", "AGENT", "MODEL", "MODEL_ENDPOINT", "MCP_SERVER",
         "MCP_TOOL", "A2A_ENDPOINT", "API", "DATA_SOURCE", "DATASET",
         "VECTOR_STORE", "RAG_INDEX", "PROMPT", "SKILL", "VENDOR",
         "IDENTITY", "CREDENTIAL", "REPOSITORY", "CLOUD_RESOURCE", "WORKFLOW",
+        "TOOL", "API_ENDPOINT", "DATA_SCOPE",
     )
     #: `entities/ai-asset.entity.ts`'s `AI_ASSET_SOURCES`.
     ASSET_SOURCES = ("manual", "runtime_observation", "discovery_connector", "api", "import")
     #: `entities/ai-asset.entity.ts`'s `AI_ASSET_DISCOVERY_STATUSES`.
     DISCOVERY_STATUSES = ("discovered", "adopted", "ignored")
-    #: `entities/asset-relationship.entity.ts`'s `ASSET_RELATIONSHIP_TYPES`.
+    #: `entities/asset-relationship.entity.ts`'s `ASSET_RELATIONSHIP_TYPES`
+    #: (12 values, SDK-0007 synced -- see `ASSET_TYPES` note above).
     RELATIONSHIP_TYPES = (
         "USES", "CALLS", "ACCESSES", "CONTAINS", "DELEGATES_TO", "HOSTED_BY",
-        "READS", "HAS_PERMISSION", "GOVERNED_BY",
+        "READS", "HAS_PERMISSION", "GOVERNED_BY", "CAN_INVOKE", "GRANTS_SCOPE",
+        "CAN_ASSUME",
     )
     #: `TraverseAssetGraphQueryDto`'s `direction` enum (AISYS-0003).
     TRAVERSE_DIRECTIONS = ("downstream", "upstream", "both")
@@ -607,15 +612,16 @@ class AiSystemsResource:
                        to ``AI_SYSTEM_GRAPH_MAX_DEPTH``, default 6 -- a
                        request above the cap is lowered, not rejected, and
                        ``stats.depthClamped`` reports it).
-            asset_types: filter to these asset types (see :attr:`ASSET_TYPES`),
-                         applied inside the recursive leg -- a filtered-out
-                         node also prunes everything beyond it. Not
-                         client-side validated: be's asset-type enum has grown
-                         past this SDK's constant before (AISYS-0003 Evidence).
+            asset_types: filter to these asset types (see :attr:`ASSET_TYPES`,
+                         client-side validated as of SDK-0007 now that the
+                         constant is kept in sync with be's enum -- see
+                         :attr:`ASSET_TYPES`'s note), applied inside the
+                         recursive leg -- a filtered-out node also prunes
+                         everything beyond it.
             relationship_types: filter to these relationship types (see
-                                 :attr:`RELATIONSHIP_TYPES`), same pruning
-                                 behaviour and same "not client-side validated"
-                                 rationale.
+                                 :attr:`RELATIONSHIP_TYPES`, client-side
+                                 validated as of SDK-0007), same pruning
+                                 behaviour.
             include_archived: include archived assets/relationships in the
                                traversal (server default ``False``).
 
@@ -624,7 +630,9 @@ class AiSystemsResource:
             (``AssetGraphTraversalResponseDto``).
 
         Raises:
-            ValueError: ``direction`` is not one of :attr:`TRAVERSE_DIRECTIONS`.
+            ValueError: ``direction`` is not one of :attr:`TRAVERSE_DIRECTIONS`,
+                        or any entry of ``asset_types``/``relationship_types``
+                        is not one of :attr:`ASSET_TYPES`/:attr:`RELATIONSHIP_TYPES`.
 
         be 404s if ``asset_id`` is not found in this org, and 413s if the
         traversal result exceeds ``AI_SYSTEM_GRAPH_MAX_NODES``.
@@ -633,6 +641,19 @@ class AiSystemsResource:
             raise ValueError(
                 f"direction must be one of {self.TRAVERSE_DIRECTIONS}; got {direction!r}"
             )
+        if asset_types:
+            for asset_type in asset_types:
+                if asset_type not in self.ASSET_TYPES:
+                    raise ValueError(
+                        f"asset_types entries must be one of {self.ASSET_TYPES}; got {asset_type!r}"
+                    )
+        if relationship_types:
+            for relationship_type in relationship_types:
+                if relationship_type not in self.RELATIONSHIP_TYPES:
+                    raise ValueError(
+                        f"relationship_types entries must be one of {self.RELATIONSHIP_TYPES}; "
+                        f"got {relationship_type!r}"
+                    )
         params: dict[str, Any] = {"assetId": asset_id, "direction": direction}
         if max_depth is not None:
             params["maxDepth"] = max_depth

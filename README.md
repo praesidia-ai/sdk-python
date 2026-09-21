@@ -166,9 +166,10 @@ derived from the entity's `as const` array — be 400s on an unknown value).
 
 `traverse(asset_id, **filters)` walks the relationship graph from an anchor asset (`direction`
 one of `"downstream"`/`"upstream"`/`"both"`, client-side validated like the list filters above;
-`max_depth`/`asset_types`/`relationship_types`/`include_archived` are passed through
-unvalidated — be's asset/relationship-type enums have grown past this SDK's constants before, and
-a stale client-side check would incorrectly block a value the server accepts). `include_archived`
+`asset_types`/`relationship_types` are now also client-side validated against
+`ASSET_TYPES`/`RELATIONSHIP_TYPES` (SDK-0007 — a test asserts those tuples match
+`be/openapi.json`'s enums, so a stale-constant false rejection would fail CI before shipping);
+`max_depth`/`include_archived` are passed through unvalidated). `include_archived`
 uses the same boolean-string encoding as the list filters. `summary(ai_system_id)` returns a thin
 per-section aggregation (`compliance`/`risk`/`evaluations`/`cost`/`evidence`, each
 `{"available": bool, "reason"?, "counts"?, "updatedAt"?}`) plus `unlinkedAssets`; a section's
@@ -695,6 +696,18 @@ checkouts of `sdk` (owns the scanner), `be-core` (spec source of truth) and
 jobs.
 
 ## Changelog
+
+### Unreleased — SDK-0007: `ASSET_TYPES`/`RELATIONSHIP_TYPES` contract sync
+
+- **Fixed** `AiSystemsResource.ASSET_TYPES` (20 → 23: adds `TOOL`, `API_ENDPOINT`, `DATA_SCOPE`)
+  and `.RELATIONSHIP_TYPES` (9 → 12: adds `CAN_INVOKE`, `GRANTS_SCOPE`, `CAN_ASSUME`) to match
+  `be/openapi.json`'s `AiAsset.assetType`/`AssetRelationship.relationshipType` enums (DB-0300).
+  `traverse`'s `asset_types`/`relationship_types` filters are now client-side validated against
+  the synced tuples (same `ValueError` shape as `direction`) — previously skipped because the
+  constants lagged be's enum (SDK-0006). New test
+  `test_asset_and_relationship_types_match_openapi` reads the sibling `be/openapi.json` and fails
+  if the tuples drift again. No breaking changes to signatures — widened valid-value sets and a
+  new (additive) client-side check that only rejects values be already 400s on.
 
 ### Unreleased — SDK-0006: `traverse` (AISYS-0003) + `summary` (AISYS-0004)
 
