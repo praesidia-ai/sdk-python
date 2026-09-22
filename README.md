@@ -94,7 +94,7 @@ bound in memory.
 | Resource | Class | Key methods |
 |----------|-------|-------------|
 | `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `protect_action`, `refresh_credential` |
-| `client.ai_systems` | `AiSystemsResource` | `list`/`get`/`create`/`update`/`archive`/`restore`/`delete`/`update_owners`/`transition_lifecycle`/`summary`, `list_assets`/`create_asset`/`get_asset`/`update_asset`/`archive_asset`/`restore_asset`/`adopt_asset`, `attach_asset`/`detach_asset`/`change_asset_role`, `create_relationship`/`get_relationship`/`update_relationship`/`archive_relationship`/`restore_relationship`/`list_relationships`/`traverse` (each `list*` also has a `*_page`/`*_all` sibling) |
+| `client.ai_systems` | `AiSystemsResource` | `list`/`get`/`create`/`update`/`archive`/`restore`/`delete`/`update_owners`/`transition_lifecycle`/`summary`, `list_assets`/`create_asset`/`get_asset`/`update_asset`/`archive_asset`/`restore_asset`/`adopt_asset`, `attach_asset`/`detach_asset`/`change_asset_role`, `create_relationship`/`get_relationship`/`update_relationship`/`archive_relationship`/`restore_relationship`/`list_relationships`/`traverse`, `put_{system,asset,relationship}_by_external_id`/`delete_{system,asset,relationship}_by_external_id` (each `list*` also has a `*_page`/`*_all` sibling) |
 | `client.workflows` | `WorkflowsResource` | `list`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `get_run` |
 | `client.audit` | `AuditResource` | `list`, `stream`, `export`, `export_bundle` |
 | `client.proof` | `ProofResource` | `list`, `get`, `events`, `capture_scope`, `coverage_summary` |
@@ -154,6 +154,12 @@ client.ai_systems.create_relationship({
 | `restore_relationship(relationship_id)` | `dict` | `POST .../asset-relationships/:id/restore` |
 | `list_relationships(**filters)` | `list[dict]` | `GET .../asset-relationships` |
 | `traverse(asset_id, **filters)` | `dict` | `GET .../asset-relationships/graph/traverse` |
+| `put_system_by_external_id(external_id, data)` | `dict` | `PUT .../ai-systems/by-external-id/:externalId` |
+| `delete_system_by_external_id(external_id)` | `dict` | `DELETE .../ai-systems/by-external-id/:externalId` (archives) |
+| `put_asset_by_external_id(external_id, data)` | `dict` | `PUT .../ai-assets/by-external-id/:externalId` |
+| `delete_asset_by_external_id(external_id)` | `dict` | `DELETE .../ai-assets/by-external-id/:externalId` (archives) |
+| `put_relationship_by_external_id(external_id, data)` | `dict` | `PUT .../asset-relationships/by-external-id/:externalId` |
+| `delete_relationship_by_external_id(external_id)` | `dict` | `DELETE .../asset-relationships/by-external-id/:externalId` (archives) |
 
 Every `list*`/`list_assets`/`list_relationships` also has a `*_page` (full pagination envelope) and
 `*_all` (auto-paginating generator) sibling, matching the `list_page`/`list_all` convention above
@@ -175,6 +181,16 @@ per-section aggregation (`compliance`/`risk`/`evaluations`/`cost`/`evidence`, ea
 `{"available": bool, "reason"?, "counts"?, "updatedAt"?}`) plus `unlinkedAssets`; a section's
 `available: false` means be cannot filter that section by this system's asset ids at all yet, not
 that the count is zero.
+
+`put_{system,asset,relationship}_by_external_id(external_id, data)` (be's BE-0579,
+SDK-0302/PRAE-228/229) declaratively create-or-update a row keyed by an externally-owned
+`external_id` — the shape IaC tooling (Terraform provider, k8s operator) needs instead of a
+lookup-then-create/update round trip. Each returns
+`{"id", "externalId", "created", "changed", "updatedAt", "resource"}` — `changed` is the
+plan-stability signal: the same `data` sent twice returns `changed: False` the second time with
+an unchanged `updatedAt`; nothing was written. `delete_{system,asset,relationship}_by_external_id`
+archives (never a hard delete) and returns the same shape. Another tenant's `external_id` 404s on
+the DELETE rather than leaking existence; every lookup is org-scoped.
 
 ## Guard — guardrail checks + audit logging, with an offline fallback (TOP-0008)
 
@@ -696,6 +712,20 @@ checkouts of `sdk` (owns the scanner), `be-core` (spec source of truth) and
 jobs.
 
 ## Changelog
+
+### Unreleased — SDK-0302: `by-external-id` desired-state methods (PRAE-228/229)
+
+- **Added** to `AiSystemsResource` (`praesidia/ai_systems.py`): `put_system_by_external_id`/
+  `delete_system_by_external_id`, `put_asset_by_external_id`/`delete_asset_by_external_id`,
+  `put_relationship_by_external_id`/`delete_relationship_by_external_id` (be's BE-0579
+  desired-state API) — the shape IaC tooling (Terraform provider PRAE-228, k8s operator
+  PRAE-229) needs. Each returns `{"id", "externalId", "created", "changed", "updatedAt",
+  "resource"}` (`DesiredStateOutcomeDto`); `changed` is the plan-stability signal, surfaced not
+  swallowed. New `HttpClient.put`/`.delete_returning` (`_http.py`) back them — `put` is retried
+  like `get`/`delete` (PUT is naturally idempotent, no `idempotency_key` needed) and
+  `delete_returning` is `delete`'s sibling for a DELETE route that answers with a JSON body
+  instead of 204. TS↔Python parity: mirrors `sdk`'s SDK-0302. No breaking changes — additive
+  only.
 
 ### Unreleased — SDK-0007: `ASSET_TYPES`/`RELATIONSHIP_TYPES` contract sync
 

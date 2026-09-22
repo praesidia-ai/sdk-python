@@ -457,6 +457,37 @@ class HttpClient:
         self._raise_for_status(r)
         return r.json()
 
+    def put(
+        self,
+        path: str,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        """
+        Send a PUT request and return the parsed JSON body -- full replace /
+        declarative create-or-update (be's BE-0579 desired-state routes).
+
+        Always idempotent per HTTP semantics (and enforced server-side there
+        too), so -- unlike :meth:`post`/:meth:`patch` -- retried per policy
+        like :meth:`get`/:meth:`delete`; no ``idempotency_key`` needed.
+        """
+        url = f"{self._base}{path}"
+
+        def do() -> httpx.Response:
+            return self._request_bounded(
+                "PUT",
+                url,
+                path=path,
+                success_limit=_MAX_JSON_RESPONSE_BYTES,
+                headers=self._merged_headers(headers),
+                json=json,
+                timeout=self._timeout,
+            )
+
+        r = self._send_with_retry(True, do)
+        self._raise_for_status(r)
+        return r.json()
+
     def delete(self, path: str) -> None:
         """Send a DELETE request (no response body expected). Always idempotent -- retried per policy."""
         url = f"{self._base}{path}"
@@ -481,6 +512,30 @@ class HttpClient:
         if r.status_code == 404 and attempts > 1:
             return
         self._raise_for_status(r)
+
+    def delete_returning(self, path: str) -> Any:
+        """
+        Send a DELETE request and return the parsed JSON body -- be's BE-0579
+        desired-state DELETE routes archive (never a hard delete) and answer
+        with the same ``DesiredStateOutcome`` shape as their PUT sibling, so
+        unlike :meth:`delete` there is no no-body case to tolerate. Always
+        idempotent -- retried per policy.
+        """
+        url = f"{self._base}{path}"
+
+        def do() -> httpx.Response:
+            return self._request_bounded(
+                "DELETE",
+                url,
+                path=path,
+                success_limit=_MAX_JSON_RESPONSE_BYTES,
+                headers=self._merged_headers(None),
+                timeout=self._timeout,
+            )
+
+        r = self._send_with_retry(True, do)
+        self._raise_for_status(r)
+        return r.json()
 
     def stream_get(
         self,

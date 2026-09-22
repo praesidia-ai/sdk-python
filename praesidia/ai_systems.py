@@ -56,6 +56,11 @@ class AiSystemsResource:
     SDK-0006 adds the multi-hop graph :meth:`traverse` (AISYS-0003) and the
     AI System :meth:`summary` aggregation (AISYS-0004), now both on
     ``be/openapi.json``.
+
+    SDK-0302 (PRAE-228/229) adds the declarative ``by-external-id``
+    desired-state methods (``put_system_by_external_id`` and its asset/
+    relationship siblings, be's BE-0579) -- the shape IaC tooling (Terraform
+    provider, k8s operator) needs.
     """
 
     #: `entities/ai-system.entity.ts`'s `AI_SYSTEM_CRITICALITIES`.
@@ -262,6 +267,37 @@ class AiSystemsResource:
         """Soft-delete an AI System (sets ``deletedAt``). DELETE .../ai-systems/:id."""
         self._http.delete(f"{self._systems_base}/{path_segment(ai_system_id, 'ai_system_id')}")
 
+    def put_system_by_external_id(self, external_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Declaratively create-or-update an AI System keyed by an
+        externally-owned ``external_id`` (be's BE-0579 desired-state API,
+        SDK-0302/PRAE-228/229) -- the shape IaC tooling (Terraform provider,
+        k8s operator) needs instead of a lookup-then-create/update round
+        trip. PUT .../ai-systems/by-external-id/:externalId.
+
+        Idempotent: the same ``data`` sent twice returns ``changed: False``
+        the second time with an unchanged ``updatedAt`` -- check it before
+        assuming a write happened.
+
+        Returns:
+            ``{"id", "externalId", "created", "changed", "updatedAt",
+            "resource"}`` (``DesiredStateOutcomeDto``).
+        """
+        return self._http.put(
+            f"{self._systems_base}/by-external-id/{path_segment(external_id, 'external_id')}",
+            json=data,
+        )
+
+    def delete_system_by_external_id(self, external_id: str) -> dict[str, Any]:
+        """
+        Archive the AI System matching ``external_id`` (never a hard delete,
+        same as :meth:`archive`). DELETE .../ai-systems/by-external-id/:externalId.
+        Another tenant's ``external_id`` 404s rather than leaking existence.
+        """
+        return self._http.delete_returning(
+            f"{self._systems_base}/by-external-id/{path_segment(external_id, 'external_id')}"
+        )
+
     def summary(self, ai_system_id: str) -> dict[str, Any]:
         """
         Thin cross-section aggregation for one AI System.
@@ -419,6 +455,38 @@ class AiSystemsResource:
                    "role"?: ...}`` (``AdoptAiAssetDto``).
         """
         return self._http.post(f"{self._assets_base}/adopt", json=data)
+
+    def put_asset_by_external_id(self, external_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Declaratively create-or-update an AI Asset keyed by an
+        externally-owned ``external_id`` (be's BE-0579, SDK-0302/PRAE-228/229).
+        PUT .../ai-assets/by-external-id/:externalId. Idempotent -- see
+        :meth:`put_system_by_external_id`.
+
+        Args:
+            data: ``CreateAiAssetDto`` shape (``assetType`` validated against
+                  :attr:`ASSET_TYPES`, ``source``/``discoveryStatus`` against
+                  their own tuples, matching :meth:`list_assets_page`).
+        """
+        if (asset_type := data.get("assetType")) is not None and asset_type not in self.ASSET_TYPES:
+            raise ValueError(f"assetType must be one of {self.ASSET_TYPES}; got {asset_type!r}")
+        if (source := data.get("source")) is not None and source not in self.ASSET_SOURCES:
+            raise ValueError(f"source must be one of {self.ASSET_SOURCES}; got {source!r}")
+        if (status := data.get("discoveryStatus")) is not None and status not in self.DISCOVERY_STATUSES:
+            raise ValueError(f"discoveryStatus must be one of {self.DISCOVERY_STATUSES}; got {status!r}")
+        return self._http.put(
+            f"{self._assets_base}/by-external-id/{path_segment(external_id, 'external_id')}",
+            json=data,
+        )
+
+    def delete_asset_by_external_id(self, external_id: str) -> dict[str, Any]:
+        """
+        Archive the AI Asset matching ``external_id`` (never a hard delete).
+        DELETE .../ai-assets/by-external-id/:externalId.
+        """
+        return self._http.delete_returning(
+            f"{self._assets_base}/by-external-id/{path_segment(external_id, 'external_id')}"
+        )
 
     # ------------------------------------------------------------------
     # AI System <-> Asset membership
@@ -664,3 +732,31 @@ class AiSystemsResource:
         if include_archived is not None:
             params["includeArchived"] = "true" if include_archived else "false"
         return self._http.get(f"{self._relationships_base}/graph/traverse", params=params)
+
+    def put_relationship_by_external_id(self, external_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Declaratively create-or-update a relationship (edge) keyed by an
+        externally-owned ``external_id`` (be's BE-0579, SDK-0302/PRAE-228/229).
+        PUT .../asset-relationships/by-external-id/:externalId. Idempotent --
+        see :meth:`put_system_by_external_id`.
+
+        Args:
+            data: ``CreateAssetRelationshipDto`` shape (``relationshipType``
+                  validated against :attr:`RELATIONSHIP_TYPES`).
+        """
+        rel_type = data.get("relationshipType")
+        if rel_type is not None and rel_type not in self.RELATIONSHIP_TYPES:
+            raise ValueError(f"relationshipType must be one of {self.RELATIONSHIP_TYPES}; got {rel_type!r}")
+        return self._http.put(
+            f"{self._relationships_base}/by-external-id/{path_segment(external_id, 'external_id')}",
+            json=data,
+        )
+
+    def delete_relationship_by_external_id(self, external_id: str) -> dict[str, Any]:
+        """
+        Archive the relationship matching ``external_id`` (never a hard
+        delete). DELETE .../asset-relationships/by-external-id/:externalId.
+        """
+        return self._http.delete_returning(
+            f"{self._relationships_base}/by-external-id/{path_segment(external_id, 'external_id')}"
+        )

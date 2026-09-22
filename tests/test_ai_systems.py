@@ -407,3 +407,143 @@ def test_ai_system_summary_contract():
     result = _client().ai_systems.summary("s")
     assert result["unlinkedAssets"] == 2
     assert result["cost"] == {"available": False, "reason": "AISYS-0025"}
+
+
+@respx.mock
+def test_put_system_by_external_id_idempotent_on_repeat():
+    """SDK-0302/PRAE-228/229 — same body twice returns changed: False the
+    second time, with an unchanged updatedAt (be's BE-0579 semantics)."""
+    body = {"name": "Support triage bot"}
+    first = {
+        "id": "s",
+        "externalId": "ext-1",
+        "created": True,
+        "changed": True,
+        "updatedAt": "2026-09-22T00:00:00Z",
+        "resource": {"id": "s", "externalId": "ext-1", "name": "Support triage bot"},
+    }
+    second = {**first, "created": False, "changed": False}
+    route = respx.put(f"{SYSTEMS}/by-external-id/ext-1").mock(
+        side_effect=[httpx.Response(200, json=first), httpx.Response(200, json=second)]
+    )
+    client = _client()
+    first_result = client.ai_systems.put_system_by_external_id("ext-1", body)
+    second_result = client.ai_systems.put_system_by_external_id("ext-1", body)
+    assert json.loads(route.calls.last.request.content) == body
+    assert first_result["created"] is True and first_result["changed"] is True
+    assert second_result["changed"] is False
+    assert second_result["updatedAt"] == first_result["updatedAt"]
+
+
+@respx.mock
+def test_delete_system_by_external_id_returns_outcome_body():
+    route = respx.delete(f"{SYSTEMS}/by-external-id/ext-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "s",
+                "externalId": "ext-1",
+                "created": False,
+                "changed": True,
+                "updatedAt": "2026-09-22T00:00:01Z",
+                "resource": {"id": "s", "externalId": "ext-1", "archivedAt": "2026-09-22T00:00:01Z"},
+            },
+        )
+    )
+    result = _client().ai_systems.delete_system_by_external_id("ext-1")
+    assert result["resource"]["archivedAt"] == "2026-09-22T00:00:01Z"
+    assert route.called
+
+
+@respx.mock
+def test_put_asset_by_external_id_contract_and_enum_validation():
+    route = respx.put(f"{ASSETS}/by-external-id/ext-asset-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "a",
+                "externalId": "ext-asset-1",
+                "created": True,
+                "changed": True,
+                "updatedAt": "2026-09-22T00:00:00Z",
+                "resource": {"id": "a", "externalId": "ext-asset-1", "assetType": "VENDOR"},
+            },
+        )
+    )
+    result = _client().ai_systems.put_asset_by_external_id(
+        "ext-asset-1", {"name": "Vendor Co", "assetType": "VENDOR"}
+    )
+    assert result["created"] is True
+    assert route.called
+    with pytest.raises(ValueError):
+        _client().ai_systems.put_asset_by_external_id(
+            "ext-asset-1", {"name": "x", "assetType": "NOT_A_TYPE"}
+        )
+
+
+@respx.mock
+def test_delete_asset_by_external_id_returns_outcome_body():
+    route = respx.delete(f"{ASSETS}/by-external-id/ext-asset-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "a",
+                "externalId": "ext-asset-1",
+                "created": False,
+                "changed": True,
+                "updatedAt": "2026-09-22T00:00:01Z",
+                "resource": {"id": "a", "externalId": "ext-asset-1", "archivedAt": "2026-09-22T00:00:01Z"},
+            },
+        )
+    )
+    result = _client().ai_systems.delete_asset_by_external_id("ext-asset-1")
+    assert result["changed"] is True
+    assert route.called
+
+
+@respx.mock
+def test_put_relationship_by_external_id_contract_and_enum_validation():
+    route = respx.put(f"{RELATIONSHIPS}/by-external-id/ext-rel-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "r",
+                "externalId": "ext-rel-1",
+                "created": True,
+                "changed": True,
+                "updatedAt": "2026-09-22T00:00:00Z",
+                "resource": {"id": "r", "externalId": "ext-rel-1", "relationshipType": "USES"},
+            },
+        )
+    )
+    result = _client().ai_systems.put_relationship_by_external_id(
+        "ext-rel-1",
+        {"sourceAssetId": "a", "targetAssetId": "b", "relationshipType": "USES"},
+    )
+    assert result["created"] is True
+    assert route.called
+    with pytest.raises(ValueError):
+        _client().ai_systems.put_relationship_by_external_id(
+            "ext-rel-1",
+            {"sourceAssetId": "a", "targetAssetId": "b", "relationshipType": "NOT_A_TYPE"},
+        )
+
+
+@respx.mock
+def test_delete_relationship_by_external_id_returns_outcome_body():
+    route = respx.delete(f"{RELATIONSHIPS}/by-external-id/ext-rel-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "r",
+                "externalId": "ext-rel-1",
+                "created": False,
+                "changed": True,
+                "updatedAt": "2026-09-22T00:00:01Z",
+                "resource": {"id": "r", "externalId": "ext-rel-1", "archivedAt": "2026-09-22T00:00:01Z"},
+            },
+        )
+    )
+    result = _client().ai_systems.delete_relationship_by_external_id("ext-rel-1")
+    assert result["changed"] is True
+    assert route.called
