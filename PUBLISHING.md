@@ -111,7 +111,7 @@ filename can never be reused, even after deletion.
 Same as `sdk`'s (kept in lockstep intentionally, see that repo's `PUBLISHING.md`): standard
 SemVer, pre-1.0 (`0.x`) breaking changes land as a **minor** bump, patch is reserved for
 backward-compatible fixes. `1.0.0` is a deliberate decision, not automatic. Every hand-written API
-call in `praesidia/*.py` is checked against a fresh `be/openapi.json` export by the
+call in `praesidia/*.py` is checked against a fresh `ui/swagger.json` export by the
 contract-drift gate (`.github/workflows/contract-drift.yml`, mirrored locally via
 `sdk/scripts/audit-api-contract.mjs --lang py`) before any release, published or not — see this
 repo's ticket report for the current parity verdict.

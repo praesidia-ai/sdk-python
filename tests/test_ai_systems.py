@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import httpx
@@ -11,6 +12,19 @@ import respx
 
 from praesidia import Praesidia
 from praesidia.ai_systems import AiSystemsResource
+
+# SDK-0303 -- spec-path resolution mirrors sdk's scripts/audit-api-contract.mjs:
+# BE_SWAGGER_PATH override > ../../ui/swagger.json sibling checkout (this
+# monorepo's committed, gate-verified spec; be's frozen openapi.json export is a stale
+# snapshot nothing regenerates -- see SDK-0303). Skips with a reason (never
+# fails) when neither exists, so this package still tests from a bare
+# sdk-python clone with no ui sibling.
+_env_override = os.environ.get("BE_SWAGGER_PATH")
+if _env_override and Path(_env_override).resolve().is_file():
+    _SWAGGER_PATH = Path(_env_override).resolve()
+else:
+    _SWAGGER_PATH = (Path(__file__).resolve().parents[2] / "ui" / "swagger.json")
+_SWAGGER_AVAILABLE = _SWAGGER_PATH.is_file()
 
 BASE_URL = "http://test.local"
 ORG_ID = "org-1"
@@ -371,15 +385,21 @@ def test_traverse_rejects_invalid_relationship_type():
         _client().ai_systems.traverse("a1", relationship_types=["NOT_A_RELATIONSHIP"])
 
 
+@pytest.mark.skipif(
+    not _SWAGGER_AVAILABLE,
+    reason=(
+        f"no swagger.json at {_SWAGGER_PATH} (BE_SWAGGER_PATH override or "
+        "ui/swagger.json sibling checkout) -- see SDK-0303"
+    ),
+)
 def test_asset_and_relationship_types_match_openapi():
     """SDK-0007 — fails if be's enum widens/shrinks again without an SDK sync.
 
-    Reads the sibling-checkout `be/openapi.json` (never regenerated here) and
+    Reads the gate-verified `ui/swagger.json` (never regenerated here) and
     compares its `AiAsset.assetType` / `AssetRelationship.relationshipType`
     enums against `AiSystemsResource.ASSET_TYPES` / `RELATIONSHIP_TYPES`.
     """
-    spec_path = Path(__file__).resolve().parents[2] / "be" / "openapi.json"
-    spec = json.loads(spec_path.read_text())
+    spec = json.loads(_SWAGGER_PATH.read_text())
     schemas = spec["components"]["schemas"]
     openapi_asset_types = set(schemas["AiAsset"]["properties"]["assetType"]["enum"])
     openapi_relationship_types = set(

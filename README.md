@@ -174,7 +174,7 @@ derived from the entity's `as const` array — be 400s on an unknown value).
 one of `"downstream"`/`"upstream"`/`"both"`, client-side validated like the list filters above;
 `asset_types`/`relationship_types` are now also client-side validated against
 `ASSET_TYPES`/`RELATIONSHIP_TYPES` (SDK-0007 — a test asserts those tuples match
-`be/openapi.json`'s enums, so a stale-constant false rejection would fail CI before shipping);
+`ui/swagger.json`'s enums, so a stale-constant false rejection would fail CI before shipping);
 `max_depth`/`include_archived` are passed through unvalidated). `include_archived`
 uses the same boolean-string encoding as the list filters. `summary(ai_system_id)` returns a thin
 per-section aggregation (`compliance`/`risk`/`evaluations`/`cost`/`evidence`, each
@@ -731,11 +731,11 @@ jobs.
 
 - **Fixed** `AiSystemsResource.ASSET_TYPES` (20 → 23: adds `TOOL`, `API_ENDPOINT`, `DATA_SCOPE`)
   and `.RELATIONSHIP_TYPES` (9 → 12: adds `CAN_INVOKE`, `GRANTS_SCOPE`, `CAN_ASSUME`) to match
-  `be/openapi.json`'s `AiAsset.assetType`/`AssetRelationship.relationshipType` enums (DB-0300).
+  `ui/swagger.json`'s `AiAsset.assetType`/`AssetRelationship.relationshipType` enums (DB-0300).
   `traverse`'s `asset_types`/`relationship_types` filters are now client-side validated against
   the synced tuples (same `ValueError` shape as `direction`) — previously skipped because the
   constants lagged be's enum (SDK-0006). New test
-  `test_asset_and_relationship_types_match_openapi` reads the sibling `be/openapi.json` and fails
+  `test_asset_and_relationship_types_match_openapi` reads the sibling `ui/swagger.json` and fails
   if the tuples drift again. No breaking changes to signatures — widened valid-value sets and a
   new (additive) client-side check that only rejects values be already 400s on.
 
@@ -744,7 +744,7 @@ jobs.
 - **Added** `AiSystemsResource.traverse(asset_id, **filters)`
   (`GET .../asset-relationships/graph/traverse`) and `.summary(ai_system_id)`
   (`GET .../ai-systems/:id/summary`, added opportunistically — same contract batch, cheap to
-  cover in the same item) once both routes landed on `be/openapi.json`. `traverse`'s `direction`
+  cover in the same item) once both routes landed on `ui/swagger.json`. `traverse`'s `direction`
   is client-side validated (`"downstream"`/`"upstream"`/`"both"`); `asset_types`/
   `relationship_types` are not (see the note above the method table). No breaking changes —
   additive methods only, no existing signature touched.
@@ -756,7 +756,7 @@ jobs.
   `archive_asset`/`restore_asset`; membership `change_asset_role`; relationship
   `get_relationship`/`update_relationship`/`archive_relationship`/`restore_relationship`. Closes
   the SDK-0002 exclusions except multi-hop graph `traverse` (AISYS-0003 — landed in SDK-0006 once
-  the route reached `be/openapi.json`). See
+  the route reached `ui/swagger.json`). See
   [AI Systems / assets / relationship graph](#ai-systems--assets--relationship-graph-sdk-0002sdk-0004-parity-with-bes-aisys-0002-and-sdks-sdk-0001sdk-0003)
   for the full method table. No breaking changes — additive methods only, no existing signature
   touched.

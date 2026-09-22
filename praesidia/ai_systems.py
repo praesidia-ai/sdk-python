@@ -55,7 +55,7 @@ class AiSystemsResource:
 
     SDK-0006 adds the multi-hop graph :meth:`traverse` (AISYS-0003) and the
     AI System :meth:`summary` aggregation (AISYS-0004), now both on
-    ``be/openapi.json``.
+    ``ui/swagger.json``.
 
     SDK-0302 (PRAE-228/229) adds the declarative ``by-external-id``
     desired-state methods (``put_system_by_external_id`` and its asset/
