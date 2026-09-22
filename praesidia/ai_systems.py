@@ -92,11 +92,11 @@ class AiSystemsResource:
     #: `entities/ai-asset.entity.ts`'s `AI_ASSET_DISCOVERY_STATUSES`.
     DISCOVERY_STATUSES = ("discovered", "adopted", "ignored")
     #: `entities/asset-relationship.entity.ts`'s `ASSET_RELATIONSHIP_TYPES`
-    #: (12 values, SDK-0007 synced -- see `ASSET_TYPES` note above).
+    #: (13 values, SDK-0007/SDK-0304 synced -- see `ASSET_TYPES` note above).
     RELATIONSHIP_TYPES = (
         "USES", "CALLS", "ACCESSES", "CONTAINS", "DELEGATES_TO", "HOSTED_BY",
-        "READS", "HAS_PERMISSION", "GOVERNED_BY", "CAN_INVOKE", "GRANTS_SCOPE",
-        "CAN_ASSUME",
+        "READS", "WRITES", "HAS_PERMISSION", "GOVERNED_BY", "CAN_INVOKE",
+        "GRANTS_SCOPE", "CAN_ASSUME",
     )
     #: `TraverseAssetGraphQueryDto`'s `direction` enum (AISYS-0003).
     TRAVERSE_DIRECTIONS = ("downstream", "upstream", "both")

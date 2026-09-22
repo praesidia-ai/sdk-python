@@ -727,6 +727,12 @@ jobs.
   instead of 204. TS↔Python parity: mirrors `sdk`'s SDK-0302. No breaking changes — additive
   only.
 
+### Unreleased — SDK-0304: `RELATIONSHIP_TYPES` adds `WRITES`
+
+- **Fixed** `AiSystemsResource.RELATIONSHIP_TYPES` (12 → 13: adds `WRITES`) to match
+  `ui/swagger.json`'s `AssetRelationship.relationshipType` enum (DB-0502, the write half of the
+  PRAE-161 lineage chain). No breaking changes — widened valid-value set only.
+
 ### Unreleased — SDK-0007: `ASSET_TYPES`/`RELATIONSHIP_TYPES` contract sync
 
 - **Fixed** `AiSystemsResource.ASSET_TYPES` (20 → 23: adds `TOOL`, `API_ENDPOINT`, `DATA_SCOPE`)
