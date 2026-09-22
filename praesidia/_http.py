@@ -542,6 +542,7 @@ class HttpClient:
         path: str,
         params: dict[str, Any] | None = None,
         timeout: httpx.Timeout | float | None = None,
+        include_auth: bool = True,
     ) -> httpx.Response:
         """
         Bounded buffered GET for bulk download/export endpoints (report PDF,
@@ -554,7 +555,8 @@ class HttpClient:
         still failing fast on a stalled peer. Pass ``timeout=`` to override
         for an unusually long or short transfer. The body is consumed through
         ``httpx.stream()`` and rejected above the explicit download-byte cap
-        before it can grow without bound in memory.
+        before it can grow without bound in memory. ``include_auth=False``
+        omits the API key for a public route (e.g. the trust-passport PDF).
         """
         url = f"{self._base}{path}"
 
@@ -564,7 +566,7 @@ class HttpClient:
                 url,
                 path=path,
                 success_limit=_MAX_DOWNLOAD_RESPONSE_BYTES,
-                headers=self._merged_headers(None),
+                headers=self._merged_headers(None, include_auth=include_auth),
                 params=params,
                 timeout=_DOWNLOAD_TIMEOUT if timeout is None else timeout,
             )

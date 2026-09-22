@@ -103,7 +103,7 @@ bound in memory.
 | `client.compliance` | `ComplianceResource` | `request_report`, `get_status`, `get_json`, `get_pdf`, `wait_for_report`, `generate_and_wait` |
 | `client.memory` | `MemoryResource` | `create`, `list`, `search`, `erase`, `get`, `delete` |
 | `client.telemetry` | `TelemetryResource` | `emit`, `emit_gen_ai_span`, `emit_gen_ai_spans`, `build_gen_ai_resource_spans` |
-| `client.trust` | `TrustResource` | `fetch_passport`, `fetch_verify_bundle`, `verify_passport`, `fetch_and_verify` |
+| `client.trust` | `TrustResource` | `fetch_passport`, `fetch_verify_bundle`, `verify_passport`, `fetch_and_verify`, `fetch_ai_system_passport_pdf` |
 
 ## AI Systems / assets / relationship graph (SDK-0002/SDK-0004, parity with be's AISYS-0002 and `sdk`'s SDK-0001/SDK-0003)
 
@@ -459,6 +459,15 @@ result = verify_passport(passport, my_trusted_jwk)
 | `trusted_keys` without the signing key | `verified: False`, `reason: "untrusted_key"` |
 | `expected_fingerprint` matches the served key | verified normally against that key |
 | `expected_fingerprint` differs | `verified: False`, `reason: "fingerprint_mismatch"` |
+
+A human-readable PDF of an **AI System's** signed passport (signature
+fingerprint + verification URL printed on it) is a public download too:
+
+```python
+pdf = client.trust.fetch_ai_system_passport_pdf(ai_system_id)  # bytes, starts with b"%PDF-"
+open("trust-passport.pdf", "wb").write(pdf)
+# Unknown / soft-deleted AI System → NotFoundError
+```
 
 ## Agent credential refresh
 

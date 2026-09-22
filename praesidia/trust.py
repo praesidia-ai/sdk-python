@@ -312,6 +312,23 @@ class TrustResource:
             include_auth=False,
         )
 
+    def fetch_ai_system_passport_pdf(self, ai_system_id: str) -> bytes:
+        """
+        Download the human-readable PDF rendering of an AI System's signed
+        trust passport (BE-0541).
+        ``GET /trust/passport/ai-systems/{ai_system_id}/passport.pdf`` (public
+        — no auth). Returns the raw PDF bytes — write with
+        ``open(path, "wb").write(pdf)``. Raises ``NotFoundError`` for an
+        unknown or soft-deleted AI System.
+        """
+        r = self._http.stream_get(
+            f"/trust/passport/ai-systems/{path_segment(ai_system_id, 'ai_system_id')}"
+            "/passport.pdf",
+            include_auth=False,
+        )
+        self._http._raise_for_status(r)
+        return r.content
+
     def verify_passport(
         self,
         passport: dict[str, Any],

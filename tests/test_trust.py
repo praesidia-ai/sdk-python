@@ -16,6 +16,7 @@ import pytest
 import respx
 
 from praesidia import (
+    NotFoundError,
     Praesidia,
     ed25519_public_key_from_jwk,
     jwk_thumbprint,
@@ -486,3 +487,48 @@ def test_jwk_thumbprint_is_rfc7638_and_none_for_unusable_keys():
     assert jwk_thumbprint_hex(PUBLIC_KEY_JWK) == expected.hex()
     assert jwk_thumbprint(P256_PUBLIC_KEY_JWK) is not None
     assert jwk_thumbprint({"kty": "RSA", "n": "x", "e": "AQAB"}) is None
+
+
+# ── SDK-0306: AI System trust-passport PDF (BE-0541, binary response) ─────────
+
+# A real PDF header + the high-bit "binary marker" comment line: any text/JSON
+# decode on the way through would corrupt these bytes.
+PDF_BYTES = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n\x00\xff"
+
+
+@respx.mock
+def test_fetch_ai_system_passport_pdf_returns_exact_bytes_unauthenticated():
+    route = respx.get(
+        f"{BASE_URL}/trust/passport/ai-systems/sys-1/passport.pdf"
+    ).mock(
+        return_value=httpx.Response(
+            200, content=PDF_BYTES, headers={"content-type": "application/pdf"}
+        )
+    )
+    pdf = _client().trust.fetch_ai_system_passport_pdf("sys-1")
+    assert pdf == PDF_BYTES
+    assert isinstance(pdf, bytes)
+    assert "Authorization" not in route.calls.last.request.headers
+
+
+@respx.mock
+def test_fetch_ai_system_passport_pdf_maps_json_404_to_typed_error():
+    # be's http-exception.filter envelope for an unknown AI System.
+    respx.get(f"{BASE_URL}/trust/passport/ai-systems/nope/passport.pdf").mock(
+        return_value=httpx.Response(
+            404,
+            json={
+                "statusCode": 404,
+                "path": "/trust/passport/ai-systems/nope/passport.pdf",
+                "method": "GET",
+                "requestId": "req-404",
+                "message": "AI System not found",
+            },
+        )
+    )
+    with pytest.raises(NotFoundError) as exc_info:
+        _client().trust.fetch_ai_system_passport_pdf("nope")
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.request_id == "req-404"
+    assert exc_info.value.body["message"] == "AI System not found"
+    assert exc_info.value.retryable is False
