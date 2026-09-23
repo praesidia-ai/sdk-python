@@ -2,7 +2,7 @@
 # Newer Hatchling releases can emit Core Metadata 2.5, which Twine 6.2 rejects.
 # Pin the backend that produces the currently publishable Metadata-Version 2.4
 # so an isolated release build cannot change format underneath the same tag.
-requires = ["hatchling==1.27.0"]
+requires = ["hatchling==1.32.3"]
 build-backend = "hatchling.build"
 
 [project]
@@ -33,16 +33,16 @@ classifiers = [
 [project.optional-dependencies]
 langgraph = ["langgraph>=1.0,<2; python_version >= '3.10'", "langgraph-checkpoint-sqlite>=3,<4; python_version >= '3.10'"]
 crewai = ["crewai==1.15.20; python_version >= '3.10' and python_version < '3.14'"]
-openai-agents = ["openai-agents==0.20.0; python_version >= '3.10'"]
-google-adk = ["google-adk==2.8.0; python_version >= '3.10'"]
-microsoft-agent-framework = ["agent-framework-core==1.17.0; python_version >= '3.10'"]
-agno = ["agno==3.0.6; python_version >= '3.10'"]
+openai-agents = ["openai-agents==0.22.3; python_version >= '3.10'"]
+google-adk = ["google-adk==2.9.2; python_version >= '3.10'"]
+microsoft-agent-framework = ["agent-framework-core==1.19.0; python_version >= '3.10'"]
+agno = ["agno==3.0.10; python_version >= '3.10'"]
 frameworks = [
     "crewai==1.15.20; python_version >= '3.10' and python_version < '3.14'",
-    "openai-agents==0.20.0; python_version >= '3.10'",
-    "google-adk==2.8.0; python_version >= '3.10'",
-    "agent-framework-core==1.17.0; python_version >= '3.10'",
-    "agno==3.0.6; python_version >= '3.10'",
+    "openai-agents==0.22.3; python_version >= '3.10'",
+    "google-adk==2.9.2; python_version >= '3.10'",
+    "agent-framework-core==1.19.0; python_version >= '3.10'",
+    "agno==3.0.10; python_version >= '3.10'",
     "langgraph==1.2.11; python_version >= '3.10'",
     "langgraph-checkpoint-sqlite==3.1.1; python_version >= '3.10'",
 ]
