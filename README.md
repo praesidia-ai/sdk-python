@@ -103,7 +103,7 @@ bound in memory.
 | `client.compliance` | `ComplianceResource` | `request_report`, `get_status`, `get_json`, `get_pdf`, `wait_for_report`, `generate_and_wait` |
 | `client.memory` | `MemoryResource` | `create`, `list`, `search`, `erase`, `get`, `delete` |
 | `client.telemetry` | `TelemetryResource` | `emit`, `emit_gen_ai_span`, `emit_gen_ai_spans`, `build_gen_ai_resource_spans` |
-| `client.trust` | `TrustResource` | `fetch_passport`, `fetch_verify_bundle`, `verify_passport`, `fetch_and_verify`, `fetch_ai_system_passport_pdf` |
+| `client.trust` | `TrustResource` | `fetch_passport`, `fetch_verify_bundle`, `verify_passport`, `fetch_and_verify`, `fetch_ai_system_passport`, `fetch_ai_system_verify_bundle`, `fetch_ai_system_badge_svg`, `fetch_ai_system_passport_pdf` |
 
 ## AI Systems / assets / relationship graph (SDK-0002/SDK-0004, parity with be's AISYS-0002 and `sdk`'s SDK-0001/SDK-0003)
 
@@ -469,6 +469,38 @@ open("trust-passport.pdf", "wb").write(pdf)
 # Unknown / soft-deleted AI System → NotFoundError
 ```
 
+The rest of the **AI System** passport routes are public as well — `TrustResource`
+never sends the API key on any of them:
+
+```python
+passport = client.trust.fetch_ai_system_passport(ai_system_id)
+# dict (be's AiSystemTrustPassportDto): credentialSubject.{aiSystemName, frameworks,
+# attestations, posture, redTeam, regulatoryClassification, aibom, dataCategories,
+# incidents, models, permissions, evidenceRoot} — each section is
+# {"available": True, "counts": {...}} or {"available": False, "reason": ...}
+# (a gap is never reported as a zero count).
+
+bundle = client.trust.fetch_ai_system_verify_bundle(ai_system_id)
+# {"passport", "publicKeyJwk", "verificationHint",
+#  "embed": {"badgeUrl", "verifyUrl", "html", "markdown"}}
+
+svg = client.trust.fetch_ai_system_badge_svg(ai_system_id)  # str, "<svg …>"
+# Unknown / soft-deleted AI System → NotFoundError; the verify bundle raises a
+# retryable ServerError (503) when be cannot load the org signing key.
+```
+
+| Method | Route | Auth |
+|---|---|---|
+| `fetch_ai_system_passport` | `GET /trust/passport/ai-systems/{ai_system_id}` | public (no auth) |
+| `fetch_ai_system_verify_bundle` | `GET /trust/passport/ai-systems/{ai_system_id}/verify` | public (no auth) |
+| `fetch_ai_system_badge_svg` | `GET /trust/passport/ai-systems/{ai_system_id}/badge.svg` | public (no auth) |
+| `fetch_ai_system_passport_pdf` | `GET /trust/passport/ai-systems/{ai_system_id}/passport.pdf` | public (no auth) |
+
+The bundle's `publicKeyJwk` comes from the same unauthenticated response as the
+passport, so it is not a trust anchor on its own. `verify_passport` /
+`fetch_and_verify` check the **agent** passport envelope only; offline
+verification of an AI System passport is not in the SDK yet.
+
 ## Agent credential refresh
 
 Adopt a newly provisioned management API key at runtime for a
@@ -721,6 +753,16 @@ checkouts of `sdk` (owns the scanner), `be-core` (spec source of truth) and
 jobs.
 
 ## Changelog
+
+### Unreleased — SDK-0310: public AI System passport routes (BE-0540)
+
+- **Added** to `TrustResource` (`praesidia/trust.py`): `fetch_ai_system_passport`,
+  `fetch_ai_system_verify_bundle` (both `dict`, shaped like be's
+  `ai-system-trust-passport.dto.ts`) and `fetch_ai_system_badge_svg` (`str`) for
+  `GET /trust/passport/ai-systems/{ai_system_id}[/verify|/badge.svg]` — public,
+  sent without the API key, like `fetch_ai_system_passport_pdf`. TS parity:
+  `PraesidiaTrust.fetchAiSystemPassport` / `fetchAiSystemVerifyBundle` /
+  `fetchAiSystemBadgeSvg`. No breaking changes — additive only.
 
 ### Unreleased — SDK-0302: `by-external-id` desired-state methods (PRAE-228/229)
 

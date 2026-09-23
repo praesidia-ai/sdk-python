@@ -312,6 +312,57 @@ class TrustResource:
             include_auth=False,
         )
 
+    def fetch_ai_system_passport(self, ai_system_id: str) -> dict[str, Any]:
+        """
+        Fetch an AI System's signed trust passport (BE-0540), aggregated over
+        its member assets. ``GET /trust/passport/ai-systems/{ai_system_id}``
+        (public — no auth). Shape: be's ``AiSystemTrustPassportDto`` — a W3C VC
+        (``type: ["VerifiableCredential", "AiSystemTrustPassport"]``) whose
+        ``credentialSubject`` carries ``aiSystemName``, ``frameworks``,
+        ``attestations`` and the sections ``posture``, ``redTeam``,
+        ``regulatoryClassification``, ``aibom`` (+ ``digest``/``version``),
+        ``dataCategories``, ``incidents``, ``models``, ``permissions``,
+        ``evidenceRoot`` — each ``{"available": True, "counts": {...}}`` or
+        ``{"available": False, "reason": ...}``. Raises ``NotFoundError`` for an
+        unknown or soft-deleted AI System.
+        """
+        return self._http.get(
+            f"/trust/passport/ai-systems/{path_segment(ai_system_id, 'ai_system_id')}",
+            include_auth=False,
+        )
+
+    def fetch_ai_system_verify_bundle(self, ai_system_id: str) -> dict[str, Any]:
+        """
+        Fetch an AI System's verification bundle: ``{"passport",
+        "publicKeyJwk", "verificationHint", "embed": {"badgeUrl", "verifyUrl",
+        "html", "markdown"}}`` (be's ``AiSystemTrustPassportVerifyDto``).
+        ``GET /trust/passport/ai-systems/{ai_system_id}/verify`` (public — no
+        auth). The JWK arrives on the same unauthenticated response as the
+        passport, so it is not a trust anchor on its own. Raises
+        ``NotFoundError`` (unknown AI System) or a retryable ``ServerError``
+        (503 — be could not load the org signing key).
+        """
+        return self._http.get(
+            f"/trust/passport/ai-systems/{path_segment(ai_system_id, 'ai_system_id')}"
+            "/verify",
+            include_auth=False,
+        )
+
+    def fetch_ai_system_badge_svg(self, ai_system_id: str) -> str:
+        """
+        Fetch an AI System's embeddable SVG trust badge.
+        ``GET /trust/passport/ai-systems/{ai_system_id}/badge.svg`` (public —
+        no auth). Returns the SVG markup as ``str``. Raises ``NotFoundError``
+        for an unknown or soft-deleted AI System.
+        """
+        r = self._http.stream_get(
+            f"/trust/passport/ai-systems/{path_segment(ai_system_id, 'ai_system_id')}"
+            "/badge.svg",
+            include_auth=False,
+        )
+        self._http._raise_for_status(r)
+        return r.text
+
     def fetch_ai_system_passport_pdf(self, ai_system_id: str) -> bytes:
         """
         Download the human-readable PDF rendering of an AI System's signed

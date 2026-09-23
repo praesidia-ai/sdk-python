@@ -18,6 +18,7 @@ import respx
 from praesidia import (
     NotFoundError,
     Praesidia,
+    ServerError,
     ed25519_public_key_from_jwk,
     jwk_thumbprint,
     jwk_thumbprint_hex,
@@ -532,3 +533,141 @@ def test_fetch_ai_system_passport_pdf_maps_json_404_to_typed_error():
     assert exc_info.value.request_id == "req-404"
     assert exc_info.value.body["message"] == "AI System not found"
     assert exc_info.value.retryable is False
+
+
+# ── SDK-0310: AI System trust passport JSON + badge routes (BE-0540) ──────────
+
+AI_SYSTEM_PASSPORT = {
+    "@context": ["https://www.w3.org/2018/credentials/v1"],
+    "type": ["VerifiableCredential", "AiSystemTrustPassport"],
+    "id": "https://api.praesidia.ai/trust/passport/ai-systems/sys-1#2026-09-22T00:00:00.000Z",
+    "issuer": "did:web:praesidia.ai:orgs:org-1",
+    "issuanceDate": "2026-09-22T00:00:00.000Z",
+    "expirationDate": "2026-09-23T00:00:00.000Z",
+    "credentialSubject": {
+        "id": "did:web:praesidia.ai:ai-systems:sys-1",
+        "aiSystemName": "Fraud Triage",
+        "posture": {"available": True, "counts": {"verified": 2}, "updatedAt": None},
+        "redTeam": {"available": False, "reason": "AISYS-0031"},
+        "attestations": {
+            "activeCount": 2,
+            "identityVerified": True,
+            "guardrailsActive": True,
+            "auditTrailEnabled": True,
+            "spendCapConfigured": False,
+        },
+        "frameworks": ["EU-AI-Act"],
+        "regulatoryClassification": {"available": True, "counts": {"high": 1}},
+        "aibom": {"available": True, "digest": "sha256:abc", "version": 3},
+        "dataCategories": {"available": True, "counts": {}},
+        "incidents": {"available": True, "counts": {"open": 0}},
+        "models": {"available": True, "counts": {"openai": 1}},
+        "permissions": {"available": False, "reason": "AISYS-0040"},
+        "evidenceRoot": {"available": False, "reason": "AISYS-0041"},
+    },
+    "proof": {
+        "type": "Ed25519Signature2020",
+        "created": "2026-09-22T00:00:00.000Z",
+        "proofPurpose": "assertionMethod",
+        "verificationMethod": "did:web:praesidia.ai:orgs:org-1#key-1",
+        "keyVersion": 1,
+        "proofValue": "c2ln",
+    },
+}
+AI_SYSTEM_ROUTE = f"{BASE_URL}/trust/passport/ai-systems"
+
+
+@respx.mock
+def test_fetch_ai_system_passport_returns_passport_unauthenticated():
+    route = respx.get(f"{AI_SYSTEM_ROUTE}/sys%201").mock(
+        return_value=httpx.Response(200, json=AI_SYSTEM_PASSPORT)
+    )
+    passport = _client().trust.fetch_ai_system_passport("sys 1")
+    assert passport == AI_SYSTEM_PASSPORT
+    assert passport["credentialSubject"]["aibom"]["digest"] == "sha256:abc"
+    assert "Authorization" not in route.calls.last.request.headers
+
+
+@respx.mock
+def test_fetch_ai_system_verify_bundle_returns_bundle_unauthenticated():
+    bundle = {
+        "passport": AI_SYSTEM_PASSPORT,
+        "publicKeyJwk": {"kty": "OKP", "crv": "Ed25519", "x": "AAAA"},
+        "verificationHint": "Import publicKeyJwk as an OKP Ed25519 key (alg: EdDSA).",
+        "embed": {
+            "badgeUrl": f"{AI_SYSTEM_ROUTE}/sys-1/badge.svg",
+            "verifyUrl": f"{AI_SYSTEM_ROUTE}/sys-1/verify",
+            "html": '<a href="…"><img src="…" /></a>',
+            "markdown": "[![…](…)](…)",
+        },
+    }
+    route = respx.get(f"{AI_SYSTEM_ROUTE}/sys-1/verify").mock(
+        return_value=httpx.Response(200, json=bundle)
+    )
+    assert _client().trust.fetch_ai_system_verify_bundle("sys-1") == bundle
+    assert "Authorization" not in route.calls.last.request.headers
+
+
+@respx.mock
+def test_fetch_ai_system_badge_svg_returns_svg_text_unauthenticated():
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="20">'
+        "<text>EU AI Act · high</text></svg>"
+    )
+    route = respx.get(f"{AI_SYSTEM_ROUTE}/sys-1/badge.svg").mock(
+        return_value=httpx.Response(
+            200,
+            content=svg.encode("utf-8"),
+            headers={"content-type": "image/svg+xml; charset=utf-8"},
+        )
+    )
+    badge = _client().trust.fetch_ai_system_badge_svg("sys-1")
+    assert badge == svg
+    assert isinstance(badge, str)
+    assert "Authorization" not in route.calls.last.request.headers
+
+
+@pytest.mark.parametrize(
+    ("method", "suffix"),
+    [
+        ("fetch_ai_system_passport", ""),
+        ("fetch_ai_system_verify_bundle", "/verify"),
+        ("fetch_ai_system_badge_svg", "/badge.svg"),
+    ],
+)
+@respx.mock
+def test_fetch_ai_system_routes_map_404_to_typed_error(method, suffix):
+    # be's http-exception.filter envelope; message from AiSystemTrustPassportService.
+    respx.get(f"{AI_SYSTEM_ROUTE}/nope{suffix}").mock(
+        return_value=httpx.Response(
+            404,
+            json={
+                "statusCode": 404,
+                "path": f"/trust/passport/ai-systems/nope{suffix}",
+                "method": "GET",
+                "requestId": "req-404",
+                "message": "Trust passport not found",
+            },
+        )
+    )
+    with pytest.raises(NotFoundError) as exc_info:
+        getattr(_client().trust, method)("nope")
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.request_id == "req-404"
+    assert exc_info.value.body["message"] == "Trust passport not found"
+    assert exc_info.value.retryable is False
+
+
+@respx.mock
+def test_fetch_ai_system_verify_bundle_maps_503_to_retryable_server_error():
+    # be answers 503 when the org signing-key lookup fails (AUD-0027).
+    respx.get(f"{AI_SYSTEM_ROUTE}/sys-1/verify").mock(
+        return_value=httpx.Response(
+            503, json={"statusCode": 503, "message": "Service Unavailable"}
+        )
+    )
+    client = Praesidia(api_key="sk-test", org_id=ORG_ID, base_url=BASE_URL, retry=False)
+    with pytest.raises(ServerError) as exc_info:
+        client.trust.fetch_ai_system_verify_bundle("sys-1")
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.retryable is True
