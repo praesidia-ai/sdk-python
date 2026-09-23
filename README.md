@@ -103,7 +103,7 @@ bound in memory.
 | `client.compliance` | `ComplianceResource` | `request_report`, `get_status`, `get_json`, `get_pdf`, `wait_for_report`, `generate_and_wait` |
 | `client.memory` | `MemoryResource` | `create`, `list`, `search`, `erase`, `get`, `delete` |
 | `client.telemetry` | `TelemetryResource` | `emit`, `emit_gen_ai_span`, `emit_gen_ai_spans`, `build_gen_ai_resource_spans` |
-| `client.trust` | `TrustResource` | `fetch_passport`, `fetch_verify_bundle`, `verify_passport`, `fetch_and_verify`, `fetch_ai_system_passport`, `fetch_ai_system_verify_bundle`, `fetch_ai_system_badge_svg`, `fetch_ai_system_passport_pdf` |
+| `client.trust` | `TrustResource` | `fetch_passport`, `fetch_verify_bundle`, `verify_passport`, `fetch_and_verify`, `fetch_ai_system_passport`, `fetch_ai_system_verify_bundle`, `fetch_ai_system_badge_svg`, `fetch_ai_system_passport_pdf`, `verify_ai_system_passport`, `fetch_and_verify_ai_system` |
 
 ## AI Systems / assets / relationship graph (SDK-0002/SDK-0004, parity with be's AISYS-0002 and `sdk`'s SDK-0001/SDK-0003)
 
@@ -493,13 +493,30 @@ svg = client.trust.fetch_ai_system_badge_svg(ai_system_id)  # str, "<svg …>"
 |---|---|---|
 | `fetch_ai_system_passport` | `GET /trust/passport/ai-systems/{ai_system_id}` | public (no auth) |
 | `fetch_ai_system_verify_bundle` | `GET /trust/passport/ai-systems/{ai_system_id}/verify` | public (no auth) |
+| `fetch_and_verify_ai_system` | `GET /trust/passport/ai-systems/{ai_system_id}/verify` + offline verify | public (no auth) |
 | `fetch_ai_system_badge_svg` | `GET /trust/passport/ai-systems/{ai_system_id}/badge.svg` | public (no auth) |
 | `fetch_ai_system_passport_pdf` | `GET /trust/passport/ai-systems/{ai_system_id}/passport.pdf` | public (no auth) |
 
 The bundle's `publicKeyJwk` comes from the same unauthenticated response as the
-passport, so it is not a trust anchor on its own. `verify_passport` /
-`fetch_and_verify` check the **agent** passport envelope only; offline
-verification of an AI System passport is not in the SDK yet.
+passport, so it is not a trust anchor on its own. Verify an AI System passport
+offline with `verify_ai_system_passport` / `fetch_and_verify_ai_system` — same
+proof, signature, expiry and trust-anchor rules as the agent functions above (be
+signs both passports through one path):
+
+```python
+result = client.trust.fetch_and_verify_ai_system(
+    ai_system_id, trusted_keys=[issuer_jwk_from_your_did_document]  # or expected_fingerprint=
+)
+# No anchor → {"verified": False, "reason": "unpinned_key", "signatureValid": True, ...}
+
+from praesidia import verify_ai_system_passport
+offline = verify_ai_system_passport(passport_handed_to_you, my_trusted_jwk)
+```
+
+The two envelopes are not interchangeable: `verify_passport` returns
+`malformed-passport` for an AI System passport and `verify_ai_system_passport`
+returns it for an agent passport. The AI System check also enforces be's section
+contract — a gap (`"available": False`) carries a `reason` and never `counts`.
 
 ## Agent credential refresh
 

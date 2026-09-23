@@ -22,6 +22,7 @@ from praesidia import (
     ed25519_public_key_from_jwk,
     jwk_thumbprint,
     jwk_thumbprint_hex,
+    verify_ai_system_passport,
     verify_passport,
 )
 
@@ -671,3 +672,207 @@ def test_fetch_ai_system_verify_bundle_maps_503_to_retryable_server_error():
         client.trust.fetch_ai_system_verify_bundle("sys-1")
     assert exc_info.value.status_code == 503
     assert exc_info.value.retryable is True
+
+
+# ── SDK-0309: OFFLINE verification of AI System passports (BE-0540) ─────────
+# be-shaped fixture: AiSystemTrustPassportService.getPassport's unsigned doc
+# signed through TrustPassportService.signCredentialDocument —
+# canonicalJson(unsigned) under the org key, proof.created = issuanceDate,
+# verificationMethod = f"{issuer}#key-{keyVersion}". Minted by Node's crypto
+# over the TS SDK's canonicalJson (Ed25519, and low-s ES256 like the KMS path).
+
+AI_SYSTEM_UNSIGNED = {
+    "@context": [
+        "https://www.w3.org/2018/credentials/v1",
+        "https://praesidia.ai/credentials/trust-passport/v1",
+    ],
+    "type": ["VerifiableCredential", "AiSystemTrustPassport"],
+    "id": "https://api.praesidia.ai/trust/passport/ai-systems/sys-1#2026-09-22T10:00:00.000Z",
+    "issuer": "did:web:praesidia.ai:orgs:org-1",
+    "issuanceDate": "2026-09-22T10:00:00.000Z",
+    "expirationDate": "2999-09-23T10:00:00.000Z",
+    "credentialSubject": {
+        "id": "did:web:praesidia.ai:ai-systems:sys-1",
+        "aiSystemName": "Fraud Triage",
+        "posture": {
+            "available": True,
+            "counts": {"total": 2, "verified": 1, "unverified": 1},
+            "updatedAt": "2026-10-01T00:00:00.000Z",
+        },
+        "redTeam": {"available": True, "counts": {"completedRuns": 3}, "updatedAt": None},
+        "attestations": {
+            "activeCount": 2,
+            "identityVerified": True,
+            "guardrailsActive": True,
+            "auditTrailEnabled": True,
+            "spendCapConfigured": False,
+        },
+        "frameworks": ["EU-AI-Act", "GDPR"],
+        "regulatoryClassification": {
+            "available": True,
+            "counts": {"total": 1, "HIGH": 1},
+            "updatedAt": "2026-09-20T08:00:00.000Z",
+        },
+        "aibom": {
+            "available": True,
+            "counts": {"componentCount": 14},
+            "updatedAt": "2026-09-21T08:00:00.000Z",
+            "digest": "sha256:9f2c",
+            "version": 3,
+        },
+        "dataCategories": {"available": True, "counts": {"total": 4}},
+        "incidents": {"available": True, "counts": {"total": 0}},
+        "models": {"available": True, "counts": {"total": 1, "openai": 1}},
+        "permissions": {"available": False, "reason": "AISYS-0031"},
+        "evidenceRoot": {"available": False, "reason": "AISYS-0031"},
+    },
+}
+AI_SYSTEM_SIGNED = {
+    "Ed25519": (
+        {
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": "y_iuLQGh_WfTz5nD-EZjr0wNjtcVP6q_0AJmYznNYjA",
+        },
+        "Ed25519Signature2020",
+        "o0KyXR9wX2PyKv9xyzFwjbYp/MZdUkI4AaFEPTHyYVu/GCl0p7gVI/iMThmFZaX0fpFOBNy6/k5+Y5/hkCrwAg==",
+    ),
+    "ES256": (
+        {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "VpWwd17Ezos3PfkEnJpS-un06chVUz4PSx0KIftQ3bc",
+            "y": "dxGtPi3JbL7qiConuR93Ur01_2nB_wuu0ij4WD-Ha1g",
+            "use": "sig",
+            "alg": "ES256",
+        },
+        "EcdsaSecp256r1Signature2019",
+        "MEQCIHKJrdMjPmD5S6VQU/fHvNZxbWy0z6EtpvNthzuEfBYZAiBvkCyl7MP6xJymxPjSePe86XdaUdkMfB0DYnt4WRHKWA==",
+    ),
+}
+
+
+def _signed_ai_system(algorithm):
+    jwk, proof_type, proof_value = AI_SYSTEM_SIGNED[algorithm]
+    passport = copy.deepcopy(AI_SYSTEM_UNSIGNED)
+    passport["proof"] = {
+        "type": proof_type,
+        "created": passport["issuanceDate"],
+        "proofPurpose": "assertionMethod",
+        "verificationMethod": f"{passport['issuer']}#key-2",
+        "keyVersion": 2,
+        "proofValue": proof_value,
+    }
+    return passport, jwk
+
+
+def _mock_ai_system_bundle(passport, public_key_jwk):
+    route = respx.get(f"{AI_SYSTEM_ROUTE}/sys-1/verify").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "passport": passport,
+                "publicKeyJwk": public_key_jwk,
+                "verificationHint": "Import publicKeyJwk…",
+                "embed": {"badgeUrl": "b", "verifyUrl": "v", "html": "h", "markdown": "m"},
+            },
+        )
+    )
+    return route, _client().trust
+
+
+@pytest.mark.parametrize("algorithm", ["Ed25519", "ES256"])
+def test_verify_ai_system_passport_accepts_be_signed_passport_under_pinned_key(algorithm):
+    passport, jwk = _signed_ai_system(algorithm)
+    assert verify_ai_system_passport(passport, jwk) == {
+        "verified": True,
+        "signatureValid": True,
+        "expired": False,
+        "reason": "ok",
+    }
+    assert _client().trust.verify_ai_system_passport(passport, jwk)["reason"] == "ok"
+
+
+@respx.mock
+@pytest.mark.parametrize("algorithm", ["Ed25519", "ES256"])
+def test_fetch_and_verify_ai_system_with_trusted_key(algorithm):
+    passport, jwk = _signed_ai_system(algorithm)
+    route, trust = _mock_ai_system_bundle(passport, jwk)
+
+    result = trust.fetch_and_verify_ai_system("sys-1", trusted_keys=[jwk])
+
+    assert result["verified"] is True and result["reason"] == "ok"
+    assert result["passport"]["credentialSubject"]["aiSystemName"] == "Fraud Triage"
+    assert result["publicKeyJwk"] == jwk
+    assert "authorization" not in route.calls.last.request.headers
+
+
+@respx.mock
+def test_fetch_and_verify_ai_system_without_anchor_is_unpinned():
+    passport, jwk = _signed_ai_system("Ed25519")
+    _, trust = _mock_ai_system_bundle(passport, jwk)
+
+    result = trust.fetch_and_verify_ai_system("sys-1")
+
+    assert result["verified"] is False
+    assert result["reason"] == "unpinned_key"
+    assert result["signatureValid"] is True
+
+
+@respx.mock
+def test_fetch_and_verify_ai_system_fingerprint_pin_and_foreign_anchor():
+    passport, jwk = _signed_ai_system("ES256")
+    _, trust = _mock_ai_system_bundle(passport, jwk)
+    assert (
+        trust.fetch_and_verify_ai_system(
+            "sys-1", expected_fingerprint=jwk_thumbprint(jwk)
+        )["reason"]
+        == "ok"
+    )
+    foreign = AI_SYSTEM_SIGNED["Ed25519"][0]
+    assert (
+        trust.fetch_and_verify_ai_system("sys-1", trusted_keys=[foreign])["reason"]
+        == "untrusted_key"
+    )
+
+
+@respx.mock
+@pytest.mark.parametrize("algorithm", ["Ed25519", "ES256"])
+def test_tampered_ai_system_subject_is_signature_mismatch(algorithm):
+    passport, jwk = _signed_ai_system(algorithm)
+    passport["credentialSubject"]["incidents"]["counts"]["total"] = 7
+
+    result = verify_ai_system_passport(passport, jwk)
+    assert result["reason"] == "signature-mismatch"
+    assert result["signatureValid"] is False and result["verified"] is False
+
+    _, trust = _mock_ai_system_bundle(passport, jwk)
+    fetched = trust.fetch_and_verify_ai_system("sys-1", trusted_keys=[jwk])
+    assert fetched["verified"] is False and fetched["signatureValid"] is False
+
+
+def test_agent_and_ai_system_envelopes_do_not_cross_verify():
+    passport, jwk = _signed_ai_system("Ed25519")
+    assert verify_passport(passport, jwk)["reason"] == "malformed-passport"
+    assert (
+        verify_ai_system_passport(PASSPORT, PUBLIC_KEY_JWK)["reason"]
+        == "malformed-passport"
+    )
+
+
+@pytest.mark.parametrize(
+    "section, value",
+    [
+        ("permissions", {"available": False, "reason": "AISYS-0031", "counts": {"total": 0}}),
+        ("evidenceRoot", {"available": False}),
+        ("incidents", {"available": True, "counts": {"total": 0.5}}),
+        ("models", None),
+        ("posture", {"available": True, "updatedAt": "2026-10-01"}),
+    ],
+)
+def test_verify_ai_system_passport_rejects_malformed_subject(section, value):
+    # The envelope check runs before the signature, so these are rejected
+    # as malformed regardless of the (now stale) proof.
+    passport, jwk = _signed_ai_system("Ed25519")
+    passport["credentialSubject"][section] = value
+    assert verify_ai_system_passport(passport, jwk)["reason"] == "malformed-passport"

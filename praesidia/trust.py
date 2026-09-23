@@ -25,7 +25,7 @@ import hashlib
 import json
 import re
 from datetime import datetime, timezone
-from typing import Any, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Mapping, Optional, Sequence, Union
 
 from ._crypto import (
     canonical_json,
@@ -77,8 +77,38 @@ def verify_passport(
                     | "fingerprint_mismatch",
         }
     """
+    return _verify_credential(passport, public_key_jwk, _passport_envelope_well_formed)
+
+
+def verify_ai_system_passport(
+    passport: dict[str, Any],
+    public_key_jwk: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    OFFLINE-verify an AI System passport (BE-0540) against a JWK.
+
+    Same proof, canonicalization, signature and expiry rules as
+    :func:`verify_passport` (be signs both through one path); only the envelope
+    check differs — ``type`` must include ``AiSystemTrustPassport`` and the AI
+    System credential subject must match be's contract. An agent passport is
+    ``malformed-passport`` here, and an AI System passport is
+    ``malformed-passport`` in :func:`verify_passport`. Never raises; returns the
+    same result dict as :func:`verify_passport`.
+    """
+    return _verify_credential(
+        passport, public_key_jwk, _ai_system_passport_envelope_well_formed
+    )
+
+
+def _verify_credential(
+    passport: dict[str, Any],
+    public_key_jwk: dict[str, Any],
+    envelope_well_formed: Callable[[dict[str, Any]], bool],
+) -> dict[str, Any]:
     try:
-        return _verify_passport_unchecked(passport, public_key_jwk)
+        return _verify_passport_unchecked(
+            passport, public_key_jwk, envelope_well_formed
+        )
     except Exception:
         return _result(False, False, False, "malformed-passport")
 
@@ -86,13 +116,14 @@ def verify_passport(
 def _verify_passport_unchecked(
     passport: dict[str, Any],
     public_key_jwk: dict[str, Any],
+    envelope_well_formed: Callable[[dict[str, Any]], bool],
 ) -> dict[str, Any]:
     proof = passport.get("proof") if isinstance(passport, dict) else None
     if not isinstance(proof, dict) or not isinstance(
         proof.get("proofValue"), str
     ):
         return _result(False, False, False, "missing-proof")
-    if not _passport_envelope_well_formed(passport):
+    if not envelope_well_formed(passport):
         return _result(False, False, False, "malformed-passport")
 
     algorithm = None
@@ -149,39 +180,33 @@ def _verify_passport_unchecked(
     return _result(True, True, False, "ok")
 
 
-def _passport_envelope_well_formed(passport: dict[str, Any]) -> bool:
+def _credential_envelope_well_formed(
+    passport: dict[str, Any], credential_type: str
+) -> bool:
+    """
+    VC + proof envelope common to both passport kinds (be's
+    ``signCredentialDocument``), plus the subject ``id`` and ``attestations``
+    block they share. ``credential_type`` is the specific VC type that must be
+    present (``TrustPassport`` / ``AiSystemTrustPassport``).
+    """
     contexts = passport.get("@context")
     types = passport.get("type")
     subject = passport.get("credentialSubject")
     proof = passport.get("proof")
     if not isinstance(subject, dict) or not isinstance(proof, dict):
         return False
-    posture = subject.get("posture")
-    red_team = subject.get("redTeam")
     attestations = subject.get("attestations")
-    compliance = subject.get("compliance")
     key_version = proof.get("keyVersion")
     return (
         isinstance(contexts, list)
         and "https://www.w3.org/2018/credentials/v1" in contexts
         and isinstance(types, list)
         and "VerifiableCredential" in types
-        and "TrustPassport" in types
+        and credential_type in types
         and _nonempty_string(passport.get("id"))
         and _nonempty_string(passport.get("issuer"))
         and _parse_canonical_instant(passport.get("issuanceDate")) is not None
         and _nonempty_string(subject.get("id"))
-        and _nonempty_string(subject.get("agentName"))
-        and _nonempty_string(subject.get("trustLevel"))
-        and _finite_number_in_range(subject.get("trustScore"), 0, 100)
-        and isinstance(compliance, list)
-        and all(_nonempty_string(item) for item in compliance)
-        and isinstance(posture, dict)
-        and _nonempty_string(posture.get("status"))
-        and _nullable_canonical_instant(posture.get("expiresAt"))
-        and isinstance(red_team, dict)
-        and _nonnegative_integer(red_team.get("completedRuns"))
-        and _nullable_canonical_instant(red_team.get("lastTestedAt"))
         and isinstance(attestations, dict)
         and _nonnegative_integer(attestations.get("activeCount"))
         and all(
@@ -199,6 +224,89 @@ def _passport_envelope_well_formed(passport: dict[str, Any]) -> bool:
         and _positive_integer(key_version)
         and proof.get("verificationMethod")
         == f"{passport.get('issuer')}#key-{key_version}"
+    )
+
+
+def _passport_envelope_well_formed(passport: dict[str, Any]) -> bool:
+    if not _credential_envelope_well_formed(passport, "TrustPassport"):
+        return False
+    subject = passport["credentialSubject"]
+    posture = subject.get("posture")
+    red_team = subject.get("redTeam")
+    compliance = subject.get("compliance")
+    return (
+        _nonempty_string(subject.get("agentName"))
+        and _nonempty_string(subject.get("trustLevel"))
+        and _finite_number_in_range(subject.get("trustScore"), 0, 100)
+        and isinstance(compliance, list)
+        and all(_nonempty_string(item) for item in compliance)
+        and isinstance(posture, dict)
+        and _nonempty_string(posture.get("status"))
+        and _nullable_canonical_instant(posture.get("expiresAt"))
+        and isinstance(red_team, dict)
+        and _nonnegative_integer(red_team.get("completedRuns"))
+        and _nullable_canonical_instant(red_team.get("lastTestedAt"))
+    )
+
+
+_AI_SYSTEM_SECTIONS = (
+    "posture",
+    "redTeam",
+    "regulatoryClassification",
+    "aibom",
+    "dataCategories",
+    "incidents",
+    "models",
+    "permissions",
+    "evidenceRoot",
+)
+
+
+def _ai_system_passport_envelope_well_formed(passport: dict[str, Any]) -> bool:
+    if not _credential_envelope_well_formed(passport, "AiSystemTrustPassport"):
+        return False
+    subject = passport["credentialSubject"]
+    frameworks = subject.get("frameworks")
+    aibom = subject.get("aibom")
+    return (
+        _nonempty_string(subject.get("aiSystemName"))
+        and isinstance(frameworks, list)
+        and all(_nonempty_string(item) for item in frameworks)
+        and all(
+            _ai_system_section_well_formed(subject.get(name))
+            for name in _AI_SYSTEM_SECTIONS
+        )
+        and ("digest" not in aibom or _nonempty_string(aibom["digest"]))
+        and ("version" not in aibom or _nonnegative_integer(aibom["version"]))
+    )
+
+
+def _ai_system_section_well_formed(section: Any) -> bool:
+    """
+    be's section contract: ``{"available": True, "counts"?, "updatedAt"?}`` or
+    ``{"available": False, "reason"}`` — ``reason`` only on a gap, and a gap
+    never carries counts (never a fabricated zero).
+    """
+    if not isinstance(section, dict) or not isinstance(
+        section.get("available"), bool
+    ):
+        return False
+    available = section["available"]
+    counts = section.get("counts")
+    return (
+        ("reason" not in section if available else _nonempty_string(section.get("reason")))
+        and (
+            "counts" not in section
+            or (
+                available
+                and isinstance(counts, dict)
+                and all(_nonnegative_integer(v) for v in counts.values())
+            )
+        )
+        and (
+            "updatedAt" not in section
+            or _nullable_canonical_instant(section["updatedAt"])
+        )
     )
 
 
@@ -437,6 +545,45 @@ class TrustResource:
         result["didDocumentUrl"] = bundle.get("didDocumentUrl")
         return result
 
+    def verify_ai_system_passport(
+        self,
+        passport: dict[str, Any],
+        public_key_jwk: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Offline-verify an AI System passport (delegates to :func:`verify_ai_system_passport`)."""
+        return verify_ai_system_passport(passport, public_key_jwk)
+
+    def fetch_and_verify_ai_system(
+        self,
+        ai_system_id: str,
+        *,
+        trusted_keys: Optional[
+            Union[Sequence[dict[str, Any]], Mapping[str, dict[str, Any]]]
+        ] = None,
+        expected_fingerprint: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        :meth:`fetch_and_verify` for an AI System passport:
+        ``GET /trust/passport/ai-systems/{ai_system_id}/verify`` (public), then
+        :func:`verify_ai_system_passport` under the same trust-anchor rules
+        (MCPSDK-04) — no anchor → ``verified: False, reason="unpinned_key"``;
+        ``trusted_keys`` without the signing key → ``"untrusted_key"``;
+        ``expected_fingerprint`` differing from the served key →
+        ``"fingerprint_mismatch"``. Returns the result with ``passport`` and
+        ``publicKeyJwk`` merged in.
+        """
+        bundle = self.fetch_ai_system_verify_bundle(ai_system_id)
+        result = _verify_against_anchor(
+            bundle["passport"],
+            bundle["publicKeyJwk"],
+            trusted_keys=trusted_keys,
+            expected_fingerprint=expected_fingerprint,
+            verify=verify_ai_system_passport,
+        )
+        result["passport"] = bundle["passport"]
+        result["publicKeyJwk"] = bundle["publicKeyJwk"]
+        return result
+
 
 # ── Trust anchors for fetch_and_verify (SEC-2026-09-12 MCPSDK-04) ────────────
 
@@ -513,9 +660,10 @@ def _verify_against_anchor(
     *,
     trusted_keys: Any = None,
     expected_fingerprint: Optional[str] = None,
+    verify: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] = verify_passport,
 ) -> dict[str, Any]:
     """
-    Verify ``passport`` against the caller's anchor, falling back to a truthful
+    Verify ``passport`` (via ``verify``) against the caller's anchor, falling back to a truthful
     but explicitly unpinned result when no anchor was supplied.
 
     ``served_key_jwk`` is the key that arrived with the passport; it is only ever
@@ -530,7 +678,7 @@ def _verify_against_anchor(
         # A concrete failure (signature-mismatch, expired, ...) is kept because
         # it is strictly more informative; only an otherwise-"ok" check is
         # downgraded to "unpinned_key".
-        served = verify_passport(passport, served_key_jwk)
+        served = verify(passport, served_key_jwk)
         served["verified"] = False
         if served["reason"] == "ok":
             served["reason"] = "unpinned_key"
@@ -539,19 +687,19 @@ def _verify_against_anchor(
     if has_fingerprint and not _jwk_matches_fingerprint(
         served_key_jwk, str(expected_fingerprint)
     ):
-        served = verify_passport(passport, served_key_jwk)
+        served = verify(passport, served_key_jwk)
         served["verified"] = False
         served["reason"] = "fingerprint_mismatch"
         return served
 
     if anchors is None:
         # Fingerprint-only anchor, and the served key matched it.
-        return verify_passport(passport, served_key_jwk)
+        return verify(passport, served_key_jwk)
 
     # Key anchor: the passport must verify under one of the caller's keys.
     under_trusted_key: Optional[dict[str, Any]] = None
     for anchor in anchors:
-        result = verify_passport(passport, anchor)
+        result = verify(passport, anchor)
         if result["verified"]:
             return result
         # Signature is good under a trusted key but something else failed
