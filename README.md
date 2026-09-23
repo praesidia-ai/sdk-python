@@ -481,7 +481,8 @@ fingerprint + verification URL printed on it) is a public download too:
 ```python
 pdf = client.trust.fetch_ai_system_passport_pdf(ai_system_id)  # bytes, starts with b"%PDF-"
 open("trust-passport.pdf", "wb").write(pdf)
-# Unknown / soft-deleted AI System → NotFoundError
+# Unpublished (passportVisibility PRIVATE, the default), unknown or
+# soft-deleted AI System → NotFoundError
 ```
 
 The rest of the **AI System** passport routes are public as well — `TrustResource`
@@ -500,7 +501,8 @@ bundle = client.trust.fetch_ai_system_verify_bundle(ai_system_id)
 #  "embed": {"badgeUrl", "verifyUrl", "html", "markdown"}}
 
 svg = client.trust.fetch_ai_system_badge_svg(ai_system_id)  # str, "<svg …>"
-# Unknown / soft-deleted AI System → NotFoundError; the verify bundle raises a
+# Unpublished (passportVisibility PRIVATE, the default), unknown or
+# soft-deleted AI System → NotFoundError; the verify bundle raises a
 # retryable ServerError (503) when be cannot load the org signing key.
 ```
 
@@ -511,6 +513,14 @@ svg = client.trust.fetch_ai_system_badge_svg(ai_system_id)  # str, "<svg …>"
 | `fetch_and_verify_ai_system` | `GET /trust/passport/ai-systems/{ai_system_id}/verify` + offline verify | public (no auth) |
 | `fetch_ai_system_badge_svg` | `GET /trust/passport/ai-systems/{ai_system_id}/badge.svg` | public (no auth) |
 | `fetch_ai_system_passport_pdf` | `GET /trust/passport/ai-systems/{ai_system_id}/passport.pdf` | public (no auth) |
+
+These routes serve a passport only once its owner publishes it: every AI
+System starts with `passportVisibility` `PRIVATE` (existing systems included),
+and an unpublished one raises the same `NotFoundError` as an id that does not
+exist. An org member with `ai_systems.update` publishes or withdraws it with
+`PATCH /organizations/{org_id}/ai-systems/{id}` — from this SDK, the API-keyed
+`client.ai_systems.update(ai_system_id, {"passportVisibility": "PUBLIC"})`,
+not `client.trust`.
 
 The bundle's `publicKeyJwk` comes from the same unauthenticated response as the
 passport, so it is not a trust anchor on its own. Verify an AI System passport

@@ -433,8 +433,8 @@ class TrustResource:
         ``regulatoryClassification``, ``aibom`` (+ ``digest``/``version``),
         ``dataCategories``, ``incidents``, ``models``, ``permissions``,
         ``evidenceRoot`` — each ``{"available": True, "counts": {...}}`` or
-        ``{"available": False, "reason": ...}``. Raises ``NotFoundError`` for an
-        unknown or soft-deleted AI System.
+        ``{"available": False, "reason": ...}``. Raises ``NotFoundError`` if unpublished
+        (``passportVisibility`` PRIVATE, the default), unknown or soft-deleted.
         """
         return self._http.get(
             f"/trust/passport/ai-systems/{path_segment(ai_system_id, 'ai_system_id')}",
@@ -446,11 +446,11 @@ class TrustResource:
         Fetch an AI System's verification bundle: ``{"passport",
         "publicKeyJwk", "verificationHint", "embed": {"badgeUrl", "verifyUrl",
         "html", "markdown"}}`` (be's ``AiSystemTrustPassportVerifyDto``).
-        ``GET /trust/passport/ai-systems/{ai_system_id}/verify`` (public — no
-        auth). The JWK arrives on the same unauthenticated response as the
-        passport, so it is not a trust anchor on its own. Raises
-        ``NotFoundError`` (unknown AI System) or a retryable ``ServerError``
-        (503 — be could not load the org signing key).
+        ``GET /trust/passport/ai-systems/{ai_system_id}/verify`` (public — no auth).
+        The JWK arrives on the same unauthenticated response as the passport, so it
+        is not a trust anchor on its own. Raises ``NotFoundError`` if unpublished
+        (``passportVisibility`` PRIVATE, the default), unknown or soft-deleted, or a
+        retryable ``ServerError`` (503 — be could not load the org signing key).
         """
         return self._http.get(
             f"/trust/passport/ai-systems/{path_segment(ai_system_id, 'ai_system_id')}"
@@ -461,9 +461,9 @@ class TrustResource:
     def fetch_ai_system_badge_svg(self, ai_system_id: str) -> str:
         """
         Fetch an AI System's embeddable SVG trust badge.
-        ``GET /trust/passport/ai-systems/{ai_system_id}/badge.svg`` (public —
-        no auth). Returns the SVG markup as ``str``. Raises ``NotFoundError``
-        for an unknown or soft-deleted AI System.
+        ``GET /trust/passport/ai-systems/{ai_system_id}/badge.svg`` (public — no auth).
+        Returns the SVG markup as ``str``. Raises ``NotFoundError`` if unpublished
+        (``passportVisibility`` PRIVATE, the default), unknown or soft-deleted.
         """
         r = self._http.stream_get(
             f"/trust/passport/ai-systems/{path_segment(ai_system_id, 'ai_system_id')}"
@@ -479,8 +479,8 @@ class TrustResource:
         trust passport (BE-0541).
         ``GET /trust/passport/ai-systems/{ai_system_id}/passport.pdf`` (public
         — no auth). Returns the raw PDF bytes — write with
-        ``open(path, "wb").write(pdf)``. Raises ``NotFoundError`` for an
-        unknown or soft-deleted AI System.
+        ``open(path, "wb").write(pdf)``. Raises ``NotFoundError`` if unpublished
+        (``passportVisibility`` PRIVATE, the default), unknown or soft-deleted.
         """
         r = self._http.stream_get(
             f"/trust/passport/ai-systems/{path_segment(ai_system_id, 'ai_system_id')}"
