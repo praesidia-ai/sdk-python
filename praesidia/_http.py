@@ -186,16 +186,36 @@ class HttpClient:
         retry: Union[RetryConfig, bool, None] = None,
     ) -> None:
         self.org_id = path_segment(org_id, "org_id")
+        self._init_transport(base_url, timeout)
+        self._headers = {"Authorization": f"Bearer {_validate_api_key(api_key)}", **self._headers}
+        #: FINDING-4 -- resolved retry policy, or None when retries are disabled.
+        self._retry: Optional[RetryConfig] = resolve_retry_config(retry)
+
+    @classmethod
+    def public(
+        cls,
+        base_url: str,
+        timeout: float = _DEFAULT_TIMEOUT,
+        retry: Union[RetryConfig, bool, None] = None,
+    ) -> HttpClient:
+        """
+        SDK-0311 -- a client for the PUBLIC (trust-passport) routes only. It has
+        no org and no credential, so no ``Authorization`` header exists to send.
+        Bypasses ``__init__`` so the authenticated constructor still requires both.
+        """
+        client = cls.__new__(cls)
+        client._init_transport(base_url, timeout)
+        client._retry = resolve_retry_config(retry)
+        return client
+
+    def _init_transport(self, base_url: str, timeout: float) -> None:
         self._base = normalize_base_url(base_url)
         self._timeout = _validate_timeout(timeout)
         self._headers_lock = RLock()
         self._headers: dict[str, str] = {
-            "Authorization": f"Bearer {_validate_api_key(api_key)}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-        #: FINDING-4 -- resolved retry policy, or None when retries are disabled.
-        self._retry: Optional[RetryConfig] = resolve_retry_config(retry)
 
     def set_api_key(self, api_key: str) -> None:
         """

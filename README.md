@@ -103,7 +103,7 @@ bound in memory.
 | `client.compliance` | `ComplianceResource` | `request_report`, `get_status`, `get_json`, `get_pdf`, `wait_for_report`, `generate_and_wait` |
 | `client.memory` | `MemoryResource` | `create`, `list`, `search`, `erase`, `get`, `delete` |
 | `client.telemetry` | `TelemetryResource` | `emit`, `emit_gen_ai_span`, `emit_gen_ai_spans`, `build_gen_ai_resource_spans` |
-| `client.trust` | `TrustResource` | `fetch_passport`, `fetch_verify_bundle`, `verify_passport`, `fetch_and_verify`, `fetch_ai_system_passport`, `fetch_ai_system_verify_bundle`, `fetch_ai_system_badge_svg`, `fetch_ai_system_passport_pdf`, `verify_ai_system_passport`, `fetch_and_verify_ai_system` |
+| `client.trust` (or keyless `PraesidiaTrust()`) | `TrustResource` | `fetch_passport`, `fetch_verify_bundle`, `verify_passport`, `fetch_and_verify`, `fetch_ai_system_passport`, `fetch_ai_system_verify_bundle`, `fetch_ai_system_badge_svg`, `fetch_ai_system_passport_pdf`, `verify_ai_system_passport`, `fetch_and_verify_ai_system` |
 
 ## AI Systems / assets / relationship graph (SDK-0002/SDK-0004, parity with be's AISYS-0002 and `sdk`'s SDK-0001/SDK-0003)
 
@@ -414,6 +414,21 @@ verify its detached Ed25519 or KMS-backed P-256/ES256 proof **locally**, without
 an online verification call. Offline verification is pure-Python and
 **dependency-free** (compact Ed25519 + ECDSA-P256 verification and canonical
 JSON in `praesidia._crypto`), so it needs no `cryptography` install.
+
+**No Praesidia account needed.** Every trust route is public, so a third-party
+verifier builds the client with no API key and no org (SDK-0311; TS parity:
+`new PraesidiaTrust()`). `PraesidiaTrust` has every `client.trust` method shown
+below and never sends an `Authorization` header:
+
+```python
+from praesidia import PraesidiaTrust
+
+trust = PraesidiaTrust()  # optional: base_url= (else PRAESIDIA_BASE_URL), timeout=, retry=
+result = trust.fetch_and_verify_ai_system(ai_system_id, trusted_keys=[issuer_jwk])
+pdf = trust.fetch_ai_system_passport_pdf(ai_system_id)
+```
+
+An authenticated `Praesidia(api_key=..., org_id=...)` keeps `client.trust` unchanged.
 
 The supplied JWK is the verification trust anchor. Resolve it from a trusted
 DID document or verification bundle; a signature proves integrity relative to
@@ -770,6 +785,16 @@ checkouts of `sdk` (owns the scanner), `be-core` (spec source of truth) and
 jobs.
 
 ## Changelog
+
+### Unreleased — SDK-0311: `PraesidiaTrust`, the trust routes without credentials
+
+- **Added** `PraesidiaTrust(base_url=None, *, timeout=30.0, retry=None)`
+  (`praesidia/trust.py`, exported from `praesidia`): a `TrustResource` that
+  needs no `api_key` / `org_id`, so a verifier with no Praesidia account can call
+  every trust fetch (`fetch_ai_system_passport_pdf`, `fetch_and_verify_ai_system`,
+  …) without placeholder credentials. `base_url` falls back to `PRAESIDIA_BASE_URL`,
+  then `https://api.praesidia.ai`. TS parity: `new PraesidiaTrust()`. No breaking
+  changes — `Praesidia(...)` and `client.trust` are unchanged.
 
 ### Unreleased — SDK-0310: public AI System passport routes (BE-0540)
 

@@ -18,6 +18,7 @@ import respx
 from praesidia import (
     NotFoundError,
     Praesidia,
+    PraesidiaTrust,
     ServerError,
     ed25519_public_key_from_jwk,
     jwk_thumbprint,
@@ -25,6 +26,7 @@ from praesidia import (
     verify_ai_system_passport,
     verify_passport,
 )
+from praesidia.trust import TrustResource
 
 BASE_URL = "http://test.local"
 ORG_ID = "org-1"
@@ -876,3 +878,64 @@ def test_verify_ai_system_passport_rejects_malformed_subject(section, value):
     passport, jwk = _signed_ai_system("Ed25519")
     passport["credentialSubject"][section] = value
     assert verify_ai_system_passport(passport, jwk)["reason"] == "malformed-passport"
+
+
+# ── SDK-0311: PraesidiaTrust — the trust routes with no Praesidia account ────
+
+
+@pytest.mark.parametrize(
+    ("method", "arg", "path", "response"),
+    [
+        ("fetch_passport", "agent-1", "/agent-1", httpx.Response(200, json=PASSPORT)),
+        ("fetch_verify_bundle", "agent-1", "/agent-1/verify", httpx.Response(200, json={})),
+        ("fetch_ai_system_passport", "sys-1", "/ai-systems/sys-1", httpx.Response(200, json={})),
+        ("fetch_ai_system_verify_bundle", "sys-1", "/ai-systems/sys-1/verify", httpx.Response(200, json={})),
+        ("fetch_ai_system_badge_svg", "sys-1", "/ai-systems/sys-1/badge.svg", httpx.Response(200, text="<svg/>")),
+        ("fetch_ai_system_passport_pdf", "sys-1", "/ai-systems/sys-1/passport.pdf", httpx.Response(200, content=PDF_BYTES)),
+    ],
+)
+@respx.mock
+def test_praesidia_trust_calls_every_public_route_without_credentials(method, arg, path, response):
+    route = respx.get(f"{BASE_URL}/trust/passport{path}").mock(return_value=response)
+    getattr(PraesidiaTrust(base_url=BASE_URL), method)(arg)  # no api_key, no org_id
+    assert route.called
+    assert "authorization" not in route.calls.last.request.headers
+
+
+@respx.mock
+def test_praesidia_trust_fetch_and_verify_ai_system_needs_no_account():
+    passport, jwk = _signed_ai_system("Ed25519")
+    route, _ = _mock_ai_system_bundle(passport, jwk)
+    result = PraesidiaTrust(base_url=BASE_URL).fetch_and_verify_ai_system(
+        "sys-1", trusted_keys=[jwk]
+    )
+    assert result["verified"] is True and result["reason"] == "ok"
+    assert "authorization" not in route.calls.last.request.headers
+
+
+@respx.mock
+def test_praesidia_trust_base_url_defaults_like_the_ts_sdk(monkeypatch):
+    monkeypatch.delenv("PRAESIDIA_BASE_URL", raising=False)
+    prod = respx.get("https://api.praesidia.ai/trust/passport/agent-1").mock(
+        return_value=httpx.Response(200, json=PASSPORT)
+    )
+    PraesidiaTrust().fetch_passport("agent-1")
+    assert prod.called
+    monkeypatch.setenv("PRAESIDIA_BASE_URL", BASE_URL)
+    local = respx.get(f"{BASE_URL}/trust/passport/agent-1").mock(
+        return_value=httpx.Response(200, json=PASSPORT)
+    )
+    PraesidiaTrust().fetch_passport("agent-1")
+    assert local.called
+
+
+def test_praesidia_trust_is_additive_and_validates_its_config():
+    assert isinstance(PraesidiaTrust(), TrustResource)
+    assert isinstance(_client().trust, TrustResource)
+    with pytest.raises(ValueError):
+        PraesidiaTrust(base_url="ftp://test.local")
+    with pytest.raises(ValueError):
+        PraesidiaTrust(timeout=0)
+    # The authenticated client still requires a real credential.
+    with pytest.raises(ValueError, match="api_key"):
+        Praesidia(api_key=None, org_id=ORG_ID, base_url=BASE_URL)  # type: ignore[arg-type]

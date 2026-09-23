@@ -64,6 +64,7 @@ from .exceptions import (
 )
 from .telemetry import gen_ai_span
 from .trust import (
+    PraesidiaTrust,
     jwk_thumbprint,
     jwk_thumbprint_hex,
     verify_ai_system_passport,
@@ -91,6 +92,8 @@ __all__ = [
     "run_local_rules",
     # H3-02f — standalone offline trust-passport verification (no account needed)
     "verify_passport",
+    # SDK-0311 — trust-passport fetches with no API key / org (third-party verifiers)
+    "PraesidiaTrust",
     # SDK-0309 — standalone offline AI System passport verification
     "verify_ai_system_passport",
     # SEC-2026-09-12 MCPSDK-04 — pin the key fetch_and_verify must trust.

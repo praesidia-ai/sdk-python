@@ -23,6 +23,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Optional, Sequence, Union
@@ -35,6 +36,7 @@ from ._crypto import (
     p256_public_key_from_jwk,
 )
 from ._http import HttpClient, path_segment
+from ._retry import RetryConfig
 
 # ── Standalone offline verification (no client / account required) ──────────
 
@@ -583,6 +585,36 @@ class TrustResource:
         result["passport"] = bundle["passport"]
         result["publicKeyJwk"] = bundle["publicKeyJwk"]
         return result
+
+
+class PraesidiaTrust(TrustResource):
+    """
+    SDK-0311 — :class:`TrustResource` for third-party verifiers with no Praesidia
+    account: no ``api_key``, no ``org_id``, and no ``Authorization`` header on any
+    request. Same methods as ``client.trust``; TS parity: ``new PraesidiaTrust()``.
+
+    Args:
+        base_url: API base URL; defaults to ``PRAESIDIA_BASE_URL``, then
+                  ``https://api.praesidia.ai``.
+        timeout:  Per-request timeout in seconds.
+        retry:    Retry policy, as for :class:`~praesidia.Praesidia`.
+
+    Example::
+
+        trust = PraesidiaTrust()
+        result = trust.fetch_and_verify_ai_system(ai_system_id, trusted_keys=[issuer_jwk])
+    """
+
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        *,
+        timeout: float = 30.0,
+        retry: Union[RetryConfig, bool, None] = None,
+    ) -> None:
+        if base_url is None:
+            base_url = os.environ.get("PRAESIDIA_BASE_URL") or "https://api.praesidia.ai"
+        super().__init__(HttpClient.public(base_url, timeout, retry))
 
 
 # ── Trust anchors for fetch_and_verify (SEC-2026-09-12 MCPSDK-04) ────────────
