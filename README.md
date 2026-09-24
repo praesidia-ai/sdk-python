@@ -826,6 +826,15 @@ jobs.
 
 ## Changelog
 
+### Unreleased — SDK-0315: `ASSET_TYPES` adds `GUARDRAIL`
+
+- **Fixed** `AiSystemsResource.ASSET_TYPES` (23 → 24: adds `GUARDRAIL`) to match
+  `ui/swagger.json`'s `AiAsset.assetType` enum (be BE-0338). Before this, `list_assets*`,
+  `put_asset_by_external_id` and `traverse` raised `ValueError` on `"GUARDRAIL"` before sending
+  the request. `RELATIONSHIP_TYPES` re-checked against the same swagger: already
+  in sync (13 values). TS↔Python parity: mirrors `sdk`'s SDK-0314. No breaking changes — widened
+  valid-value set only.
+
 ### Unreleased — SDK-0311: `PraesidiaTrust`, the trust routes without credentials
 
 - **Added** `PraesidiaTrust(base_url=None, *, timeout=30.0, retry=None)`

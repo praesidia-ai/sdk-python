@@ -77,15 +77,16 @@ class AiSystemsResource:
         "suspended",
         "retired",
     )
-    #: `entities/ai-asset.entity.ts`'s `AI_ASSET_TYPES` (23 values, SDK-0007
-    #: synced with DB-0300's widened enum; kept in sync via
+    #: `entities/ai-asset.entity.ts`'s `AI_ASSET_TYPES` (24 values, SDK-0007
+    #: synced with DB-0300's widened enum, SDK-0315 adds BE-0338's
+    #: `GUARDRAIL`; kept in sync via
     #: `tests/test_ai_systems.py::test_asset_and_relationship_types_match_openapi`).
     ASSET_TYPES = (
         "APPLICATION", "AGENT", "MODEL", "MODEL_ENDPOINT", "MCP_SERVER",
         "MCP_TOOL", "A2A_ENDPOINT", "API", "DATA_SOURCE", "DATASET",
         "VECTOR_STORE", "RAG_INDEX", "PROMPT", "SKILL", "VENDOR",
         "IDENTITY", "CREDENTIAL", "REPOSITORY", "CLOUD_RESOURCE", "WORKFLOW",
-        "TOOL", "API_ENDPOINT", "DATA_SCOPE",
+        "TOOL", "API_ENDPOINT", "DATA_SCOPE", "GUARDRAIL",
     )
     #: `entities/ai-asset.entity.ts`'s `AI_ASSET_SOURCES`.
     ASSET_SOURCES = ("manual", "runtime_observation", "discovery_connector", "api", "import")
