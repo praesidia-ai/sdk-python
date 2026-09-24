@@ -702,7 +702,7 @@ with PraesidiaInteractionHooks(
     api_key=os.environ["PRAESIDIA_API_KEY"],    # org key with agents:invoke
     org_id=os.environ["PRAESIDIA_ORG_ID"],
     agent_id=os.environ["PRAESIDIA_AGENT_ID"],  # required: the agent tool policies decide
-    timeout=5,  # seconds a hook waits before its fail mode applies
+    timeout=5,  # httpx timeout in seconds, per phase, not per request (see Fail mode)
 ) as hooks:
     hooks.before_exec("git status", cwd="/srv/repo")  # raises on deny
     subprocess.run(["git", "status"], cwd="/srv/repo")
@@ -734,7 +734,10 @@ the name defaults to `tool.__name__`) and keeps its signature for framework intr
 The TS SDK has no `guarded` equivalent: call `beforeToolCall` before the tool there.
 
 **Fail mode.** An outage is a network error, a timeout, a 408 / 429 / 5xx, or a malformed
-response. A fail-closed hook then raises `InteractionDecisionUnavailableError` (the outage is its
+response. `timeout` (seconds, default 30) is httpx's: it bounds the connect, the request write,
+the wait for a pooled connection and each read of the response separately, not the whole
+request, so a hook can wait longer than `timeout` before its fail mode applies. A fail-closed
+hook then raises `InteractionDecisionUnavailableError` (the outage is its
 `__cause__`); a fail-open hook returns `InteractionHookResult(decision=None, fail_open_error=err)`.
 Any other 4xx (bad key, unknown agent, feature not enabled) always raises the typed
 `PraesidiaError` (`AuthError`, `ForbiddenError`, ...), on every hook. The defaults fail closed
@@ -745,17 +748,21 @@ checks so a Praesidia outage does not stop every agent. Override per class with
 outage while waiting for an approval never turns into an allow: the hook keeps waiting, then
 times out.
 
-**Cache.** A verdict is reused for its `ttlSeconds` (be sends 30, or 0 for approvals and
-daily-limited rules) for the identical request, in memory, per hooks instance (at most 1000
-entries). Cached verdicts are valid only under the `policyFingerprint` that produced them: a
-response with a new fingerprint evicts them all. A policy change therefore takes effect within
-`ttlSeconds`.
+**Cache.** A verdict is reused for its `ttlSeconds` for the identical request, in memory, per
+hooks instance (at most 1000 entries). be sends 30, or 0 (never reused) when the answer came
+from a rule that requires approval (including the `allow` of a consumed approval, and the `allow`
+that `observe` mode gives in place of an approval), from a daily-limited rule's `allow`, or from
+a failed policy evaluation (`reasonCode` `policy_service_error`, a deny in `enforce` mode). Cached
+verdicts are valid only under the `policyFingerprint` that produced them: a response with a new
+fingerprint evicts them all. A policy change therefore takes effect within `ttlSeconds`.
 
 In `observe` governance mode be answers `allow` and records the would-be decision; in `off` it
 answers `allow`. `decide(type, action, approval_id=None)` is the raw call (no cache, no wait, no
 fail mode). Action names must be dot-separated `[A-Za-z0-9_-]` segments (be's rule); anything
-else raises `PraesidiaConfigError` before a request is sent. Hook arguments whose value is `None`
-are omitted. The route is `POST /organizations/{orgId}/interaction-decisions` (`agents:invoke` key
+else raises `PraesidiaConfigError` before a request is sent. The four typed hooks and `guarded`
+omit an argument whose value is `None` (and `arguments` when none is left);
+`before_interaction` and `decide` send `action` as given, so a `None` value is sent as JSON
+`null`. The route is `POST /organizations/{orgId}/interaction-decisions` (`agents:invoke` key
 scope, `AGENT_POLICIES` feature); the request and response bytes match the TS SDK's, proven by
 replaying be's recorded `test-fixtures/interaction-decision-v1.json` in both SDKs.
 
