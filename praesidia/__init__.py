@@ -51,10 +51,22 @@ from .gateway import MCP_SERVER_ID_HEADER, gateway_headers
 from .guard import Guard, TaskHandle
 from .identity import IdentityClient, IdentityError
 from .local_rules import run_local_rules
+# SDK-0301 — advisory in-runtime interaction hooks (parity with the TS SDK's SDK-0300).
+from .interaction_hooks import (
+    DEFAULT_FAIL_MODES,
+    INTERACTION_TYPES,
+    INTERACTION_VERDICTS,
+    AsyncPraesidiaInteractionHooks,
+    InteractionDecision,
+    InteractionHookResult,
+    PraesidiaInteractionHooks,
+)
 from .exceptions import (
     AuthError,
     ForbiddenError,
     GuardrailBlockedError,
+    InteractionDecisionUnavailableError,
+    InteractionDeniedError,
     InvalidMcpServerIdError,
     NotFoundError,
     PraesidiaConfigError,
@@ -122,6 +134,16 @@ __all__ = [
     "jcs_canonicalize",
     "jcs_commitment",
     "JcsCanonicalizationError",
+    # SDK-0301 — advisory in-runtime interaction hooks
+    "PraesidiaInteractionHooks",
+    "AsyncPraesidiaInteractionHooks",
+    "InteractionHookResult",
+    "InteractionDecision",
+    "INTERACTION_TYPES",
+    "INTERACTION_VERDICTS",
+    "DEFAULT_FAIL_MODES",
+    "InteractionDeniedError",
+    "InteractionDecisionUnavailableError",
 ]
 
 from .protected_http import ProtectedHttpResource, verify_http_receipt, verify_protected_http_result

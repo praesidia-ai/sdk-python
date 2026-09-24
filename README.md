@@ -3,8 +3,9 @@
 Python management SDK for the [Praesidia](https://praesidia.ai) AI agent platform.
 
 Covers agents, agent-tasks, workflows, connections, audit log, analytics, EU AI
-Act compliance reports, agent memory, OTLP GenAI telemetry emit, and offline
-trust-passport verification via the Praesidia REST API.
+Act compliance reports, agent memory, OTLP GenAI telemetry emit, offline
+trust-passport verification and advisory in-runtime interaction hooks via the
+Praesidia REST API.
 
 ## Installation
 
@@ -681,6 +682,83 @@ endpoint yet, so `permit=` is forward-compatible plumbing, not something you can
 Python has no `beginTask`/`TaskHandle`-style lifecycle object (unlike the TS SDK) — `protect_action`
 is net-new on `AgentsResource`, matching the TS SDK's states, headers and error taxonomy exactly.
 
+## Interaction hooks — advisory in-runtime guard (SDK-0301)
+
+Shell commands, code runs, file access, browser actions and tool calls run on **your** compute.
+Praesidia does not operate or intercept that runtime. `PraesidiaInteractionHooks` is an
+**advisory in-runtime guard**: before the action, your code asks Praesidia for a decision
+and the SDK enforces that decision in your process. An agent that does not load the SDK, or
+skips a hook, is not governed by it. For enforcement Praesidia sits in the path of, route the
+action through a governed MCP server (`client.agents.protect_action`) instead.
+
+```python
+import os
+import subprocess
+from praesidia import PraesidiaInteractionHooks
+
+def search_web(q: str) -> str: ...
+
+with PraesidiaInteractionHooks(
+    api_key=os.environ["PRAESIDIA_API_KEY"],    # org key with agents:invoke
+    org_id=os.environ["PRAESIDIA_ORG_ID"],
+    agent_id=os.environ["PRAESIDIA_AGENT_ID"],  # required: the agent tool policies decide
+    timeout=5,  # seconds a hook waits before its fail mode applies
+) as hooks:
+    hooks.before_exec("git status", cwd="/srv/repo")  # raises on deny
+    subprocess.run(["git", "status"], cwd="/srv/repo")
+
+    search = hooks.guarded(search_web)  # before_tool_call("search_web", kwargs) on every call
+    search(q="praesidia")
+```
+
+`AsyncPraesidiaInteractionHooks` (over `httpx.AsyncClient`) has the same constructor and methods;
+every hook is awaited (`await hooks.before_exec(...)`), `guarded` returns an async wrapper that
+accepts a sync or async tool, and it closes with `await hooks.aclose()` or `async with`.
+
+| Hook | Asks as | Default on outage |
+|---|---|---|
+| `before_tool_call(tool_name, arguments=None)` | `model_to_tool.<tool_name>` | fail-open |
+| `before_exec(command, args=None, cwd=None, runtime="shell")` | `agent_to_shell.exec` (`runtime="code"` → `agent_to_code_execution.exec`) | **fail-closed** |
+| `before_fs_access(path, mode)` | `agent_to_filesystem.<mode>` | fail-open for `read` / `list`, **fail-closed** for `write` / `delete` |
+| `before_browser_action(action, url=None, arguments=None)` | `agent_to_browser.<action>` | fail-open |
+| `before_interaction(type, {"name", "arguments"?}, *, fail_mode="closed")` | `<type>.<name>`, any of `INTERACTION_TYPES` | **fail-closed** |
+
+Every hook returns `InteractionHookResult(decision=...)` on `allow`, raises
+`InteractionDeniedError` on `deny`, and on `require_approval` blocks: it re-asks every
+`approval_poll_interval` seconds (default 2), echoing `approvalId`, until a human approves
+(returns) or rejects / the approval expires (raises). After `approval_timeout` seconds (default
+600) it raises with `reason_code="approval_wait_timeout"`. `on_approval_required(decision)` is
+called once when the wait starts, so you can tell someone which approval to act on.
+`guarded(tool, tool_name=None)` wraps a keyword-argument tool (the kwargs become `arguments`;
+the name defaults to `tool.__name__`) and keeps its signature for framework introspection.
+The TS SDK has no `guarded` equivalent: call `beforeToolCall` before the tool there.
+
+**Fail mode.** An outage is a network error, a timeout, a 408 / 429 / 5xx, or a malformed
+response. A fail-closed hook then raises `InteractionDecisionUnavailableError` (the outage is its
+`__cause__`); a fail-open hook returns `InteractionHookResult(decision=None, fail_open_error=err)`.
+Any other 4xx (bad key, unknown agent, feature not enabled) always raises the typed
+`PraesidiaError` (`AuthError`, `ForbiddenError`, ...), on every hook. The defaults fail closed
+where a skipped check can do irreversible local damage with no other Praesidia control in the
+path (shell / code execution, filesystem writes), and fail open for read-only and lower-impact
+checks so a Praesidia outage does not stop every agent. Override per class with
+`fail_mode={"tool_call" | "exec" | "fs_read" | "fs_write" | "browser": "open" | "closed"}`. An
+outage while waiting for an approval never turns into an allow: the hook keeps waiting, then
+times out.
+
+**Cache.** A verdict is reused for its `ttlSeconds` (be sends 30, or 0 for approvals and
+daily-limited rules) for the identical request, in memory, per hooks instance (at most 1000
+entries). Cached verdicts are valid only under the `policyFingerprint` that produced them: a
+response with a new fingerprint evicts them all. A policy change therefore takes effect within
+`ttlSeconds`.
+
+In `observe` governance mode be answers `allow` and records the would-be decision; in `off` it
+answers `allow`. `decide(type, action, approval_id=None)` is the raw call (no cache, no wait, no
+fail mode). Action names must be dot-separated `[A-Za-z0-9_-]` segments (be's rule); anything
+else raises `PraesidiaConfigError` before a request is sent. Hook arguments whose value is `None`
+are omitted. The route is `POST /organizations/{orgId}/interaction-decisions` (`agents:invoke` key
+scope, `AGENT_POLICIES` feature); the request and response bytes match the TS SDK's, proven by
+replaying be's recorded `test-fixtures/interaction-decision-v1.json` in both SDKs.
+
 ## Retry (FINDING-4) — bounded, idempotency-safe by default
 
 The client retries **only** requests that are safe to repeat: GET, DELETE, and
@@ -750,6 +828,10 @@ except RateLimitError:
 
 `ProtectedActionDeniedError` and `UnsupportedProtectedActionTargetError` (PA01 DX-002) are raised
 only by `client.agents.protect_action` — see [above](#protect-a-dispatch--protect_action-pa01-dx-002).
+
+`InteractionDeniedError` (`interaction_type`, `action_name`, `reason_code`, `decision`) and
+`InteractionDecisionUnavailableError` (`__cause__` = the outage) are raised only by the interaction
+hooks — see [Interaction hooks](#interaction-hooks--advisory-in-runtime-guard-sdk-0301).
 
 ## Not covered by this SDK
 
@@ -825,6 +907,19 @@ checkouts of `sdk` (owns the scanner), `be-core` (spec source of truth) and
 jobs.
 
 ## Changelog
+
+### Unreleased — SDK-0301: interaction hooks, an advisory in-runtime guard (BE-1486)
+
+- **Added** `PraesidiaInteractionHooks` (httpx.Client) and `AsyncPraesidiaInteractionHooks`
+  (httpx.AsyncClient): `before_tool_call`, `before_exec`, `before_fs_access`,
+  `before_browser_action`, `before_interaction`, `decide`, `guarded`, plus `INTERACTION_TYPES`,
+  `INTERACTION_VERDICTS`, `DEFAULT_FAIL_MODES`, `InteractionHookResult`, `InteractionDecision`
+  (`praesidia/interaction_hooks.py`) and `InteractionDeniedError` /
+  `InteractionDecisionUnavailableError` (`praesidia/exceptions.py`). Calls be's
+  `POST /organizations/{orgId}/interaction-decisions`; replays be's recorded fixture
+  `test-fixtures/interaction-decision-v1.json` (the same file the TS SDK replays). TS↔Python
+  parity: mirrors `sdk`'s SDK-0300 (same defaults, verdicts, fail modes, cache and approval wait);
+  `guarded` is Python-only. Additive only, no breaking change (semver minor).
 
 ### Unreleased — SDK-0315: `ASSET_TYPES` adds `GUARDRAIL`
 

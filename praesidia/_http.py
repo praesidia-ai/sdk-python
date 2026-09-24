@@ -597,8 +597,9 @@ class HttpClient:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _raise_for_status(self, r: httpx.Response) -> None:
-        """Map HTTP error codes to typed SDK exceptions."""
+    @staticmethod
+    def _raise_for_status(r: httpx.Response) -> None:
+        """Map HTTP error codes to typed SDK exceptions (also used by ``interaction_hooks``)."""
         envelope = _parse_error_envelope(r.text)
         envelope_kwargs: dict[str, Any] = {
             "code": envelope.get("code") if envelope else None,

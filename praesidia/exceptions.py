@@ -198,3 +198,36 @@ class UnsupportedProtectedActionTargetError(PraesidiaError):
             "supported by this SDK version."
         )
         self.protocol = protocol
+
+
+class InteractionDeniedError(PraesidiaError):
+    """
+    SDK-0301 — raised by an interaction hook (``PraesidiaInteractionHooks`` /
+    ``AsyncPraesidiaInteractionHooks``) when Praesidia's verdict is ``deny``, or
+    when a ``require_approval`` wait ends without an approval (``reason_code``
+    ``approval_rejected`` / ``approval_expired`` / ``approval_cancelled`` from be,
+    or ``approval_wait_timeout`` from the SDK). ``decision`` is be's last response
+    (still ``require_approval`` on a timeout). Mirrors the TS SDK's error.
+    """
+
+    def __init__(self, interaction_type: str, action_name: str, reason_code: str, decision: dict[str, Any]) -> None:
+        super().__init__(f"Praesidia denied {interaction_type}.{action_name}: {reason_code}")
+        self.interaction_type = interaction_type
+        self.action_name = action_name
+        self.reason_code = reason_code
+        self.decision = decision
+
+
+class InteractionDecisionUnavailableError(PraesidiaError):
+    """
+    SDK-0301 — raised by a fail-closed interaction hook when no decision could be
+    obtained (network error, timeout, 408/429/5xx, or a malformed response).
+    ``__cause__`` is the underlying error. A fail-open hook returns instead.
+    """
+
+    def __init__(self, interaction_type: str, action_name: str, cause: BaseException) -> None:
+        super().__init__(
+            f"Praesidia decision unavailable for {interaction_type}.{action_name} (fail-closed): {cause}"
+        )
+        self.interaction_type = interaction_type
+        self.action_name = action_name

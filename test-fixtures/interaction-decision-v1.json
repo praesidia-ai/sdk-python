@@ -1,0 +1,273 @@
+{
+  "version": 1,
+  "description": "BE-1486 recorded request/response pairs for POST /organizations/{orgId}/interaction-decisions. Replayed by be/src/protected-actions/interaction-decisions/interaction-decisions.service.spec.ts against the real service; the SDK hook suites (SDK-0300 TS, SDK-0301 Python) replay the same file against their clients. `given` is the server-side state the be spec mocks; SDKs read only request/response. decisionId is a fresh UUID per call.",
+  "route": "POST /organizations/{orgId}/interaction-decisions",
+  "orgId": "11111111-1111-4111-8111-111111111111",
+  "verdicts": ["allow", "deny", "require_approval"],
+  "interactionTypes": [
+    "prompt_to_model",
+    "model_to_tool",
+    "agent_to_mcp",
+    "agent_to_api",
+    "agent_to_agent",
+    "agent_to_db",
+    "agent_to_saas",
+    "agent_to_browser",
+    "agent_to_code_execution",
+    "agent_to_shell",
+    "agent_to_filesystem",
+    "agent_to_email"
+  ],
+  "rules": [
+    {
+      "id": "33333333-3333-4333-8333-333333333301",
+      "version": 1,
+      "toolPattern": "agent_to_filesystem.read",
+      "mode": "ALLOW"
+    },
+    {
+      "id": "33333333-3333-4333-8333-333333333302",
+      "version": 2,
+      "toolPattern": "agent_to_shell.*",
+      "mode": "DENY"
+    },
+    {
+      "id": "33333333-3333-4333-8333-333333333303",
+      "version": 1,
+      "toolPattern": "agent_to_email.send",
+      "mode": "STEP_UP"
+    }
+  ],
+  "cases": [
+    {
+      "name": "allow_by_policy",
+      "given": {
+        "governanceMode": "enforce",
+        "evaluate": {
+          "decision": "ALLOW",
+          "reason": "allowed_by_policy",
+          "matchedRuleId": "33333333-3333-4333-8333-333333333301",
+          "matchedRuleVersion": 1
+        }
+      },
+      "request": {
+        "interactionType": "agent_to_filesystem",
+        "agentId": "22222222-2222-4222-8222-222222222222",
+        "action": {
+          "name": "read",
+          "arguments": { "path": "/srv/reports/q3.csv" }
+        }
+      },
+      "response": {
+        "verdict": "allow",
+        "reasonCode": "allowed_by_policy",
+        "approvalId": null,
+        "policyFingerprint": "70fb32e200a1f5e4b7b6425a23b12e038cf82c33d2006184f28280dd3ae873e9",
+        "ttlSeconds": 30,
+        "enforcementMode": "enforce",
+        "decisionId": "55555555-5555-4555-8555-555555555501"
+      }
+    },
+    {
+      "name": "deny_by_policy",
+      "given": {
+        "governanceMode": "enforce",
+        "evaluate": {
+          "decision": "DENY",
+          "reason": "denied_by_policy",
+          "matchedRuleId": "33333333-3333-4333-8333-333333333302",
+          "matchedRuleVersion": 2
+        }
+      },
+      "request": {
+        "interactionType": "agent_to_shell",
+        "agentId": "22222222-2222-4222-8222-222222222222",
+        "action": { "name": "exec", "arguments": { "command": "rm -rf /srv" } }
+      },
+      "response": {
+        "verdict": "deny",
+        "reasonCode": "denied_by_policy",
+        "approvalId": null,
+        "policyFingerprint": "70fb32e200a1f5e4b7b6425a23b12e038cf82c33d2006184f28280dd3ae873e9",
+        "ttlSeconds": 30,
+        "enforcementMode": "enforce",
+        "decisionId": "55555555-5555-4555-8555-555555555502"
+      }
+    },
+    {
+      "name": "deny_no_policy_matched",
+      "given": {
+        "governanceMode": "enforce",
+        "evaluate": {
+          "decision": "DENY",
+          "reason": "no_policy_matched",
+          "matchedRuleId": null,
+          "matchedRuleVersion": null
+        }
+      },
+      "request": {
+        "interactionType": "agent_to_browser",
+        "agentId": "22222222-2222-4222-8222-222222222222",
+        "action": {
+          "name": "navigate",
+          "arguments": { "url": "https://example.com" }
+        }
+      },
+      "response": {
+        "verdict": "deny",
+        "reasonCode": "no_policy_matched",
+        "approvalId": null,
+        "policyFingerprint": "70fb32e200a1f5e4b7b6425a23b12e038cf82c33d2006184f28280dd3ae873e9",
+        "ttlSeconds": 30,
+        "enforcementMode": "enforce",
+        "decisionId": "55555555-5555-4555-8555-555555555503"
+      }
+    },
+    {
+      "name": "require_approval_minted",
+      "given": {
+        "governanceMode": "enforce",
+        "evaluate": {
+          "decision": "STEP_UP",
+          "reason": "step_up_required",
+          "matchedRuleId": "33333333-3333-4333-8333-333333333303",
+          "matchedRuleVersion": 1
+        },
+        "stepUp": {
+          "consumed": null,
+          "minted": "44444444-4444-4444-8444-444444444401"
+        }
+      },
+      "request": {
+        "interactionType": "agent_to_email",
+        "agentId": "22222222-2222-4222-8222-222222222222",
+        "action": {
+          "name": "send",
+          "arguments": { "to": "cfo@example.com", "subject": "Wire" }
+        }
+      },
+      "response": {
+        "verdict": "require_approval",
+        "reasonCode": "step_up_required",
+        "approvalId": "44444444-4444-4444-8444-444444444401",
+        "policyFingerprint": "70fb32e200a1f5e4b7b6425a23b12e038cf82c33d2006184f28280dd3ae873e9",
+        "ttlSeconds": 0,
+        "enforcementMode": "enforce",
+        "decisionId": "55555555-5555-4555-8555-555555555504"
+      }
+    },
+    {
+      "name": "approval_granted_consumed",
+      "given": {
+        "governanceMode": "enforce",
+        "evaluate": {
+          "decision": "STEP_UP",
+          "reason": "step_up_required",
+          "matchedRuleId": "33333333-3333-4333-8333-333333333303",
+          "matchedRuleVersion": 1
+        },
+        "stepUp": {
+          "consumed": "44444444-4444-4444-8444-444444444401",
+          "minted": null
+        }
+      },
+      "request": {
+        "interactionType": "agent_to_email",
+        "agentId": "22222222-2222-4222-8222-222222222222",
+        "action": {
+          "name": "send",
+          "arguments": { "to": "cfo@example.com", "subject": "Wire" }
+        },
+        "approvalId": "44444444-4444-4444-8444-444444444401"
+      },
+      "response": {
+        "verdict": "allow",
+        "reasonCode": "approval_consumed",
+        "approvalId": "44444444-4444-4444-8444-444444444401",
+        "policyFingerprint": "70fb32e200a1f5e4b7b6425a23b12e038cf82c33d2006184f28280dd3ae873e9",
+        "ttlSeconds": 0,
+        "enforcementMode": "enforce",
+        "decisionId": "55555555-5555-4555-8555-555555555505"
+      }
+    },
+    {
+      "name": "approval_rejected",
+      "given": {
+        "governanceMode": "enforce",
+        "evaluate": {
+          "decision": "STEP_UP",
+          "reason": "step_up_required",
+          "matchedRuleId": "33333333-3333-4333-8333-333333333303",
+          "matchedRuleVersion": 1
+        },
+        "stepUp": {
+          "consumed": null,
+          "minted": "44444444-4444-4444-8444-444444444402"
+        },
+        "echoedApprovalStatus": "REJECTED"
+      },
+      "request": {
+        "interactionType": "agent_to_email",
+        "agentId": "22222222-2222-4222-8222-222222222222",
+        "action": {
+          "name": "send",
+          "arguments": { "to": "cfo@example.com", "subject": "Wire" }
+        },
+        "approvalId": "44444444-4444-4444-8444-444444444401"
+      },
+      "response": {
+        "verdict": "deny",
+        "reasonCode": "approval_rejected",
+        "approvalId": "44444444-4444-4444-8444-444444444401",
+        "policyFingerprint": "70fb32e200a1f5e4b7b6425a23b12e038cf82c33d2006184f28280dd3ae873e9",
+        "ttlSeconds": 0,
+        "enforcementMode": "enforce",
+        "decisionId": "55555555-5555-4555-8555-555555555506"
+      }
+    },
+    {
+      "name": "observe_mode_would_deny",
+      "given": {
+        "governanceMode": "observe",
+        "evaluate": {
+          "decision": "DENY",
+          "reason": "denied_by_policy",
+          "matchedRuleId": "33333333-3333-4333-8333-333333333302",
+          "matchedRuleVersion": 2
+        }
+      },
+      "request": {
+        "interactionType": "agent_to_shell",
+        "agentId": "22222222-2222-4222-8222-222222222222",
+        "action": { "name": "exec", "arguments": { "command": "rm -rf /srv" } }
+      },
+      "response": {
+        "verdict": "allow",
+        "reasonCode": "denied_by_policy",
+        "approvalId": null,
+        "policyFingerprint": "373c8876dd84451e41adf62f17b621482aab276eae95c4d910faf4626a40a8f6",
+        "ttlSeconds": 30,
+        "enforcementMode": "observe",
+        "decisionId": "55555555-5555-4555-8555-555555555507"
+      }
+    },
+    {
+      "name": "governance_off",
+      "given": { "governanceMode": "off" },
+      "request": {
+        "interactionType": "agent_to_shell",
+        "agentId": "22222222-2222-4222-8222-222222222222",
+        "action": { "name": "exec", "arguments": { "command": "rm -rf /srv" } }
+      },
+      "response": {
+        "verdict": "allow",
+        "reasonCode": "governance_off",
+        "approvalId": null,
+        "policyFingerprint": "2c30e70b7c33377bc6ee4372576d2087c2b27ea01766c27f9c12cd50f156e657",
+        "ttlSeconds": 30,
+        "enforcementMode": "off",
+        "decisionId": "55555555-5555-4555-8555-555555555508"
+      }
+    }
+  ]
+}
