@@ -22,6 +22,7 @@ praesidia/compliance.py           # ComplianceResource — EU AI Act report expo
 praesidia/memory.py               # MemoryResource
 praesidia/telemetry.py            # gen_ai_span — OTLP GenAI span emission
 praesidia/trust.py                # verify_passport — offline trust-passport verification
+praesidia/gateway.py              # gateway_headers — x-praesidia-mcp-server-id for gateway calls
 praesidia/identity.py             # IdentityClient, IdentityError
 praesidia/proof.py                # class ProofResource (proof.py:16) — protected-action evidence
 praesidia/protected_http.py       # ProtectedHttpResource, verify_http_receipt,

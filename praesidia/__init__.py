@@ -46,6 +46,8 @@ from .agents import tool_call_headers_from_task
 # AISYS-0002 and the TS SDK's ai_systems resource (SDK-0001).
 from .ai_systems import AiSystemsResource
 from .client import Praesidia
+# SDK-0313 — tag gateway calls with an MCP server id (GW-0776).
+from .gateway import MCP_SERVER_ID_HEADER, gateway_headers
 from .guard import Guard, TaskHandle
 from .identity import IdentityClient, IdentityError
 from .local_rules import run_local_rules
@@ -53,6 +55,7 @@ from .exceptions import (
     AuthError,
     ForbiddenError,
     GuardrailBlockedError,
+    InvalidMcpServerIdError,
     NotFoundError,
     PraesidiaConfigError,
     PraesidiaError,
@@ -84,6 +87,10 @@ __all__ = [
     "ResponseTooLargeError",
     "ServerError",
     "tool_call_headers_from_task",
+    # SDK-0313 — gateway MCP server id header
+    "gateway_headers",
+    "MCP_SERVER_ID_HEADER",
+    "InvalidMcpServerIdError",
     # TOP-0008 -- Guard convenience wrapper + offline local-rules guardrail fallback
     "Guard",
     "TaskHandle",

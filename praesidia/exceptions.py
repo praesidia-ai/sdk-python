@@ -130,6 +130,20 @@ class PraesidiaConfigError(PraesidiaError):
     """
 
 
+class InvalidMcpServerIdError(PraesidiaConfigError):
+    """
+    SDK-0313 — raised by ``gateway_headers`` before anything is sent when an MCP
+    server id is not one canonical hyphenated UUID, the value the gateway would
+    answer with 400 ``invalid_mcp_server_id``. Mirrors the TS SDK's
+    ``InvalidMcpServerIdError``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "x-praesidia-mcp-server-id must be one canonical hyphenated UUID (8-4-4-4-12 hex)"
+        )
+
+
 class ProtectedActionDeniedError(PraesidiaError):
     """
     PA01 DX-002 — raised by ``AgentsResource.protect_action`` when the

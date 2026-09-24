@@ -594,6 +594,36 @@ for row in client.agents.poll_pending_tasks(
 (`str | None`). For JIT-first orgs `clientSecret` is `None` — do **not** persist
 a static `X-A2A-Client-Secret`; use the JIT capability-token flow above.
 
+## Gateway — tag calls with an MCP server id (SDK-0313)
+
+Point the OpenAI or Anthropic SDK at the Praesidia gateway, then use `gateway_headers` to name the
+MCP server a call is made for. The gateway reports the egress it observes against that server,
+removes the header before forwarding the call, and treats the id as untrusted: be records it only
+for a server your key's org owns.
+
+```python
+from openai import OpenAI
+from praesidia import gateway_headers
+
+client = OpenAI(
+    base_url="https://gateway.praesidia.ai/openai/v1",
+    api_key="pra_...",
+    default_headers=gateway_headers(mcp_server_id=SERVER_ID),       # per client
+)
+client.chat.completions.create(
+    model="gpt-4o-mini", messages=[...],
+    extra_headers=gateway_headers(mcp_server_id=OTHER_SERVER_ID),   # per call; wins
+)
+```
+
+`gateway_headers()` with no id returns `{}`, so no header is sent. An id that is not one
+hyphenated 8-4-4-4-12 hex UUID raises `InvalidMcpServerIdError` (a `PraesidiaConfigError`)
+before any request, instead of the gateway's 400 `invalid_mcp_server_id`. Build both dicts with
+`gateway_headers` (header name `MCP_SERVER_ID_HEADER`) so the per-call value replaces the client
+value. If the two use different letter case, both are sent and the gateway rejects the duplicate.
+The TypeScript SDK's twin (SDK-0312) wraps `fetch` instead. The Python OpenAI and Anthropic SDKs
+accept these headers directly, so no custom HTTP client is needed.
+
 ## Protect a dispatch — `protect_action` (PA01 DX-002)
 
 `call_mcp_tool` above never raises on denial and has no way to distinguish "the tool ran and
