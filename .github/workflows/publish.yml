@@ -52,6 +52,26 @@ jobs:
           python -m build
           twine check dist/*
 
+      # SDK-0338 — CycloneDX SBOM of what a user gets from `pip install
+      # praesidia`: the built wheel alone in a clean venv (no dev/test extras).
+      # cyclonedx-bom runs runner-side via pipx (preinstalled on ubuntu-latest,
+      # pinned here); it is not a project dependency.
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          python -m venv "$RUNNER_TEMP/sbom-venv"
+          "$RUNNER_TEMP/sbom-venv/bin/pip" install --quiet dist/*.whl
+          pipx run --spec cyclonedx-bom==7.4.0 cyclonedx-py environment \
+            --pyproject pyproject.toml --mc-type library \
+            --of JSON -o sbom.cdx.json "$RUNNER_TEMP/sbom-venv/bin/python"
+          python -c "import json; assert json.load(open('sbom.cdx.json'))['bomFormat'] == 'CycloneDX'"
+
+      - name: Upload SBOM as workflow artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          if-no-files-found: error
+
       - name: Publish to PyPI
         run: twine upload --non-interactive dist/*
         env:
