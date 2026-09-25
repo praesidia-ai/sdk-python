@@ -28,7 +28,7 @@ from praesidia import (
 )
 from praesidia.trust import TrustResource
 
-BASE_URL = "http://test.local"
+BASE_URL = "https://test.local"
 ORG_ID = "org-1"
 
 # --- Cross-language fixture (Node-signed over the SDK canonicalJson) ---------

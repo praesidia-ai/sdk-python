@@ -7,7 +7,9 @@ future release via httpx.AsyncClient without changing the resource API.
 
 from __future__ import annotations
 
+import ipaddress
 import json
+import os
 import time
 from threading import RLock
 from typing import Any, Callable, Optional, Union
@@ -27,6 +29,7 @@ from .exceptions import (
     AuthError,
     ForbiddenError,
     NotFoundError,
+    PraesidiaConfigError,
     PraesidiaError,
     RateLimitError,
     ResponseTooLargeError,
@@ -78,7 +81,21 @@ def path_segment(value: str, name: str = "path segment") -> str:
     return quote(value, safe="")
 
 
-def normalize_base_url(base_url: str) -> str:
+def _is_loopback_host(host: str) -> bool:
+    """SDK-0339 -- ``localhost``, ``127.0.0.0/8`` or ``::1``; never ``*.localhost``/``0.0.0.0``."""
+    if host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip == ipaddress.IPv6Address("::1") or (ip.version == 4 and ip in _LOOPBACK_V4)
+
+
+_LOOPBACK_V4 = ipaddress.IPv4Network("127.0.0.0/8")
+
+
+def normalize_base_url(base_url: str, allow_insecure_http: Optional[bool] = None) -> str:
     """Return a safe absolute HTTP(S) API base URL without a trailing slash."""
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("base_url must be a non-empty absolute HTTP(S) URL")
@@ -106,6 +123,15 @@ def normalize_base_url(base_url: str) -> str:
         raise ValueError(
             "base_url must be an absolute HTTP(S) URL without credentials, "
             "a query, or a fragment"
+        )
+    # SDK-0339 -- the API key and every governed payload ride this URL; refuse
+    # cleartext to a non-loopback host unless the caller opts in explicitly.
+    if allow_insecure_http is None:
+        allow_insecure_http = os.environ.get("PRAESIDIA_ALLOW_INSECURE_HTTP") == "1"
+    if parsed.scheme == "http" and not _is_loopback_host(parsed.hostname) and not allow_insecure_http:
+        raise PraesidiaConfigError(
+            f"base_url must use HTTPS for non-loopback host {parsed.hostname}; pass "
+            "allow_insecure_http=True (or set PRAESIDIA_ALLOW_INSECURE_HTTP=1) to send credentials in cleartext"
         )
     path = parsed.path.rstrip("/")
     return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
@@ -184,9 +210,10 @@ class HttpClient:
         base_url: str,
         timeout: float = _DEFAULT_TIMEOUT,
         retry: Union[RetryConfig, bool, None] = None,
+        allow_insecure_http: Optional[bool] = None,
     ) -> None:
         self.org_id = path_segment(org_id, "org_id")
-        self._init_transport(base_url, timeout)
+        self._init_transport(base_url, timeout, allow_insecure_http)
         self._headers = {"Authorization": f"Bearer {_validate_api_key(api_key)}", **self._headers}
         #: FINDING-4 -- resolved retry policy, or None when retries are disabled.
         self._retry: Optional[RetryConfig] = resolve_retry_config(retry)
@@ -197,6 +224,7 @@ class HttpClient:
         base_url: str,
         timeout: float = _DEFAULT_TIMEOUT,
         retry: Union[RetryConfig, bool, None] = None,
+        allow_insecure_http: Optional[bool] = None,
     ) -> HttpClient:
         """
         SDK-0311 -- a client for the PUBLIC (trust-passport) routes only. It has
@@ -204,12 +232,12 @@ class HttpClient:
         Bypasses ``__init__`` so the authenticated constructor still requires both.
         """
         client = cls.__new__(cls)
-        client._init_transport(base_url, timeout)
+        client._init_transport(base_url, timeout, allow_insecure_http)
         client._retry = resolve_retry_config(retry)
         return client
 
-    def _init_transport(self, base_url: str, timeout: float) -> None:
-        self._base = normalize_base_url(base_url)
+    def _init_transport(self, base_url: str, timeout: float, allow_insecure_http: Optional[bool] = None) -> None:
+        self._base = normalize_base_url(base_url, allow_insecure_http)
         self._timeout = _validate_timeout(timeout)
         self._headers_lock = RLock()
         self._headers: dict[str, str] = {

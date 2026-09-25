@@ -52,7 +52,15 @@ client = Praesidia(
     base_url="https://api.praesidia.ai",  # default; omit for hosted API
     timeout=30.0,             # per-operation request timeout; max 300 seconds
 )
+```
 
+> **Plaintext HTTP (SDK-0339, behaviour change).** `Praesidia`, `Guard`, `PraesidiaTrust` and the
+> interaction hooks raise `PraesidiaConfigError` for an `http:` `base_url` / `PRAESIDIA_BASE_URL`
+> unless the host is loopback (`localhost`, `127.0.0.0/8`, `::1`) or you pass
+> `allow_insecure_http=True` (env `PRAESIDIA_ALLOW_INSECURE_HTTP=1`). Before, any `http:` host was
+> accepted and the API key was sent in cleartext. `PraesidiaIdentity` keeps its stricter rule.
+
+```python
 # List agents
 agents = client.agents.list()
 print(f"Found {len(agents)} agents")

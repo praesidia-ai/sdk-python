@@ -12,7 +12,7 @@ import respx
 from praesidia import Praesidia, gen_ai_span
 from praesidia.telemetry import OTLP_MAX_RESOURCE_SPANS, TelemetryResource
 
-BASE_URL = "http://test.local"
+BASE_URL = "https://test.local"
 ORG_ID = "org-1"
 TRACES = f"{BASE_URL}/telemetry/otlp/v1/traces"
 ACK = {"accepted": True, "buffered": 1}

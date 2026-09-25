@@ -51,6 +51,11 @@ class Praesidia:
         base_url: Override the backend base URL.  Defaults to the hosted API
                   at ``https://api.praesidia.ai``.  Set to
                   ``http://localhost:5001`` for local development.
+        allow_insecure_http: SDK-0339 -- permit a plaintext ``http:`` base URL
+                  to a non-loopback host (the API key then travels in
+                  cleartext). Loopback (``localhost``, ``127.0.0.0/8``,
+                  ``::1``) never needs it. Defaults to
+                  ``PRAESIDIA_ALLOW_INSECURE_HTTP=1``, else ``False``.
         timeout:   Per-operation HTTP timeout in seconds (default: 30, maximum:
                    300). Bulk downloads use their own finite idle timeout.
         retry:     FINDING-4 — bounded retry policy for GET/DELETE (and
@@ -102,6 +107,7 @@ class Praesidia:
         timeout: float = 30.0,
         retry: Union[RetryConfig, bool, None] = None,
         runtime_installation_id: str | None = None,
+        allow_insecure_http: bool | None = None,
     ) -> None:
         self._http = HttpClient(
             api_key=api_key,
@@ -109,6 +115,7 @@ class Praesidia:
             base_url=base_url,
             timeout=timeout,
             retry=retry,
+            allow_insecure_http=allow_insecure_http,
         )
         self.agents = AgentsResource(self._http)
         self.ai_systems = AiSystemsResource(self._http)

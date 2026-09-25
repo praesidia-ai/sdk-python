@@ -58,7 +58,7 @@ def test_stream_get_passes_finite_timeout(monkeypatch):
         return httpx.Response(200, content=b"ok")
 
     _patch_bounded_request(monkeypatch, "GET", fake_get)
-    client = HttpClient(api_key="k", org_id="o", base_url="http://test.local")
+    client = HttpClient(api_key="k", org_id="o", base_url="https://test.local")
     client.stream_get("/reports/rep-1/pdf")
 
     # The download call must NOT disable timeouts (the old timeout=None bug).
@@ -74,7 +74,7 @@ def test_stream_get_respects_explicit_timeout_override(monkeypatch):
         return httpx.Response(200, content=b"ok")
 
     _patch_bounded_request(monkeypatch, "GET", fake_get)
-    client = HttpClient(api_key="k", org_id="o", base_url="http://test.local")
+    client = HttpClient(api_key="k", org_id="o", base_url="https://test.local")
     override = httpx.Timeout(5.0)
     client.stream_get("/x", timeout=override)
 
@@ -130,7 +130,7 @@ def test_general_requests_use_configured_timeout(monkeypatch):
 
     _patch_bounded_request(monkeypatch, "GET", fake_get)
     client = HttpClient(
-        api_key="k", org_id="o", base_url="http://test.local", timeout=7.5
+        api_key="k", org_id="o", base_url="https://test.local", timeout=7.5
     )
     client.get("/health")
     assert captured["timeout"] == 7.5

@@ -29,7 +29,7 @@ SENTINEL_KEY = "sk_live_SENTINEL_DO_NOT_LEAK_0000000000"
 
 
 def test_default_str_and_repr_do_not_leak_the_api_key():
-    client = Praesidia(api_key=SENTINEL_KEY, org_id="org-1", base_url="http://test.local")
+    client = Praesidia(api_key=SENTINEL_KEY, org_id="org-1", base_url="https://test.local")
     assert SENTINEL_KEY not in str(client)
     assert SENTINEL_KEY not in repr(client)
     # The transport object is the one that actually stores the credential.

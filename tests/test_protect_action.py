@@ -15,7 +15,7 @@ from praesidia.exceptions import (
     UnsupportedProtectedActionTargetError,
 )
 
-BASE_URL = "http://test.local"
+BASE_URL = "https://test.local"
 ORG_ID = "org-1"
 CALL_URL = f"{BASE_URL}/organizations/{ORG_ID}/mcp-servers/srv-1/tools/search/call"
 

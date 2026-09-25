@@ -17,7 +17,7 @@ import praesidia.guard as guard_mod
 from praesidia.exceptions import PraesidiaConfigError, ServerError
 from praesidia.guard import Guard
 
-BASE_URL = "http://test.local"
+BASE_URL = "https://test.local"
 ORG_ID = "org-uuid-123"
 VALIDATE = f"{BASE_URL}/organizations/{ORG_ID}/guardrails/validate"
 DOWN = httpx.Response(503, json={"message": "unavailable"})

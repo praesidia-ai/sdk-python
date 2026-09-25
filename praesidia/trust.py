@@ -598,6 +598,7 @@ class PraesidiaTrust(TrustResource):
                   ``https://api.praesidia.ai``.
         timeout:  Per-request timeout in seconds.
         retry:    Retry policy, as for :class:`~praesidia.Praesidia`.
+        allow_insecure_http: As for :class:`~praesidia.Praesidia` (SDK-0339).
 
     Example::
 
@@ -611,10 +612,11 @@ class PraesidiaTrust(TrustResource):
         *,
         timeout: float = 30.0,
         retry: Union[RetryConfig, bool, None] = None,
+        allow_insecure_http: Optional[bool] = None,
     ) -> None:
         if base_url is None:
             base_url = os.environ.get("PRAESIDIA_BASE_URL") or "https://api.praesidia.ai"
-        super().__init__(HttpClient.public(base_url, timeout, retry))
+        super().__init__(HttpClient.public(base_url, timeout, retry, allow_insecure_http))
 
 
 # ── Trust anchors for fetch_and_verify (SEC-2026-09-12 MCPSDK-04) ────────────

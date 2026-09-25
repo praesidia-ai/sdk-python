@@ -10,7 +10,7 @@ import respx
 
 from praesidia import Praesidia
 
-BASE_URL = "http://test.local"
+BASE_URL = "https://test.local"
 ORG_ID = "org-1"
 ANALYTICS = f"{BASE_URL}/organizations/{ORG_ID}/analytics"
 

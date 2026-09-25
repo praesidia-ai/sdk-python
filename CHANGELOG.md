@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Fixed
+- **Behaviour change (SDK-0339):** an `http:` `base_url` / `PRAESIDIA_BASE_URL` to a non-loopback
+  host now raises `PraesidiaConfigError` instead of sending the API key in cleartext. Loopback
+  (`localhost`, `127.0.0.0/8`, `::1`) is unaffected. Opt back in with the new keyword
+  `allow_insecure_http=True` on `Praesidia`, `Guard`, `PraesidiaTrust` and the interaction hooks,
+  or `PRAESIDIA_ALLOW_INSECURE_HTTP=1`. Other malformed base URLs still raise `ValueError`.
 - `client.ai_systems.transition_lifecycle()` to `production` or `retired` always got a 400 since
   be AISYS-0018 made those targets approval-gated (SDK-0323). It now raises
   `PraesidiaConfigError` (a `PraesidiaError`) before sending, naming the method to use. New

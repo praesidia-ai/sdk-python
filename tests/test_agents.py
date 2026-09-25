@@ -11,7 +11,7 @@ import respx
 
 from praesidia import Praesidia
 
-BASE_URL = "http://test.local"
+BASE_URL = "https://test.local"
 ORG_ID = "org-1"
 AGENT_ID = "agent-9"
 CONN_ID = "00000000-0000-4000-8000-000000000c01"

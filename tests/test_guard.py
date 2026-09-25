@@ -16,7 +16,7 @@ import respx
 from praesidia.exceptions import GuardrailBlockedError, PraesidiaConfigError
 from praesidia.guard import Guard
 
-BASE_URL = "http://test.local"
+BASE_URL = "https://test.local"
 ORG_ID = "org-uuid-123"
 CONNECTION_ID = "00000000-0000-4000-8000-000000000c01"
 

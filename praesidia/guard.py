@@ -213,6 +213,7 @@ class Guard:
         failure_mode: Optional[FailureMode] = None,
         max_degraded_ms: Optional[float] = None,
         on_degraded: Optional[Callable[[dict[str, Any]], None]] = None,
+        allow_insecure_http: Optional[bool] = None,
     ) -> None:
         self._api_key = api_key or os.environ.get("PRAESIDIA_API_KEY")
         self._org_id = org_id or os.environ.get("PRAESIDIA_ORG_ID")
@@ -248,7 +249,8 @@ class Guard:
             if retry is not None:
                 http_kwargs["retry"] = retry
             self._http = HttpClient(
-                api_key=self._api_key, org_id=self._org_id, base_url=self._base_url, **http_kwargs
+                api_key=self._api_key, org_id=self._org_id, base_url=self._base_url,
+                allow_insecure_http=allow_insecure_http, **http_kwargs,
             )
 
     # ── identity ────────────────────────────────────────────────────────

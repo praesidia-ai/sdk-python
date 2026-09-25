@@ -112,6 +112,7 @@ class _InteractionHooksBase(Generic[_R]):
         org_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         base_url: Optional[str] = None,
+        allow_insecure_http: Optional[bool] = None,
         timeout: Optional[float] = None,
         fail_mode: Optional[Mapping[str, str]] = None,
         approval_poll_interval: float = 2.0,
@@ -140,7 +141,7 @@ class _InteractionHooksBase(Generic[_R]):
         self._fingerprint: Optional[str] = None
         self._lock = threading.Lock()
         self._http = self._open(
-            base_url=normalize_base_url(base_url or os.environ.get("PRAESIDIA_BASE_URL") or "https://api.praesidia.ai"),
+            base_url=normalize_base_url(base_url or os.environ.get("PRAESIDIA_BASE_URL") or "https://api.praesidia.ai", allow_insecure_http),
             headers={
                 "Authorization": f"Bearer {_validate_api_key(api_key)}",
                 "Content-Type": "application/json",

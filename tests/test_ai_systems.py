@@ -27,7 +27,7 @@ else:
     _SWAGGER_PATH = (Path(__file__).resolve().parents[2] / "ui" / "swagger.json")
 _SWAGGER_AVAILABLE = _SWAGGER_PATH.is_file()
 
-BASE_URL = "http://test.local"
+BASE_URL = "https://test.local"
 ORG_ID = "org-1"
 ORG_BASE = f"{BASE_URL}/organizations/{ORG_ID}"
 SYSTEMS = f"{ORG_BASE}/ai-systems"

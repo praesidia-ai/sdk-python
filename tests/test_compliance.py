@@ -8,7 +8,7 @@ import respx
 
 from praesidia import Praesidia, PraesidiaError
 
-BASE_URL = "http://test.local"
+BASE_URL = "https://test.local"
 ORG_ID = "org-1"
 REPORTS = f"{BASE_URL}/organizations/{ORG_ID}/compliance/eu-ai-act/reports"
 

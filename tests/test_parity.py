@@ -14,7 +14,7 @@ import respx
 
 from praesidia import Praesidia, tool_call_headers_from_task
 
-BASE_URL = "http://test.local"
+BASE_URL = "https://test.local"
 ORG_ID = "org-1"
 AGENT_ID = "agent-9"
 
