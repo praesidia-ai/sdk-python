@@ -502,6 +502,30 @@ def test_put_asset_by_external_id_contract_and_enum_validation():
 
 
 @respx.mock
+def test_asset_writes_reject_pipeline_sources_but_list_filter_keeps_them():
+    """SDK-0318 / BE-1529 -- create/put send only `manual`/`api`/`import`;
+    the list filter still accepts every `AI_ASSET_SOURCES` value."""
+    post = respx.post(ASSETS).mock(return_value=httpx.Response(201, json={"id": "a"}))
+    put = respx.put(f"{ASSETS}/by-external-id/e").mock(return_value=httpx.Response(200, json={}))
+    listed = respx.get(ASSETS).mock(
+        return_value=httpx.Response(200, json={"data": [], "total": 0, "page": 1, "limit": 20})
+    )
+    ai = _client().ai_systems
+    for source in ("discovery_connector", "runtime_observation", "entitlement_projection"):
+        with pytest.raises(ValueError, match="source must be one of"):
+            ai.create_asset({"name": "x", "assetType": "VENDOR", "source": source})
+        with pytest.raises(ValueError, match="source must be one of"):
+            ai.put_asset_by_external_id("e", {"name": "x", "assetType": "VENDOR", "source": source})
+        ai.list_assets_page(source=source)
+        assert listed.calls.last.request.url.params["source"] == source
+    assert not post.called and not put.called
+    for source in AiSystemsResource.CLIENT_ASSET_SOURCES:
+        ai.create_asset({"name": "x", "assetType": "VENDOR", "source": source})
+        ai.put_asset_by_external_id("e", {"name": "x", "assetType": "VENDOR", "source": source})
+    assert post.call_count == put.call_count == 3
+
+
+@respx.mock
 def test_delete_asset_by_external_id_returns_outcome_body():
     route = respx.delete(f"{ASSETS}/by-external-id/ext-asset-1").mock(
         return_value=httpx.Response(

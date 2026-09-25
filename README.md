@@ -170,6 +170,10 @@ Every `list*`/`list_assets`/`list_relationships` also has a `*_page` (full pagin
 `transition_lifecycle`'s `lifecycle_status` is validated the same way; `change_asset_role`'s `role`
 is not (matches `attach_asset`'s `role`, per `AiSystemAssetRole` being hand-copied rather than
 derived from the entity's `as const` array — be 400s on an unknown value).
+`create_asset` and `put_asset_by_external_id` validate `assetType`/`discoveryStatus` the same way,
+and `source` against `CLIENT_ASSET_SOURCES` (`"manual"`/`"api"`/`"import"`). The other
+`ASSET_SOURCES` values are written only by be's own pipelines (BE-1529). The
+`list_assets*` `source` filter still accepts all of `ASSET_SOURCES`.
 
 `traverse(asset_id, **filters)` walks the relationship graph from an anchor asset (`direction`
 one of `"downstream"`/`"upstream"`/`"both"`, client-side validated like the list filters above;
@@ -914,6 +918,20 @@ checkouts of `sdk` (owns the scanner), `be-core` (spec source of truth) and
 jobs.
 
 ## Changelog
+
+### Unreleased — SDK-0318: asset writes send only client sources (BE-1529)
+
+- **Fixed** `create_asset` / `put_asset_by_external_id` now raise `ValueError` on a `source`
+  outside the new `AiSystemsResource.CLIENT_ASSET_SOURCES` (`manual`/`api`/`import`), before
+  sending. Previously `discovery_connector`/`runtime_observation`/`entitlement_projection`
+  reached be and got a 400. `create_asset` now also validates `assetType`/`discoveryStatus`,
+  as `put_asset_by_external_id` already did.
+- **Fixed** `ASSET_SOURCES` (5 → 6: adds `entitlement_projection`). Before this,
+  `list_assets*(source="entitlement_projection")` raised `ValueError` even though be's list
+  filter accepts it.
+- **Behaviour change (semver patch)**: an invalid create/put value now raises `ValueError`
+  instead of the server's 400 `PraesidiaError`. Any value that now raises was already
+  rejected by be ≥ BE-1529. TS↔Python parity: mirrors `sdk`'s SDK-0317.
 
 ### Unreleased — SDK-0301: interaction hooks, an advisory in-runtime guard (BE-1486)
 

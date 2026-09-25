@@ -88,8 +88,16 @@ class AiSystemsResource:
         "IDENTITY", "CREDENTIAL", "REPOSITORY", "CLOUD_RESOURCE", "WORKFLOW",
         "TOOL", "API_ENDPOINT", "DATA_SCOPE", "GUARDRAIL",
     )
-    #: `entities/ai-asset.entity.ts`'s `AI_ASSET_SOURCES`.
-    ASSET_SOURCES = ("manual", "runtime_observation", "discovery_connector", "api", "import")
+    #: `entities/ai-asset.entity.ts`'s `AI_ASSET_SOURCES` (the list filter's
+    #: full set; SDK-0318 adds DB-0300's `entitlement_projection`).
+    ASSET_SOURCES = (
+        "manual", "runtime_observation", "discovery_connector", "api", "import",
+        "entitlement_projection",
+    )
+    #: `dto/create-ai-asset.dto.ts`'s `CLIENT_SOURCES` (BE-1529): the only
+    #: `source` values :meth:`create_asset` / :meth:`put_asset_by_external_id`
+    #: may send -- the other `ASSET_SOURCES` are written by be's own pipelines.
+    CLIENT_ASSET_SOURCES = ("manual", "api", "import")
     #: `entities/ai-asset.entity.ts`'s `AI_ASSET_DISCOVERY_STATUSES`.
     DISCOVERY_STATUSES = ("discovered", "adopted", "ignored")
     #: `entities/asset-relationship.entity.ts`'s `ASSET_RELATIONSHIP_TYPES`
@@ -420,8 +428,10 @@ class AiSystemsResource:
             data: ``{"name": ..., "assetType": ..., "source"?: ...,
                    "discoveryStatus"?: ..., "environment"?: ...,
                    "ownerType"?: ..., "ownerId"?: ..., "metadata"?: ...}``
-                  (``CreateAiAssetDto``).
+                  (``CreateAiAssetDto``; enums validated as in
+                  :meth:`put_asset_by_external_id`).
         """
+        self._check_asset_write(data)
         return self._http.post(self._assets_base, json=data)
 
     def get_asset(self, asset_id: str) -> dict[str, Any]:
@@ -466,19 +476,23 @@ class AiSystemsResource:
 
         Args:
             data: ``CreateAiAssetDto`` shape (``assetType`` validated against
-                  :attr:`ASSET_TYPES`, ``source``/``discoveryStatus`` against
-                  their own tuples, matching :meth:`list_assets_page`).
+                  :attr:`ASSET_TYPES`, ``source`` against
+                  :attr:`CLIENT_ASSET_SOURCES`, ``discoveryStatus`` against
+                  :attr:`DISCOVERY_STATUSES`).
         """
-        if (asset_type := data.get("assetType")) is not None and asset_type not in self.ASSET_TYPES:
-            raise ValueError(f"assetType must be one of {self.ASSET_TYPES}; got {asset_type!r}")
-        if (source := data.get("source")) is not None and source not in self.ASSET_SOURCES:
-            raise ValueError(f"source must be one of {self.ASSET_SOURCES}; got {source!r}")
-        if (status := data.get("discoveryStatus")) is not None and status not in self.DISCOVERY_STATUSES:
-            raise ValueError(f"discoveryStatus must be one of {self.DISCOVERY_STATUSES}; got {status!r}")
+        self._check_asset_write(data)
         return self._http.put(
             f"{self._assets_base}/by-external-id/{path_segment(external_id, 'external_id')}",
             json=data,
         )
+
+    def _check_asset_write(self, data: dict[str, Any]) -> None:
+        if (asset_type := data.get("assetType")) is not None and asset_type not in self.ASSET_TYPES:
+            raise ValueError(f"assetType must be one of {self.ASSET_TYPES}; got {asset_type!r}")
+        if (source := data.get("source")) is not None and source not in self.CLIENT_ASSET_SOURCES:
+            raise ValueError(f"source must be one of {self.CLIENT_ASSET_SOURCES}; got {source!r}")
+        if (status := data.get("discoveryStatus")) is not None and status not in self.DISCOVERY_STATUSES:
+            raise ValueError(f"discoveryStatus must be one of {self.DISCOVERY_STATUSES}; got {status!r}")
 
     def delete_asset_by_external_id(self, external_id: str) -> dict[str, Any]:
         """
