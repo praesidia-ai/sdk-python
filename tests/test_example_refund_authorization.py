@@ -257,6 +257,9 @@ def test_refund_example_verify_command_carries_the_platform_key(tmp_path):
     assert f"verify offline: npx @praesidia/audit-verifier {path} --platform-key k.pem " \
            f"--platform-key-fingerprint {'ab' * 32} --summary" in lines
     assert not starts(lines, "platform key: ")
+    for only in ({"PRAESIDIA_PLATFORM_KEY_FILE": "k.pem"}, {"PRAESIDIA_PLATFORM_KEY_FINGERPRINT": "ab" * 32}):
+        _, lines, _, _ = approved_run(tmp_path, env=only)
+        assert starts(lines, "platform key: ")
 
 
 def test_refund_example_wait_rooted_counts_effective_to_equal_to_the_hour_end_as_rooted(tmp_path):
