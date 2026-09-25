@@ -1,12 +1,12 @@
-# Managed runtime tools — Python 0.4.1
+# Managed runtime tools — Python 0.5.0
 
 Each adapter exposes one explicit managed tool. Its effect runs through the
 backend's registered protected HTTP target and independent approval; there is no
 local effect callback to accidentally execute while approval is pending.
 This is not universal interception of a framework, agent, provider or MCP server.
 
-Install the reviewed local 0.4.1 wheel with one optional extra, for example
-`pip install 'praesidia[google-adk]==0.4.1'` after that version is published, or
+Install the reviewed local 0.5.0 wheel with one optional extra, for example
+`pip install 'praesidia[google-adk]==0.5.0'` after that version is published, or
 `pip install -e '.[google-adk]'` from this checkout now. All six tested extras can
 coexist in Python 3.11 using `.[frameworks]`; CrewAI's selected release does not
 support Python 3.14. Base management SDK support remains Python 3.9+.

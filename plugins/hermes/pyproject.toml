@@ -7,7 +7,7 @@ name = "praesidia-hermes"
 version = "0.1.1"
 description = "Hermes managed protected HTTP tool and explicit tool boundary"
 requires-python = ">=3.11"
-dependencies = ["praesidia==0.4.1"]
+dependencies = ["praesidia==0.5.0"]
 readme = "README.md"
 license = {file = "LICENSE"}
 

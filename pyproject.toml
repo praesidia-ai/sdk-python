@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "praesidia"
-version = "0.4.1"
+version = "0.5.0"
 description = "Python management SDK for the Praesidia AI agent platform"
 readme = "README.md"
 license = { text = "MIT" }

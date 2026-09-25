@@ -26,7 +26,7 @@ Quick start::
         print(event)
 """
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 
 from ._crypto import (
     canonical_json,

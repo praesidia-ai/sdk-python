@@ -25,7 +25,7 @@ approval, Stripe test-mode refund, outcome, receipt, audit package) is in
 
 Requires Python 3.9+ and [`httpx`](https://www.python-httpx.org/) (installed automatically).
 
-## Managed runtime tools (0.4.1 source)
+## Managed runtime tools (0.5.0 source)
 
 Optional native adapters now cover CrewAI, OpenAI Agents Python, Google ADK,
 Microsoft Agent Framework Python, Agno and LangGraph. A separate local package

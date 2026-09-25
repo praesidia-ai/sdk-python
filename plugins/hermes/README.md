@@ -5,7 +5,7 @@ default strict tool boundary. It targets **Nous Hermes Agent**, not the unrelate
 formerly named HermesOS hosting service. Tested against upstream commit
 `0390ace8179f4cf75bd3941e590dd74e638672b6` (2026-09-06).
 
-Install the locally built `praesidia` 0.4.1 wheel, then `pip install ./plugins/hermes`
+Install the locally built `praesidia` 0.5.0 wheel, then `pip install ./plugins/hermes`
 in the Hermes Python environment. Nothing is published by this repository.
 Enable the `praesidia` entry-point plugin in the intended Hermes profile and set:
 

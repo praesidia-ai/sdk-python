@@ -52,6 +52,11 @@ jobs:
           python -m build
           twine check dist/*
 
+      # SDK-0344 — install smoke (SDK-0331) on the exact wheel uploaded below;
+      # nothing rebuilds dist/ between this step and the upload.
+      - name: Smoke the wheel that will be uploaded
+        run: WHEEL="$(ls dist/*.whl)" bash scripts/wheel_install_smoke.sh
+
       # SDK-0338 — CycloneDX SBOM of what a user gets from `pip install
       # praesidia`: the built wheel alone in a clean venv (no dev/test extras).
       # cyclonedx-bom runs runner-side via pipx (preinstalled on ubuntu-latest,

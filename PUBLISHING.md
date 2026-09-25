@@ -30,12 +30,12 @@ Publishing is a **tag push**, not a local `twine upload`. `.github/workflows/pub
 
 ## What ships (verified 2026-09-11, `python -m build` + `twine check`)
 
-The **wheel** (`praesidia-0.4.1-py3-none-any.whl`, what `pip install praesidia` actually pulls)
+The **wheel** (`praesidia-0.5.0-py3-none-any.whl`, what `pip install praesidia` actually pulls)
 contains only `praesidia/**` (23 modules + `integrations/` subpackage + `py.typed` marker) and
 `dist-info` metadata/license — **no tests, no `.env`, no CI config, no Dockerfile, no plugins/**.
 `twine check` passes on both artifacts.
 
-The **sdist** (`praesidia-0.4.1.tar.gz`, a fallback source archive, rarely what a consumer
+The **sdist** (`praesidia-0.5.0.tar.gz`, a fallback source archive, rarely what a consumer
 actually installs since the wheel is pure-Python/universal) additionally includes `tests/`,
 `.github/`, `Dockerfile`, `uv.lock`, and `plugins/hermes/` — this is normal Python-ecosystem
 practice (hatchling includes all git-tracked files by default; there is no `MANIFEST.in`
@@ -65,12 +65,13 @@ git push origin v0.4.2
 # 4. Watch the Actions run:
 #    https://github.com/praesidia-ai/sdk-python/actions/workflows/publish.yml
 #    It re-verifies tag == pyproject.toml version, re-runs pytest with coverage, `python -m
-#    build`, `twine check dist/*`, then `twine upload` — an artifact that fails the repo's own
+#    build`, `twine check dist/*`, the clean-venv install smoke on that same dist/*.whl
+#    (scripts/wheel_install_smoke.sh), then `twine upload` — an artifact that fails the repo's own
 #    gates never reaches PyPI.
 ```
 
 If cutting the very first release, the manifest's current version has never been tagged — tag the
-current commit as-is (no bump needed): `git tag v0.4.1 && git push origin v0.4.1`.
+current commit as-is (no bump needed): `git tag v0.5.0 && git push origin v0.5.0`.
 
 ## After publishing — verify it actually landed
 
@@ -101,7 +102,7 @@ filename can never be reused, even after deletion.
   Prefer this over full deletion.
 - **Full delete** (PyPI UI "Remove release"): only for genuinely accidental/secret-leaking
   publishes. The version number is burned forever either way — you cannot re-upload
-  `praesidia==0.4.1` after deleting it. The next fix must be a new version number.
+  `praesidia==0.5.0` after deleting it. The next fix must be a new version number.
 - **Wrong metadata only** (description, classifiers, URLs): PyPI project metadata (not
   per-release) can be edited without a new release for description/URLs configured at the project
   level; per-release metadata (what's baked into `PKG-INFO`) requires a new version.
