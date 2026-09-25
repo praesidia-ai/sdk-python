@@ -55,6 +55,7 @@ from .local_rules import run_local_rules
 # SDK-0301 — advisory in-runtime interaction hooks (parity with the TS SDK's SDK-0300).
 from .interaction_hooks import (
     DEFAULT_FAIL_MODES,
+    INTERACTION_CONSTRAINED_BY,
     INTERACTION_OUTCOME_STATUSES,
     INTERACTION_TYPES,
     INTERACTION_VERDICTS,
@@ -146,6 +147,7 @@ __all__ = [
     "InteractionOutcomeReceipt",
     "INTERACTION_OUTCOME_STATUSES",
     "INTERACTION_TYPES",
+    "INTERACTION_CONSTRAINED_BY",
     "INTERACTION_VERDICTS",
     "DEFAULT_FAIL_MODES",
     "InteractionDeniedError",

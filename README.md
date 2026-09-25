@@ -678,6 +678,15 @@ task = client.agents.run(
 # inherit it. For a dedicated client whose every call belongs to the same chain:
 client.forward_chain(inbound_chain_id)
 
+# Delegate a sub-task with narrower authority (BE-1597). The server intersects
+# delegation_constraints (sent as delegationConstraints) with the parent task's
+# envelope and denies a widening request with 403. Omit it to inherit the parent's.
+child = client.agents.run(
+    "connection-uuid", input={"message": "summarise"}, type="DELEGATION",
+    parent_task_id=parent_task_id,
+    delegation_constraints={"tools": ["search"], "actions": ["read"]},
+)
+
 # Poll the tasks routed to a server agent; each row now carries chainId,
 # hopIndex and (when governance is on) an opaque capabilityToken (may be absent).
 for row in client.agents.poll_pending_tasks(
@@ -835,6 +844,15 @@ called once when the wait starts, so you can tell someone which approval to act 
 `guarded(tool, tool_name=None)` wraps a keyword-argument tool (the kwargs become `arguments`;
 the name defaults to `tool.__name__`) and keeps its signature for framework introspection.
 The TS SDK has no `guarded` equivalent: call `beforeToolCall` before the tool there.
+
+**Running under a task.** Pass `task_id=` (the agent task UUID) to the constructor and every
+decision request carries it as `taskId` (BE-1609): the task's delegation envelope then narrows
+the verdict. A task outside the organization is ignored. The decision may carry `constrainedBy`
+(`None` or one of `INTERACTION_CONSTRAINED_BY`: `org_policy`, `delegation`, `assurance`), the
+layer that denied or required approval; it is absent from servers older than BE-1609. When the
+server cannot read the delegation chain or the assurance policy it denies, with `reasonCode`
+`delegation_chain_unavailable` or `assurance_evaluation_error`. Verdicts are cached per hooks
+instance, so use one instance per task.
 
 **Reporting the outcome.** When an `allow` came from a consumed approval
 (`decision["reasonCode"] == "approval_consumed"`), report what happened once:

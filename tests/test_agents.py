@@ -197,3 +197,34 @@ def test_run_rejects_invalid_identifiers_before_network(kwargs, message):
     connection_id = kwargs.pop("connection_id", CONN_ID)
     with pytest.raises(ValueError, match=message):
         _client().agents.run(connection_id, {"message": "hi"}, **kwargs)
+
+
+@respx.mock
+def test_run_forwards_delegation_constraints_verbatim_as_camelcase():
+    # SDK-0333 / BE-1597 — the child's envelope; the server intersects it with the parent's.
+    route = respx.post(TASKS_URL).mock(return_value=httpx.Response(201, json={"id": "t"}))
+    constraints = {"tools": ["search"], "actions": ["read"], "environments": ["production"]}
+
+    _client().agents.run(
+        CONN_ID, {"message": "hi"}, type="DELEGATION",
+        parent_task_id=PARENT_TASK_ID, delegation_constraints=constraints,
+    )
+
+    body = json.loads(route.calls.last.request.content)
+    assert body["delegationConstraints"] == constraints
+    assert "delegation_constraints" not in body
+
+
+@respx.mock
+def test_run_omits_delegation_constraints_when_none():
+    route = respx.post(TASKS_URL).mock(return_value=httpx.Response(201, json={"id": "t"}))
+
+    _client().agents.run(CONN_ID, {"message": "hi"}, parent_task_id=PARENT_TASK_ID, delegation_constraints=None)
+
+    assert "delegationConstraints" not in json.loads(route.calls.last.request.content)
+
+
+@pytest.mark.parametrize("bad", [["tools"], "tools", 1])
+def test_run_rejects_non_dict_delegation_constraints_before_network(bad):
+    with pytest.raises(ValueError, match="delegation_constraints"):
+        _client().agents.run(CONN_ID, {"message": "hi"}, delegation_constraints=bad)

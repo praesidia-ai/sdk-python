@@ -210,6 +210,7 @@ class AgentsResource:
         chain_id: str | None = None,
         callback_url: str | None = None,
         parent_task_id: str | None = None,
+        delegation_constraints: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Submit a task to an agent connection.
@@ -245,6 +246,13 @@ class AgentsResource:
                            SDK never mints an id.
             callback_url:  Optional webhook URL for the task result.
             parent_task_id: Optional parent task UUID for a delegated sub-task.
+            delegation_constraints: SDK-0333 — optional delegation envelope
+                           (be BE-1597 ``DelegationConstraintsDto``: ``actions``,
+                           ``resources``, ``tools``, ``models``,
+                           ``environments``, all optional), sent verbatim as
+                           ``delegationConstraints``. On a delegated task the
+                           server intersects it with the parent's envelope; a
+                           widening request is denied (403). ``None`` omits it.
 
         Returns:
             Created task dict including ``id`` and ``status`` (plus ``chainId``
@@ -278,6 +286,8 @@ class AgentsResource:
             or not _UUID_RE.match(parent_task_id)
         ):
             raise ValueError("parent_task_id must be an RFC-4122 UUID")
+        if delegation_constraints is not None and not isinstance(delegation_constraints, dict):
+            raise ValueError("delegation_constraints must be a dict (CreateAgentTaskDto.delegationConstraints is @IsObject)")
         payload: dict[str, Any] = {
             "connectionId": connection_id,
             "type": type,
@@ -289,6 +299,8 @@ class AgentsResource:
             payload["callbackUrl"] = callback_url
         if parent_task_id:
             payload["parentTaskId"] = parent_task_id
+        if delegation_constraints is not None:
+            payload["delegationConstraints"] = delegation_constraints
         if chain_id:
             payload["chainId"] = chain_id
         tasks_url = f"/organizations/{self._http.org_id}/tasks"

@@ -32,6 +32,7 @@ from ._http import (
     normalize_base_url,
     path_segment,
 )
+from .agents import _UUID_RE
 from ._jcs_canonical import JcsCanonicalizationError, jcs_commitment
 from .exceptions import (
     InteractionDecisionUnavailableError,
@@ -71,9 +72,11 @@ _MAX_DECISION_BYTES = 64 * 1024
 _NO_DECISION = (httpx.RequestError, PraesidiaError)
 
 
-class InteractionDecision(TypedDict):
-    """be ``InteractionDecisionResponseDto``, wire (camelCase) keys."""
+#: be ``InteractionConstrainedBy`` (BE-1609): the layer that denied or required approval.
+INTERACTION_CONSTRAINED_BY = ("org_policy", "delegation", "assurance")
 
+
+class _InteractionDecisionRequired(TypedDict):
     verdict: str
     reasonCode: str
     approvalId: Optional[str]
@@ -81,6 +84,15 @@ class InteractionDecision(TypedDict):
     ttlSeconds: int
     enforcementMode: str
     decisionId: str
+
+
+class InteractionDecision(_InteractionDecisionRequired, total=False):
+    """be ``InteractionDecisionResponseDto``, wire (camelCase) keys.
+
+    ``constrainedBy`` (BE-1609) is absent from older servers; ``None`` = nothing constrained it.
+    """
+
+    constrainedBy: Optional[str]
 
 
 class InteractionOutcomeReceipt(TypedDict):
@@ -118,6 +130,7 @@ class _InteractionHooksBase(Generic[_R]):
         approval_poll_interval: float = 2.0,
         approval_timeout: float = 600.0,
         on_approval_required: Optional[Callable[[InteractionDecision], None]] = None,
+        task_id: Optional[str] = None,
     ) -> None:
         api_key = api_key or os.environ.get("PRAESIDIA_API_KEY")
         org_id = org_id or os.environ.get("PRAESIDIA_ORG_ID")
@@ -132,6 +145,10 @@ class _InteractionHooksBase(Generic[_R]):
         self._poll = _positive(approval_poll_interval, "approval_poll_interval")
         self._approval_timeout = _positive(approval_timeout, "approval_timeout")
         self._on_approval_required = on_approval_required
+        if task_id is not None and not (isinstance(task_id, str) and _UUID_RE.match(task_id)):
+            raise PraesidiaConfigError("task_id must be an RFC-4122 UUID")
+        #: BE-1609 — the agent task these hooks run under; its delegation envelope narrows every verdict.
+        self.task_id = task_id
         self.organization_id = org_id
         self.agent_id = agent_id
         org = path_segment(org_id, "org_id")
@@ -194,6 +211,7 @@ class _InteractionHooksBase(Generic[_R]):
             "agentId": self.agent_id,
             "action": act,
             **({} if approval_id is None else {"approvalId": approval_id}),
+            **({} if self.task_id is None else {"taskId": self.task_id}),
         })
 
     def report_outcome(

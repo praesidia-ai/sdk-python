@@ -20,6 +20,7 @@ import respx
 
 from praesidia import (
     DEFAULT_FAIL_MODES,
+    INTERACTION_CONSTRAINED_BY,
     INTERACTION_TYPES,
     INTERACTION_VERDICTS,
     AsyncPraesidiaInteractionHooks,
@@ -516,3 +517,40 @@ def test_context_managers_close_the_http_client():
         return a
 
     assert asyncio.run(main())._http.client.is_closed
+
+
+# ── SDK-0333 / BE-1609 — taskId on the request, constrainedBy on the response ──
+
+TASK = "33333333-3333-4333-8333-333333333333"
+
+
+@both
+def test_task_id_is_sent_as_camel_case_task_id_last(api, mode):
+    api.respond(200, json=DENY)
+    req = CASES["deny_by_policy"]["request"]
+    with contextlib.suppress(InteractionDeniedError):
+        run(hooks(mode, task_id=TASK).before_exec("rm -rf /srv"))
+    assert api.calls[0].request.content == wire({**req, "taskId": TASK})
+
+
+@both
+def test_task_id_follows_approval_id_in_decide(api, mode):
+    api.respond(200, json=CONSUMED)
+    req = CASES["approval_granted_consumed"]["request"]
+    run(hooks(mode, task_id=TASK).decide(req["interactionType"], req["action"], req["approvalId"]))
+    assert api.calls[0].request.content == wire({**req, "taskId": TASK})
+
+
+@both
+@pytest.mark.parametrize("constrained_by", [None, *INTERACTION_CONSTRAINED_BY])
+def test_constrained_by_is_passed_through(api, mode, constrained_by):
+    body = {**DENY, "reasonCode": "delegation_chain_unavailable", "constrainedBy": constrained_by}
+    api.respond(200, json=body)
+    req = CASES["deny_by_policy"]["request"]
+    assert run(hooks(mode, task_id=TASK).decide(req["interactionType"], req["action"]))["constrainedBy"] == constrained_by
+
+
+@pytest.mark.parametrize("bad", ["not-a-uuid", 123, ""])
+def test_invalid_task_id_raises_at_construction(bad):
+    with pytest.raises(PraesidiaConfigError, match="task_id"):
+        hooks("sync", task_id=bad)
