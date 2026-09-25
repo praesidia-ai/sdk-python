@@ -54,11 +54,13 @@ from .local_rules import run_local_rules
 # SDK-0301 — advisory in-runtime interaction hooks (parity with the TS SDK's SDK-0300).
 from .interaction_hooks import (
     DEFAULT_FAIL_MODES,
+    INTERACTION_OUTCOME_STATUSES,
     INTERACTION_TYPES,
     INTERACTION_VERDICTS,
     AsyncPraesidiaInteractionHooks,
     InteractionDecision,
     InteractionHookResult,
+    InteractionOutcomeReceipt,
     PraesidiaInteractionHooks,
 )
 from .exceptions import (
@@ -139,6 +141,8 @@ __all__ = [
     "AsyncPraesidiaInteractionHooks",
     "InteractionHookResult",
     "InteractionDecision",
+    "InteractionOutcomeReceipt",
+    "INTERACTION_OUTCOME_STATUSES",
     "INTERACTION_TYPES",
     "INTERACTION_VERDICTS",
     "DEFAULT_FAIL_MODES",

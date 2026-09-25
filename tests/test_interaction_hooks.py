@@ -275,6 +275,81 @@ def test_approval_rejected_raises(api, mode):
     assert err.value.reason_code == "approval_rejected"
 
 
+# ── report_outcome (BE-1582, parity with the TS SDK's SDK-0324) ──────────────
+
+OUTCOME_URL = f"{URL}/outcome"
+RECEIPT = {"approvalId": CONSUMED["approvalId"], "decisionId": "66666666-6666-4666-8666-666666666601"}
+
+
+@pytest.fixture
+def outcome_api():
+    with respx.mock(assert_all_called=False) as mock:
+        yield mock.post(URL), mock.post(OUTCOME_URL)
+
+
+@both
+def test_consumed_allow_surfaces_approval_id_and_the_report_sends_only_a_commitment(outcome_api, mode):
+    decide, report = outcome_api
+    decide.mock(side_effect=seq(PENDING, CONSUMED))
+    report.mock(return_value=httpx.Response(200, json=RECEIPT))
+    h = hooks(mode)
+    decision = run(h.before_interaction("agent_to_email", EMAIL)).decision
+    assert decision["reasonCode"] == "approval_consumed" and decision["approvalId"] == CONSUMED["approvalId"]
+    result = {"messageId": "msg_secret_123", "to": "cfo@example.com"}
+    receipt = run(h.report_outcome(decision["approvalId"], "succeeded", result=result, target_system="smtp", target_transaction_id="tx-1"))
+    assert receipt == RECEIPT and report.call_count == 1
+    body = report.calls[0].request.content
+    assert body == wire({
+        "agentId": AGENT,
+        "approvalId": CONSUMED["approvalId"],
+        "status": "succeeded",
+        "resultCommitment": interaction_hooks.jcs_commitment(result),
+        "targetSystem": "smtp",
+        "targetTransactionId": "tx-1",
+    })
+    assert b"msg_secret_123" not in body and b'"result"' not in body
+
+
+def test_result_commitment_matches_the_ts_sdk_digest():
+    # Expected value computed with the TS SDK's jcsCommitment (core/sdk src/jcs-canonical.ts).
+    result = {"to": "cfo@example.com", "messageId": "msg_secret_123", "amount": 12.5}
+    assert interaction_hooks.jcs_commitment(result) == "96e14fc6ed52788dfd5257035574f34ed3bd1c4edfe9c7a2feb5065c37acadff"
+
+
+@both
+def test_report_without_result_omits_result_commitment(outcome_api, mode):
+    _, report = outcome_api
+    report.mock(return_value=httpx.Response(200, json=RECEIPT))
+    run(hooks(mode).report_outcome(RECEIPT["approvalId"], "failed_no_effect"))
+    assert sent(report) == {"agentId": AGENT, "approvalId": RECEIPT["approvalId"], "status": "failed_no_effect"}
+
+
+@both
+def test_report_409_is_one_typed_error_not_retried(outcome_api, mode):
+    _, report = outcome_api
+    report.mock(side_effect=[httpx.Response(409, json={"message": "already reported"}), httpx.Response(200, json=RECEIPT)])
+    with pytest.raises(PraesidiaError) as err:
+        run(hooks(mode).report_outcome(RECEIPT["approvalId"], "succeeded"))
+    assert err.value.status_code == 409 and report.call_count == 1
+
+
+@both
+@pytest.mark.parametrize(
+    "args,kwargs",
+    [((RECEIPT["approvalId"], "done"), {}), (("", "succeeded"), {}), ((RECEIPT["approvalId"], "partial"), {"result": {"n": float("nan")}})],
+    ids=["bad status", "no approval_id", "non-JSON result"],
+)
+def test_report_rejects_bad_input_before_any_request(outcome_api, mode, args, kwargs):
+    _, report = outcome_api
+    with pytest.raises(PraesidiaConfigError):
+        run(hooks(mode).report_outcome(*args, **kwargs))
+    assert report.call_count == 0
+
+
+def test_outcome_statuses_equal_the_be_enum():
+    assert interaction_hooks.INTERACTION_OUTCOME_STATUSES == ("succeeded", "failed_no_effect", "partial", "unknown")
+
+
 # ── decision cache ───────────────────────────────────────────────────────────
 
 

@@ -58,6 +58,8 @@ INTERACTION_TYPES = (
 )
 #: be ``InteractionVerdict`` (``interaction-decision.dto.ts``).
 INTERACTION_VERDICTS = ("allow", "deny", "require_approval")
+#: be ``InteractionOutcomeStatus`` (BE-1582), same order.
+INTERACTION_OUTCOME_STATUSES = ("succeeded", "failed_no_effect", "partial", "unknown")
 #: Fail-closed where a skipped check can do irreversible local damage (exec, fs writes).
 DEFAULT_FAIL_MODES: Mapping[str, str] = MappingProxyType(
     {"tool_call": "open", "exec": "closed", "fs_read": "open", "fs_write": "closed", "browser": "open"}
@@ -78,6 +80,13 @@ class InteractionDecision(TypedDict):
     policyFingerprint: str
     ttlSeconds: int
     enforcementMode: str
+    decisionId: str
+
+
+class InteractionOutcomeReceipt(TypedDict):
+    """be ``InteractionOutcomeResponseDto``: ``decisionId`` is the Decision Record id of the outcome."""
+
+    approvalId: str
     decisionId: str
 
 
@@ -185,6 +194,35 @@ class _InteractionHooksBase(Generic[_R]):
             "action": act,
             **({} if approval_id is None else {"approvalId": approval_id}),
         })
+
+    def report_outcome(
+        self,
+        approval_id: str,
+        status: str,
+        *,
+        result: Any = None,
+        target_system: Optional[str] = None,
+        target_transaction_id: Optional[str] = None,
+    ) -> Any:
+        """
+        Record the result of an approved interaction, once (BE-1582). ``approval_id`` is
+        ``decision["approvalId"]`` of an ``allow`` with reasonCode ``approval_consumed``. ``result`` is
+        committed locally (sha256 of its JCS form) and never sent; ``None`` sends no commitment. Any
+        refusal (unknown, not consumed, not approved, already reported) is one ``PraesidiaError`` with
+        ``status_code`` 409; it is not retried. Returns an ``InteractionOutcomeReceipt``.
+        """
+        if not isinstance(approval_id, str) or not approval_id:
+            raise PraesidiaConfigError("approval_id is required")
+        if status not in INTERACTION_OUTCOME_STATUSES:
+            raise PraesidiaConfigError(f"status must be one of {', '.join(INTERACTION_OUTCOME_STATUSES)}")
+        try:
+            commitment = None if result is None else jcs_commitment(result)
+        except JcsCanonicalizationError as exc:
+            raise PraesidiaConfigError(f"result must be a JSON value: {exc}") from exc
+        optional = {"resultCommitment": commitment, "targetSystem": target_system, "targetTransactionId": target_transaction_id}
+        body = {"agentId": self.agent_id, "approvalId": approval_id, "status": status}
+        # Key order = be DTO = TS SDK; not retried (the server records the outcome once).
+        return self._http.post(f"{self._path}/outcome", {**body, **{k: v for k, v in optional.items() if v is not None}}, _receipt)
 
     def _cached(self, key: str) -> Optional[InteractionDecision]:
         with self._lock:
@@ -345,24 +383,24 @@ class _SyncPost:
     def __init__(self, client: httpx.Client) -> None:
         self.client = client
 
-    def post(self, path: str, json: dict[str, Any]) -> InteractionDecision:
+    def post(self, path: str, json: dict[str, Any], parse: Optional[Callable[..., Any]] = None) -> Any:
         with self.client.stream("POST", path, content=_dumps(json)) as r:
             raw = bytearray()
             for chunk in r.iter_bytes():
                 _append(raw, chunk, r)
-        return _decision(r, raw)
+        return (parse or _decision)(r, raw)
 
 
 class _AsyncPost:
     def __init__(self, client: httpx.AsyncClient) -> None:
         self.client = client
 
-    async def post(self, path: str, json: dict[str, Any]) -> InteractionDecision:
+    async def post(self, path: str, json: dict[str, Any], parse: Optional[Callable[..., Any]] = None) -> Any:
         async with self.client.stream("POST", path, content=_dumps(json)) as r:
             raw = bytearray()
             async for chunk in r.aiter_bytes():
                 _append(raw, chunk, r)
-        return _decision(r, raw)
+        return (parse or _decision)(r, raw)
 
 
 def _dumps(body: dict[str, Any]) -> bytes:
@@ -376,13 +414,25 @@ def _append(raw: bytearray, chunk: bytes, r: httpx.Response) -> None:
         raise ResponseTooLargeError(r.request.url.path, _MAX_DECISION_BYTES, r.status_code)
 
 
-def _decision(r: httpx.Response, raw: bytearray) -> InteractionDecision:
-    """Typed SDK error for a non-2xx; a malformed 2xx raises ``PraesidiaError`` with its 2xx status (an outage)."""
+def _json(r: httpx.Response, raw: bytearray) -> Any:
+    """Typed SDK error for a non-2xx; the parsed 2xx body, or ``None`` when it is not JSON."""
     HttpClient._raise_for_status(httpx.Response(r.status_code, content=bytes(raw), request=r.request))
     try:
-        d = json.loads(raw)
+        return json.loads(raw)
     except ValueError:
-        d = None
+        return None
+
+
+def _receipt(r: httpx.Response, raw: bytearray) -> InteractionOutcomeReceipt:
+    d = _json(r, raw)
+    if not (isinstance(d, dict) and isinstance(d.get("approvalId"), str) and isinstance(d.get("decisionId"), str)):
+        raise PraesidiaError("malformed interaction outcome response", status_code=r.status_code)
+    return d  # type: ignore[return-value]
+
+
+def _decision(r: httpx.Response, raw: bytearray) -> InteractionDecision:
+    """Typed SDK error for a non-2xx; a malformed 2xx raises ``PraesidiaError`` with its 2xx status (an outage)."""
+    d = _json(r, raw)
     ttl = d.get("ttlSeconds") if isinstance(d, dict) else None
     if not (
         isinstance(d, dict)

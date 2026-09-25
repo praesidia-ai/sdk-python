@@ -804,6 +804,26 @@ called once when the wait starts, so you can tell someone which approval to act 
 the name defaults to `tool.__name__`) and keeps its signature for framework introspection.
 The TS SDK has no `guarded` equivalent: call `beforeToolCall` before the tool there.
 
+**Reporting the outcome.** When an `allow` came from a consumed approval
+(`decision["reasonCode"] == "approval_consumed"`), report what happened once:
+
+```python
+decision = hooks.before_interaction("agent_to_email", {"name": "send"}).decision
+sent = mailer.send(msg)
+hooks.report_outcome(
+    decision["approvalId"],
+    "succeeded",  # | "failed_no_effect" | "partial" | "unknown"
+    result=sent,  # hashed locally (sha256 of JCS); only resultCommitment is sent
+    target_system="smtp",
+    target_transaction_id=sent["messageId"],
+)  # -> {"approvalId": ..., "decisionId": ...}
+```
+
+`result` never leaves your process; `result=None` sends no commitment (the TS SDK commits a
+JSON `null` result, Python cannot tell it from "not given"). A second report, or one for an
+approval that was not consumed, is refused with a single `PraesidiaError` (`status_code`
+409); it is not retried. The async hooks return an awaitable.
+
 **Fail mode.** An outage is a network error, a timeout, a 408 / 429 / 5xx, or a malformed
 response. `timeout` (seconds, default 30) is httpx's: it bounds the connect, the request write,
 the wait for a pooled connection and each read of the response separately, not the whole
