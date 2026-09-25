@@ -186,3 +186,120 @@ def test_list_rejects_resource_type_kwarg():
     # could exist. Passing it now raises TypeError at call time.
     with pytest.raises(TypeError):
         _client().audit.list(resource_type="agent")
+
+
+# --- SDK-0327 — decision receipts + audit packages (BE-1581, BE-1629) -------
+
+AUDIT_API = f"{BASE_URL}/organizations/{ORG_ID}/audit"
+PKG_ID = "0b6f7a2e-9c1d-4e3f-8a5b-1c2d3e4f5a6b"
+JOB = {"id": PKG_ID, "status": "queued", "error": None, "createdAt": "2026-09-25T00:00:00Z", "completedAt": None}
+
+
+@respx.mock
+def test_receipt_by_decision_id_and_row_id():
+    by_decision = respx.get(f"{AUDIT_API}/decisions/dec%2F1/receipt").mock(
+        return_value=httpx.Response(200, json={"decisionId": "dec/1"})
+    )
+    by_row = respx.get(f"{AUDIT_API}/row-1/receipt").mock(return_value=httpx.Response(200, json={"rowId": "row-1"}))
+    assert _client().audit.get_decision_receipt("dec/1") == {"decisionId": "dec/1"}
+    assert _client().audit.get_receipt("row-1") == {"rowId": "row-1"}
+    assert by_decision.called and by_row.called
+
+
+def test_receipt_rejects_bad_ids_before_network():
+    for bad in ("", "..", " x"):
+        with pytest.raises(ValueError):
+            _client().audit.get_decision_receipt(bad)
+        with pytest.raises(ValueError):
+            _client().audit.get_receipt(bad)
+
+
+@respx.mock
+def test_request_package_sends_only_given_fields():
+    route = respx.post(f"{AUDIT_API}/packages").mock(return_value=httpx.Response(202, json=JOB))
+    audit = _client().audit
+    assert audit.request_package() == JOB
+    assert route.calls[0].request.content == b"{}"
+    audit.request_package(from_date="2026-07-01T00:00:00Z", to_date="2026-09-01", ai_system_id=PKG_ID)
+    import json as _json
+
+    assert _json.loads(route.calls[1].request.content) == {
+        "from": "2026-07-01T00:00:00Z",
+        "to": "2026-09-01",
+        "aiSystemId": PKG_ID,
+    }
+
+
+def test_request_package_validates_before_network():
+    with pytest.raises(ValueError):
+        _client().audit.request_package(from_date="yesterday")
+    with pytest.raises(ValueError):
+        _client().audit.request_package(from_date="2026-09-02", to_date="2026-09-01")
+    with pytest.raises(ValueError, match="ai_system_id"):
+        _client().audit.request_package(ai_system_id="not-a-uuid")
+
+
+@respx.mock
+def test_get_and_download_package():
+    respx.get(f"{AUDIT_API}/packages/{PKG_ID}").mock(return_value=httpx.Response(200, json=JOB))
+    respx.get(f"{AUDIT_API}/packages/{PKG_ID}/download").mock(
+        return_value=httpx.Response(200, content=b"PK\x03\x04zip", headers={"content-type": "application/zip"})
+    )
+    assert _client().audit.get_package(PKG_ID) == JOB
+    assert _client().audit.download_package(PKG_ID) == b"PK\x03\x04zip"
+
+
+def test_package_ids_must_be_uuids():
+    for call in (_client().audit.get_package, _client().audit.download_package):
+        with pytest.raises(ValueError, match="package_id"):
+            call("../bundle")
+
+
+@respx.mock
+@pytest.mark.parametrize("status", [409, 410])
+def test_download_package_surfaces_not_ready_and_expired(status):
+    from praesidia import PraesidiaError
+
+    respx.get(f"{AUDIT_API}/packages/{PKG_ID}/download").mock(return_value=httpx.Response(status))
+    with pytest.raises(PraesidiaError) as info:
+        _client().audit.download_package(PKG_ID)
+    assert info.value.status_code == status
+
+
+def test_download_package_uses_bounded_stream_get():
+    client = _client()
+    seen = {}
+
+    def fake(path, params=None, **_):
+        seen["path"] = path
+        return httpx.Response(200, content=b"zip", request=httpx.Request("GET", BASE_URL + path))
+
+    client.audit._http.stream_get = fake
+    assert client.audit.download_package(PKG_ID) == b"zip"
+    assert seen["path"].endswith(f"/audit/packages/{PKG_ID}/download")
+
+
+@respx.mock
+def test_export_bundle_include_unrooted_and_window_headers():
+    from praesidia import AuditBundle
+
+    route = respx.get(f"{AUDIT_API}/bundle").mock(
+        return_value=httpx.Response(
+            200,
+            content=b"PKzip",
+            headers={
+                "X-Praesidia-Requested-To": "2026-09-02T00:00:00Z",
+                "X-Praesidia-Effective-To": "2026-09-01T23:00:00Z",
+                "X-Praesidia-Window-Clamp": "clamped_to_last_rooted_hour",
+            },
+        )
+    )
+    audit = _client().audit
+    bundle = audit.export_bundle(from_date="2026-09-01", to_date="2026-09-02")
+    assert isinstance(bundle, bytes) and isinstance(bundle, AuditBundle) and bundle == b"PKzip"
+    assert "includeUnrooted" not in route.calls[0].request.url.params
+    assert bundle.requested_to == "2026-09-02T00:00:00Z"
+    assert bundle.effective_to == "2026-09-01T23:00:00Z"
+    assert bundle.window_clamp == "clamped_to_last_rooted_hour"
+    audit.export_bundle(from_date="2026-09-01", to_date="2026-09-02", include_unrooted=True)
+    assert route.calls[1].request.url.params["includeUnrooted"] == "true"

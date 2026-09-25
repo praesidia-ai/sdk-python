@@ -6,10 +6,34 @@ Covers the ``/organizations/{org_id}/audit-logs`` endpoints.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Iterator
 
-from ._http import HttpClient
+from ._http import HttpClient, path_segment
 from ._evidence import evidence_date_range
+
+# be validates package / AI System ids with ParseUUIDPipe / @IsUUID (any version).
+_UUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
+
+
+def _uuid(value: str, name: str) -> str:
+    if not isinstance(value, str) or not _UUID.fullmatch(value):
+        raise ValueError(f"{name} must be a UUID")
+    return value
+
+
+class AuditBundle(bytes):
+    """The signed bundle ZIP bytes plus the window the server actually cut (BE-1629).
+
+    ``effective_to`` is earlier than ``requested_to`` when the range end was clamped to
+    the last Merkle-rooted hour; ``window_clamp`` says why (``none``,
+    ``clamped_to_last_rooted_hour``, ``no_rooted_hour`` or ``include_unrooted``).
+    Each is ``None`` when the server did not send the header.
+    """
+
+    requested_to: str | None
+    effective_to: str | None
+    window_clamp: str | None
 
 
 class AuditResource:
@@ -22,17 +46,78 @@ class AuditResource:
     def __init__(self, http: HttpClient) -> None:
         self._http = http
         self._base = f"/organizations/{http.org_id}/audit-logs"
-        self._bundle_path = f"/organizations/{http.org_id}/audit/bundle"
+        self._audit = f"/organizations/{http.org_id}/audit"
+        self._bundle_path = f"{self._audit}/bundle"
 
-    def export_bundle(self, *, from_date: str, to_date: str) -> bytes:
+    def export_bundle(self, *, from_date: str, to_date: str, include_unrooted: bool = False) -> AuditBundle:
         """Download a signed ZIP for offline verification (at most 90 days).
 
         Requires audit:read and owner/compliance-officer access with COMPLIANCE_VIEW.
         This is separate from the JSON/CSV log export. The bounded transport caps
-        downloads at 128 MiB. A successful download does not verify the evidence.
+        downloads at 128 MiB. A successful download does not verify the evidence:
+        run ``praesidia-verify`` on it. The server cuts the range at the last
+        Merkle-rooted hour unless ``include_unrooted=True``; read
+        ``effective_to`` / ``window_clamp`` on the result to see the cut.
         """
         evidence_date_range(from_date, to_date, bundle=True)
-        response = self._http.stream_get(self._bundle_path, params={"from": from_date, "to": to_date})
+        params: dict[str, Any] = {"from": from_date, "to": to_date}
+        if include_unrooted:
+            params["includeUnrooted"] = "true"
+        response = self._http.stream_get(self._bundle_path, params=params)
+        self._http._raise_for_status(response)
+        bundle = AuditBundle(response.content)
+        bundle.requested_to = response.headers.get("X-Praesidia-Requested-To")
+        bundle.effective_to = response.headers.get("X-Praesidia-Effective-To")
+        bundle.window_clamp = response.headers.get("X-Praesidia-Window-Clamp")
+        return bundle
+
+    def get_decision_receipt(self, decision_id: str) -> dict[str, Any]:
+        """Fetch the Decision Receipt for a ``decisionId``. GET .../audit/decisions/:decisionId/receipt.
+
+        Raises ``NotFoundError`` when no receipt has this id in the caller's org.
+        """
+        return self._http.get(f"{self._audit}/decisions/{path_segment(decision_id, 'decision_id')}/receipt")
+
+    def get_receipt(self, row_id: str) -> dict[str, Any]:
+        """Fetch the Decision Receipt for an audit row id. GET .../audit/:rowId/receipt."""
+        return self._http.get(f"{self._audit}/{path_segment(row_id, 'row_id')}/receipt")
+
+    def request_package(
+        self,
+        *,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        ai_system_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Queue an audit package export. POST .../audit/packages (202, returns the job).
+
+        ``from_date``/``to_date`` bound the included audit bundle (server default: the
+        90 days ending now). ``ai_system_id`` narrows inventory, risk and incidents.
+        Poll :meth:`get_package` until ``status`` is ``done``, then :meth:`download_package`.
+        """
+        evidence_date_range(from_date, to_date)
+        body: dict[str, Any] = {}
+        if from_date is not None:
+            body["from"] = from_date
+        if to_date is not None:
+            body["to"] = to_date
+        if ai_system_id is not None:
+            body["aiSystemId"] = _uuid(ai_system_id, "ai_system_id")
+        return self._http.post(f"{self._audit}/packages", json=body)
+
+    def get_package(self, package_id: str) -> dict[str, Any]:
+        """Return the package job (``status``: queued/running/done/failed). GET .../audit/packages/:id."""
+        return self._http.get(f"{self._audit}/packages/{_uuid(package_id, 'package_id')}")
+
+    def download_package(self, package_id: str) -> bytes:
+        """Download a finished audit package ZIP through the bounded (128 MiB) transport.
+
+        Raises ``PraesidiaError`` with ``status_code`` 409 while the job is not done
+        and 410 once the package is past its 7-day retention. A download does not
+        verify the evidence: run ``praesidia-verify`` on it.
+        """
+        path = f"{self._audit}/packages/{_uuid(package_id, 'package_id')}/download"
+        response = self._http.stream_get(path)
         self._http._raise_for_status(response)
         return response.content
 

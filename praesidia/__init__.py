@@ -45,6 +45,7 @@ from .agents import tool_call_headers_from_task
 # SDK-0002 — AI System / asset / relationship graph parity with be's
 # AISYS-0002 and the TS SDK's ai_systems resource (SDK-0001).
 from .ai_systems import AiSystemsResource
+from .audit import AuditBundle
 from .client import Praesidia
 # SDK-0313 — tag gateway calls with an MCP server id (GW-0776).
 from .gateway import MCP_SERVER_ID_HEADER, gateway_headers
@@ -93,6 +94,7 @@ __all__ = [
     "IdentityError",
     "Praesidia",
     "AiSystemsResource",
+    "AuditBundle",
     "PraesidiaError",
     "AuthError",
     "ForbiddenError",

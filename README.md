@@ -105,7 +105,7 @@ bound in memory.
 | `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `protect_action`, `refresh_credential` |
 | `client.ai_systems` | `AiSystemsResource` | `list`/`get`/`create`/`update`/`archive`/`restore`/`delete`/`update_owners`/`transition_lifecycle`/`request_lifecycle_transition`/`approve_lifecycle_transition`/`reject_lifecycle_transition`/`retire`/`reapprove`/`summary`, `list_assets`/`create_asset`/`get_asset`/`update_asset`/`archive_asset`/`restore_asset`/`adopt_asset`, `attach_asset`/`detach_asset`/`change_asset_role`, `create_relationship`/`get_relationship`/`update_relationship`/`archive_relationship`/`restore_relationship`/`list_relationships`/`traverse`, `put_{system,asset,relationship}_by_external_id`/`delete_{system,asset,relationship}_by_external_id` (each `list*` also has a `*_page`/`*_all` sibling) |
 | `client.workflows` | `WorkflowsResource` | `list`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `get_run` |
-| `client.audit` | `AuditResource` | `list`, `stream`, `export`, `export_bundle` |
+| `client.audit` | `AuditResource` | `list`, `stream`, `export`, `export_bundle`, `get_decision_receipt`, `get_receipt`, `request_package`, `get_package`, `download_package` |
 | `client.proof` | `ProofResource` | `list`, `get`, `events`, `capture_scope`, `coverage_summary` |
 | `client.analytics` | `AnalyticsResource` | `usage`, `cost_trends`, `agent_performance`, `top_agents`, `export`, `capture_state`, `agent_analytics`, `events`, `activity_log`, `record_event`, `security_metrics`, `usage_heatmap`, `compliance_metrics`, `anomalies`, `cost_by_team`, `model_comparison` |
 | `client.connections` | `ConnectionsResource` | `list`, `get`, `create`, `create_agent`, `create_mcp`, `update_status`, `delete`, `test`, `health` |
@@ -401,6 +401,24 @@ ordinary JSON/CSV logs. Signed windows must be greater than zero and at most
 90 days. Dates are `YYYY-MM-DD` (UTC) or explicit-timezone ISO timestamps with
 up to three fractional-second digits. The existing finite transport timeout
 and 128 MiB download cap apply; oversized downloads raise `ResponseTooLargeError`.
+
+`export_bundle()` returns an `AuditBundle` (a `bytes` subclass). The server
+cuts the range at the last Merkle-rooted hour unless `include_unrooted=True`;
+`bundle.requested_to`, `bundle.effective_to` and `bundle.window_clamp`
+(`none` / `clamped_to_last_rooted_hour` / `no_rooted_hour` / `include_unrooted`)
+report the cut.
+
+```python
+receipt = review.audit.get_decision_receipt(decision_id)  # or get_receipt(row_id)
+job = review.audit.request_package(from_date="2026-07-01", to_date="2026-09-01")
+while review.audit.get_package(job["id"])["status"] in ("queued", "running"):
+    time.sleep(5)
+Path("audit-package.zip").write_bytes(review.audit.download_package(job["id"]))
+```
+
+`download_package()` raises `PraesidiaError` with `status_code` 409 until the job
+is `done` and 410 once the package is past its 7-day retention. Package and
+`ai_system_id` values must be UUIDs.
 
 A successful read or download **is not verification**. `SUCCEEDED` describes
 an operational outcome and can coexist with incomplete evidence. The
@@ -1013,6 +1031,16 @@ checkouts of `sdk` (owns the scanner), `be-core` (spec source of truth) and
 jobs.
 
 ## Changelog
+
+### Unreleased — SDK-0327: Decision Receipts + audit packages (BE-1581, BE-1629)
+
+- **Added** `audit.get_decision_receipt(decision_id)`, `audit.get_receipt(row_id)`,
+  `audit.request_package(from_date=, to_date=, ai_system_id=)`, `audit.get_package(id)` and
+  `audit.download_package(id) -> bytes` (bounded 128 MiB transport).
+- **Added** `export_bundle(include_unrooted=False)` and the `AuditBundle` return type carrying
+  `requested_to` / `effective_to` / `window_clamp` from the response headers. `AuditBundle`
+  subclasses `bytes`, so existing callers are unaffected. **Semver minor**, no breaking change.
+  TS↔Python parity: mirrors `sdk`'s SDK-0326.
 
 ### Unreleased — SDK-0318: asset writes send only client sources (BE-1529)
 

@@ -254,3 +254,23 @@ def test_create_returns_jit_mode_with_null_secret():
     assert result["credentialMode"] == "jit"
     assert result["clientSecret"] is None
     assert result["clientId"] == "ag_public123"
+
+
+# ---------------------------------------------------------------------------
+# SDK-0327 — audit receipt/package parity map with the TS SDK (SDK-0326)
+# ---------------------------------------------------------------------------
+
+AUDIT_PARITY = {
+    "getDecisionReceipt": "get_decision_receipt",
+    "getReceipt": "get_receipt",
+    "requestPackage": "request_package",
+    "getPackage": "get_package",
+    "downloadPackage": "download_package",
+    "exportBundle": "export_bundle",
+}
+
+
+def test_audit_parity_map_methods_exist():
+    audit = _client().audit
+    missing = [py for py in AUDIT_PARITY.values() if not callable(getattr(audit, py, None))]
+    assert missing == []
