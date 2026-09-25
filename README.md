@@ -409,8 +409,10 @@ and 128 MiB download cap apply; oversized downloads raise `ResponseTooLargeError
 `export_bundle()` returns an `AuditBundle` (a `bytes` subclass). The server
 cuts the range at the last Merkle-rooted hour unless `include_unrooted=True`;
 `bundle.requested_to`, `bundle.effective_to` and `bundle.window_clamp`
-(`none` / `clamped_to_last_rooted_hour` / `no_rooted_hour` / `include_unrooted`)
-report the cut.
+(`none` / `clamped_to_last_rooted_hour` / `clamped_to_unrooted_gap` /
+`no_rooted_hour` / `include_unrooted`) report the cut. `clamped_to_unrooted_gap`
+means an earlier hour in the range has rows but no Merkle root (or holds a row
+signed after its root was built), so the range ends at the start of that hour.
 
 ```python
 receipt = review.audit.get_decision_receipt(decision_id)  # or get_receipt(row_id)

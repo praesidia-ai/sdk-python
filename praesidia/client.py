@@ -44,8 +44,10 @@ class Praesidia:
     Entry point for the Praesidia management SDK.
 
     Args:
-        api_key:  API key string (obtain via the Praesidia dashboard under
-                  *Settings → API Keys*).
+        api_key:  API key string.  Create an organization key at
+                  ``/configure/integrations/api-keys`` (Configure › Integrations ›
+                  Service Account Keys) or a personal key at ``/profile`` →
+                  *API Keys*.
         org_id:   Organisation UUID.  Every resource call is scoped to this
                   organisation.
         base_url: Override the backend base URL.  Defaults to the hosted API
