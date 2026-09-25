@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Fixed
+- `client.ai_systems.transition_lifecycle()` to `production` or `retired` always got a 400 since
+  be AISYS-0018 made those targets approval-gated (SDK-0323). It now raises
+  `PraesidiaConfigError` (a `PraesidiaError`) before sending, naming the method to use. New
+  methods reach the approval routes: `request_lifecycle_transition(ai_system_id, to_status, *,
+  reason=None)`, `approve_lifecycle_transition(request_id, *, reason=None)`,
+  `reject_lifecycle_transition(request_id, *, reason=None)`, `retire(ai_system_id, *,
+  retention_policy, reason, retention_until=None)` (202) and `reapprove(ai_system_id,
+  material_change_id, *, reason=None)`. Callers that caught the 400 as `PraesidiaError` still
+  catch it.
 - `client.memory.erase()` now matches `POST /organizations/{org}/memories/erase`
   (SDK-0321, BE-1565). The new optional arguments `expected_subject_hash` (64
   lowercase hex, checked before the request) and `acknowledge_cross_org` are sent

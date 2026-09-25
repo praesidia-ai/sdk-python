@@ -12,6 +12,7 @@ import respx
 
 from praesidia import Praesidia
 from praesidia.ai_systems import AiSystemsResource
+from praesidia.exceptions import PraesidiaConfigError
 
 # SDK-0303 -- spec-path resolution mirrors sdk's scripts/audit-api-contract.mjs:
 # BE_SWAGGER_PATH override > ../../ui/swagger.json sibling checkout (this
@@ -71,8 +72,8 @@ def test_ai_system_owners_lifecycle_and_delete_contracts():
     assert json.loads(owners.calls.last.request.content) == {"ownerType": "user", "ownerId": "u1"}
 
     lifecycle = respx.patch(f"{SYSTEMS}/s/lifecycle").mock(return_value=httpx.Response(200, json={"id": "s"}))
-    _client().ai_systems.transition_lifecycle("s", "production")
-    assert json.loads(lifecycle.calls.last.request.content) == {"lifecycleStatus": "production"}
+    _client().ai_systems.transition_lifecycle("s", "development")
+    assert json.loads(lifecycle.calls.last.request.content) == {"lifecycleStatus": "development"}
 
     with pytest.raises(ValueError):
         _client().ai_systems.transition_lifecycle("s", "not-a-status")
@@ -80,6 +81,88 @@ def test_ai_system_owners_lifecycle_and_delete_contracts():
     delete = respx.delete(f"{SYSTEMS}/s").mock(return_value=httpx.Response(204))
     _client().ai_systems.delete("s")
     assert delete.called
+
+
+# SDK-0323 — AISYS-0018 approval-gated lifecycle (be ai-systems.controller.ts).
+
+
+@respx.mock
+@pytest.mark.parametrize("target", ["production", "retired"])
+def test_lifecycle_patch_to_gated_target_fails_fast(target):
+    # be ai-systems.service.ts:408-416 400s every direct PATCH into a gated state.
+    patch = respx.patch(f"{SYSTEMS}/s/lifecycle")
+    with pytest.raises(PraesidiaConfigError, match="retire" if target == "retired" else "request_lifecycle_transition"):
+        _client().ai_systems.transition_lifecycle("s", target)
+    assert not patch.called
+
+
+@respx.mock
+def test_request_lifecycle_transition_contract():
+    route = respx.post(f"{SYSTEMS}/s/lifecycle-requests").mock(
+        return_value=httpx.Response(201, json={"id": "r1", "status": "PENDING"})
+    )
+    out = _client().ai_systems.request_lifecycle_transition("s", "production", reason="go live")
+    assert out == {"id": "r1", "status": "PENDING"}
+    assert json.loads(route.calls.last.request.content) == {"toStatus": "production", "reason": "go live"}
+
+    _client().ai_systems.request_lifecycle_transition("s", "production")
+    assert json.loads(route.calls.last.request.content) == {"toStatus": "production"}
+
+
+@respx.mock
+def test_request_lifecycle_transition_rejects_retired_and_unknown_locally():
+    route = respx.post(f"{SYSTEMS}/s/lifecycle-requests")
+    # be controller :164 400s toStatus 'retired' (BE-0932: retire has one door).
+    with pytest.raises(ValueError, match="retire"):
+        _client().ai_systems.request_lifecycle_transition("s", "retired")
+    with pytest.raises(ValueError):
+        _client().ai_systems.request_lifecycle_transition("s", "not-a-status")
+    assert not route.called
+
+
+@respx.mock
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+def test_decide_lifecycle_transition_contract(decision):
+    route = respx.post(f"{SYSTEMS}/lifecycle-requests/r1/{decision}").mock(
+        return_value=httpx.Response(201, json={"id": "r1"})
+    )
+    method = getattr(_client().ai_systems, f"{decision}_lifecycle_transition")
+    assert method("r1", reason="ok by owner") == {"id": "r1"}
+    assert json.loads(route.calls.last.request.content) == {"reason": "ok by owner"}
+    method("r1")
+    assert json.loads(route.calls.last.request.content) == {}
+
+
+@respx.mock
+def test_retire_lifecycle_contract():
+    route = respx.post(f"{SYSTEMS}/s/retire").mock(
+        return_value=httpx.Response(202, json={"requestId": "r2", "preview": {}})
+    )
+    out = _client().ai_systems.retire(
+        "s", retention_policy="Keep evidence 7 years.", reason="Superseded by v3."
+    )
+    assert out["requestId"] == "r2"
+    assert json.loads(route.calls.last.request.content) == {
+        "retentionPolicy": "Keep evidence 7 years.",
+        "reason": "Superseded by v3.",
+    }
+    _client().ai_systems.retire(
+        "s",
+        retention_policy="Keep evidence 7 years.",
+        reason="Superseded by v3.",
+        retention_until="2033-01-31T00:00:00.000Z",
+    )
+    assert json.loads(route.calls.last.request.content)["retentionUntil"] == "2033-01-31T00:00:00.000Z"
+
+
+@respx.mock
+def test_reapprove_lifecycle_contract():
+    change = "00000000-0000-4000-8000-000000000001"
+    route = respx.post(f"{SYSTEMS}/s/reapprove").mock(return_value=httpx.Response(200, json={"id": "s"}))
+    assert _client().ai_systems.reapprove("s", change, reason="reviewed") == {"id": "s"}
+    assert json.loads(route.calls.last.request.content) == {"materialChangeId": change, "reason": "reviewed"}
+    _client().ai_systems.reapprove("s", change)
+    assert json.loads(route.calls.last.request.content) == {"materialChangeId": change}
 
 
 @respx.mock

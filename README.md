@@ -95,7 +95,7 @@ bound in memory.
 | Resource | Class | Key methods |
 |----------|-------|-------------|
 | `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `protect_action`, `refresh_credential` |
-| `client.ai_systems` | `AiSystemsResource` | `list`/`get`/`create`/`update`/`archive`/`restore`/`delete`/`update_owners`/`transition_lifecycle`/`summary`, `list_assets`/`create_asset`/`get_asset`/`update_asset`/`archive_asset`/`restore_asset`/`adopt_asset`, `attach_asset`/`detach_asset`/`change_asset_role`, `create_relationship`/`get_relationship`/`update_relationship`/`archive_relationship`/`restore_relationship`/`list_relationships`/`traverse`, `put_{system,asset,relationship}_by_external_id`/`delete_{system,asset,relationship}_by_external_id` (each `list*` also has a `*_page`/`*_all` sibling) |
+| `client.ai_systems` | `AiSystemsResource` | `list`/`get`/`create`/`update`/`archive`/`restore`/`delete`/`update_owners`/`transition_lifecycle`/`request_lifecycle_transition`/`approve_lifecycle_transition`/`reject_lifecycle_transition`/`retire`/`reapprove`/`summary`, `list_assets`/`create_asset`/`get_asset`/`update_asset`/`archive_asset`/`restore_asset`/`adopt_asset`, `attach_asset`/`detach_asset`/`change_asset_role`, `create_relationship`/`get_relationship`/`update_relationship`/`archive_relationship`/`restore_relationship`/`list_relationships`/`traverse`, `put_{system,asset,relationship}_by_external_id`/`delete_{system,asset,relationship}_by_external_id` (each `list*` also has a `*_page`/`*_all` sibling) |
 | `client.workflows` | `WorkflowsResource` | `list`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `get_run` |
 | `client.audit` | `AuditResource` | `list`, `stream`, `export`, `export_bundle` |
 | `client.proof` | `ProofResource` | `list`, `get`, `events`, `capture_scope`, `coverage_summary` |
@@ -133,7 +133,12 @@ client.ai_systems.create_relationship({
 | `create(data)` | `dict` | `POST .../ai-systems` |
 | `update(ai_system_id, data)` | `dict` | `PATCH .../ai-systems/:id` |
 | `update_owners(ai_system_id, data)` | `dict` | `PATCH .../ai-systems/:id/owners` |
-| `transition_lifecycle(ai_system_id, lifecycle_status)` | `dict` | `PATCH .../ai-systems/:id/lifecycle` |
+| `transition_lifecycle(ai_system_id, lifecycle_status)` | `dict` | `PATCH .../ai-systems/:id/lifecycle` (ungated targets only) |
+| `request_lifecycle_transition(ai_system_id, to_status, *, reason=None)` | `dict` | `POST .../ai-systems/:id/lifecycle-requests` |
+| `approve_lifecycle_transition(request_id, *, reason=None)` | `dict` | `POST .../ai-systems/lifecycle-requests/:requestId/approve` |
+| `reject_lifecycle_transition(request_id, *, reason=None)` | `dict` | `POST .../ai-systems/lifecycle-requests/:requestId/reject` |
+| `retire(ai_system_id, *, retention_policy, reason, retention_until=None)` | `dict` | `POST .../ai-systems/:id/retire` (202) |
+| `reapprove(ai_system_id, material_change_id, *, reason=None)` | `dict` | `POST .../ai-systems/:id/reapprove` |
 | `archive(ai_system_id)` | `dict` | `POST .../ai-systems/:id/archive` |
 | `restore(ai_system_id)` | `dict` | `POST .../ai-systems/:id/restore` |
 | `delete(ai_system_id)` | `None` | `DELETE .../ai-systems/:id` (soft-delete) |
@@ -161,6 +166,28 @@ client.ai_systems.create_relationship({
 | `delete_asset_by_external_id(external_id)` | `dict` | `DELETE .../ai-assets/by-external-id/:externalId` (archives) |
 | `put_relationship_by_external_id(external_id, data)` | `dict` | `PUT .../asset-relationships/by-external-id/:externalId` |
 | `delete_relationship_by_external_id(external_id)` | `dict` | `DELETE .../asset-relationships/by-external-id/:externalId` (archives) |
+
+`production` and `retired` are approval-gated (be AISYS-0018): be answers a direct
+`PATCH .../lifecycle` into either with 400, so `transition_lifecycle` raises
+`PraesidiaConfigError` before sending. File a request, then an `ORGANIZATION_OWNER` other than
+the requester approves it; the approval is what applies the move:
+
+```python
+req = client.ai_systems.request_lifecycle_transition(system_id, "production", reason="Passed review")
+# as an ORGANIZATION_OWNER (not the requester):
+client.ai_systems.approve_lifecycle_transition(req["id"], reason="Approved")  # or reject_lifecycle_transition
+
+# Retirement has its own door; it records the retention policy and returns 202 {requestId, preview}
+ret = client.ai_systems.retire(
+    system_id,
+    retention_policy="Audit evidence retained 7 years, then destroyed.",
+    reason="Superseded by the v3 model.",
+)
+client.ai_systems.approve_lifecycle_transition(ret["requestId"])  # applies retirement + cascade
+```
+
+`request_lifecycle_transition` raises `ValueError` for `"retired"` (use `retire`). `reapprove`
+clears the re-approval flag a material change left on a `production` system.
 
 Every `list*`/`list_assets`/`list_relationships` also has a `*_page` (full pagination envelope) and
 `*_all` (auto-paginating generator) sibling, matching the `list_page`/`list_all` convention above

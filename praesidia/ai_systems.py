@@ -19,6 +19,7 @@ from typing import Any, Iterator
 
 from ._http import HttpClient, path_segment
 from ._pagination import normalize_paged_envelope, paginate_all
+from .exceptions import PraesidiaConfigError
 
 
 def _query(page: int, limit: int, **filters: Any) -> dict[str, Any]:
@@ -77,6 +78,8 @@ class AiSystemsResource:
         "suspended",
         "retired",
     )
+    #: be `ai-system-lifecycle.util.ts`'s `APPROVAL_GATED_LIFECYCLE_TARGETS` (AISYS-0018).
+    APPROVAL_GATED_LIFECYCLE_STATUSES = ("production", "retired")
     #: `entities/ai-asset.entity.ts`'s `AI_ASSET_TYPES` (24 values, SDK-0007
     #: synced with DB-0300's widened enum, SDK-0315 adds BE-0338's
     #: `GUARDRAIL`; kept in sync via
@@ -257,19 +260,121 @@ class AiSystemsResource:
         """
         Move an AI System to a new lifecycle status. PATCH .../ai-systems/:id/lifecycle.
 
+        Only ungated targets move directly. ``production`` and ``retired`` are
+        approval-gated (be AISYS-0018): be 400s every direct PATCH into them, so
+        this method raises before sending. Use :meth:`request_lifecycle_transition`
+        (``production``) or :meth:`retire` (``retired``); an ORGANIZATION_OWNER's
+        :meth:`approve_lifecycle_transition` applies the move.
+
         Raises:
             ValueError: ``lifecycle_status`` is not in :attr:`LIFECYCLE_STATUSES`.
+            PraesidiaConfigError: ``lifecycle_status`` is in :attr:`APPROVAL_GATED_LIFECYCLE_STATUSES`.
 
         be 400s with ``Invalid AI System lifecycle transition: '<from>' -> '<to>'``
-        on a structurally valid but illegal move (e.g. ``retired`` -> ``production``).
+        on a structurally valid but illegal move (e.g. ``proposed`` -> ``suspended``).
         """
         if lifecycle_status not in self.LIFECYCLE_STATUSES:
             raise ValueError(
                 f"lifecycle_status must be one of {self.LIFECYCLE_STATUSES}; got {lifecycle_status!r}"
             )
+        if lifecycle_status in self.APPROVAL_GATED_LIFECYCLE_STATUSES:
+            use = "retire()" if lifecycle_status == "retired" else "request_lifecycle_transition()"
+            raise PraesidiaConfigError(
+                f"lifecycle transition to {lifecycle_status!r} is approval-gated; "
+                f"file it with {use} and have an ORGANIZATION_OWNER approve it"
+            )
         return self._http.patch(
             f"{self._systems_base}/{path_segment(ai_system_id, 'ai_system_id')}/lifecycle",
             json={"lifecycleStatus": lifecycle_status},
+        )
+
+    def request_lifecycle_transition(
+        self, ai_system_id: str, to_status: str, *, reason: str | None = None
+    ) -> dict[str, Any]:
+        """
+        File an approval request for a lifecycle move (AISYS-0018).
+        POST .../ai-systems/:id/lifecycle-requests (``AI_SYSTEMS_UPDATE``).
+
+        Nothing moves yet: an ORGANIZATION_OWNER's :meth:`approve_lifecycle_transition`
+        applies it. Returns the request (``AiSystemLifecycleTransitionRequestResponseDto``,
+        ``status`` ``"PENDING"``); pass its ``id`` to approve/reject.
+
+        Raises:
+            ValueError: ``to_status`` is unknown, or ``"retired"`` (be 400s it;
+                retirement is filed only by :meth:`retire`).
+        """
+        if to_status not in self.LIFECYCLE_STATUSES:
+            raise ValueError(
+                f"to_status must be one of {self.LIFECYCLE_STATUSES}; got {to_status!r}"
+            )
+        if to_status == "retired":
+            raise ValueError("retirement is requested only via retire(), which records the retention policy")
+        body: dict[str, Any] = {"toStatus": to_status}
+        if reason is not None:
+            body["reason"] = reason
+        return self._http.post(
+            f"{self._systems_base}/{path_segment(ai_system_id, 'ai_system_id')}/lifecycle-requests",
+            json=body,
+        )
+
+    def approve_lifecycle_transition(self, request_id: str, *, reason: str | None = None) -> dict[str, Any]:
+        """
+        Approve a pending lifecycle request; this applies the move (and, for
+        ``retired``, the retirement cascade). POST .../ai-systems/lifecycle-requests/:requestId/approve.
+        be requires the request's approver rank (ORGANIZATION_OWNER) and a
+        decider other than the requester.
+        """
+        return self._decide_lifecycle_transition(request_id, "approve", reason)
+
+    def reject_lifecycle_transition(self, request_id: str, *, reason: str | None = None) -> dict[str, Any]:
+        """Reject a pending lifecycle request. POST .../ai-systems/lifecycle-requests/:requestId/reject."""
+        return self._decide_lifecycle_transition(request_id, "reject", reason)
+
+    def _decide_lifecycle_transition(self, request_id: str, decision: str, reason: str | None) -> dict[str, Any]:
+        return self._http.post(
+            f"{self._systems_base}/lifecycle-requests/{path_segment(request_id, 'request_id')}/{decision}",
+            json={} if reason is None else {"reason": reason},
+        )
+
+    def retire(
+        self,
+        ai_system_id: str,
+        *,
+        retention_policy: str,
+        reason: str,
+        retention_until: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Request retirement. POST .../ai-systems/:id/retire (202, ``AI_SYSTEMS_ARCHIVE``).
+
+        Records the retention policy and files the gated ``retired`` request; the
+        system is not retired until :meth:`approve_lifecycle_transition`.
+        ``retention_policy`` and ``reason`` are 10-4000 chars; ``retention_until``
+        is an ISO 8601 date (be ``RetireAiSystemDto``).
+
+        Returns:
+            ``{"requestId", "preview"}`` (``RetireAiSystemResponseDto``).
+        """
+        body: dict[str, Any] = {"retentionPolicy": retention_policy, "reason": reason}
+        if retention_until is not None:
+            body["retentionUntil"] = retention_until
+        return self._http.post(
+            f"{self._systems_base}/{path_segment(ai_system_id, 'ai_system_id')}/retire", json=body
+        )
+
+    def reapprove(
+        self, ai_system_id: str, material_change_id: str, *, reason: str | None = None
+    ) -> dict[str, Any]:
+        """
+        Clear the re-approval flag a material change left on a ``production``
+        system (ORGANIZATION_OWNER). POST .../ai-systems/:id/reapprove.
+        ``material_change_id`` must be the change the flag names now (409 otherwise).
+        """
+        body: dict[str, Any] = {"materialChangeId": material_change_id}
+        if reason is not None:
+            body["reason"] = reason
+        return self._http.post(
+            f"{self._systems_base}/{path_segment(ai_system_id, 'ai_system_id')}/reapprove", json=body
         )
 
     def delete(self, ai_system_id: str) -> None:
