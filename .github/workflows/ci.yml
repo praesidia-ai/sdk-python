@@ -51,6 +51,16 @@ jobs:
       - name: Verify installed dependency consistency
         run: pip check
 
+      # The editable install above imports from the checkout; this proves what a user gets
+      # from `pip install <wheel>` in a clean venv outside the repo.
+      - name: Smoke the built wheel in a clean venv
+        if: matrix.python-version == '3.9' || matrix.python-version == '3.14'
+        run: |
+          pip install build==1.3.0
+          bash scripts/wheel_install_smoke.sh
+        env:
+          PYTHON: python
+
       # Audit the base SDK + LangGraph dependency profile. Optional framework
       # profiles have distinct dependencies; this is not an advisory-clean claim
       # for the CrewAI/Chroma profile documented in runtime-integrations.md. Pin the scanner itself so the gate is reproducible.
