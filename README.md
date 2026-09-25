@@ -19,6 +19,10 @@ reviewed wheel supplied by your deployment operator, or build this checkout
 with `python -m build` and install the resulting local `.whl` file.
 A successful local build does not publish a PyPI release.
 
+A standalone, installed-package example of the governed refund path (decision,
+approval, Stripe test-mode refund, outcome, receipt, audit package) is in
+[`examples/refund_authorization/`](examples/refund_authorization/README.md).
+
 Requires Python 3.9+ and [`httpx`](https://www.python-httpx.org/) (installed automatically).
 
 ## Managed runtime tools (0.4.1 source)

@@ -65,7 +65,7 @@ packages = ["praesidia"]
 [tool.hatch.build.targets.sdist]
 # In an isolated Git worktree, .git is a metadata file rather than a directory.
 # Never ship checkout paths or Git metadata in a source distribution.
-exclude = ["/.git", "/.git/**"]
+exclude = ["/.git", "/.git/**", "/examples/refund_authorization"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

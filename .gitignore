@@ -22,3 +22,7 @@ htmlcov/
 
 # OS
 .DS_Store
+
+# examples/refund_authorization run artifacts and local secrets
+examples/refund_authorization/.env
+examples/refund_authorization/audit-package.zip
