@@ -28,9 +28,11 @@ import functools
 import json
 import logging
 import os
+import math
 import re
+import time
 from datetime import datetime, timezone
-from typing import Any, Callable, TypeVar, Union
+from typing import Any, Callable, Literal, Optional, TypeVar, Union
 
 from ._http import CHAIN_ID_HEADER, HttpClient
 from ._retry import RetryConfig
@@ -49,6 +51,14 @@ _UUID_RE = re.compile(
 )
 
 _F = TypeVar("_F", bound=Callable[..., Any])
+
+#: SDK-0336 (parity with TS SDK-0335) -- behaviour when the control plane is unreachable.
+FailureMode = Literal["fail_closed", "local_rules", "fail_open"]
+_FAILURE_MODES = ("fail_closed", "local_rules", "fail_open")
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 def _is_uuid(value: str) -> bool:
@@ -178,12 +188,14 @@ class Guard:
         before the wrapped call runs.
       - Output blocks are returned for inspection by default; ``strict=True``
         (or ``guard_output(..., throw_on_block=True)``) raises instead.
-      - Network errors talking to Praesidia: by default (``fail_open=False,
-        strict=False``) they are logged via the ``praesidia.guard`` logger
-        and treated as a local pass, so infrastructure failures never
-        disrupt the caller's agent.
-      - ``fail_open=True`` -> same as default (silent degradation).
-      - ``strict=True``    -> network errors are re-raised.
+      - Network errors talking to Praesidia follow ``failure_mode`` (SDK-0336):
+        ``local_rules`` (default) serves local rules + a ``praesidia.guard``
+        warning, ``fail_open`` serves local rules silently, ``fail_closed``
+        re-raises. Legacy mapping when unset: ``fail_open=True`` ->
+        ``fail_open``, else ``strict=True`` -> ``fail_closed``.
+      - ``max_degraded_ms`` bounds a degraded episode: past it, both degrading
+        modes fail closed until one call succeeds. ``on_degraded`` fires once
+        per episode; locally-served results carry ``degraded=True``.
     """
 
     def __init__(
@@ -198,6 +210,9 @@ class Guard:
         retry: Union[RetryConfig, bool, None] = None,
         strict: bool = False,
         fail_open: bool = False,
+        failure_mode: Optional[FailureMode] = None,
+        max_degraded_ms: Optional[float] = None,
+        on_degraded: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> None:
         self._api_key = api_key or os.environ.get("PRAESIDIA_API_KEY")
         self._org_id = org_id or os.environ.get("PRAESIDIA_ORG_ID")
@@ -206,6 +221,20 @@ class Guard:
         self._base_url = base_url or os.environ.get("PRAESIDIA_BASE_URL") or _DEFAULT_BASE_URL
         self.strict = strict
         self.fail_open = fail_open
+        self.failure_mode: FailureMode = failure_mode or (
+            "fail_open" if fail_open else "fail_closed" if strict else "local_rules"
+        )
+        if self.failure_mode not in _FAILURE_MODES:
+            raise PraesidiaConfigError(f"failure_mode must be one of {', '.join(_FAILURE_MODES)}")
+        if max_degraded_ms is not None and not (
+            isinstance(max_degraded_ms, (int, float)) and not isinstance(max_degraded_ms, bool) and math.isfinite(max_degraded_ms) and max_degraded_ms >= 0
+        ):
+            raise PraesidiaConfigError("max_degraded_ms must be a finite number >= 0")
+        self.max_degraded_ms = max_degraded_ms
+        self._on_degraded = on_degraded
+        #: epoch ms of the current degraded episode's first failure
+        self._degraded_since: int | None = None
+        self._degraded_escalated = False
 
         # Local/offline mode when no api_key + org_id are resolvable -- no
         # HttpClient is ever constructed, so no transport exists to make a
@@ -329,8 +358,9 @@ class Guard:
             )
         except Exception as err:  # noqa: BLE001 -- must degrade on ANY transport/HTTP failure
             self._handle_network_error(err, "guardrails/validate")
-            return run_local_rules(content)
+            return {**run_local_rules(content), "degraded": True}
 
+        self._degraded_since = None
         return {
             "passed": result["passed"],
             "triggered": result.get("triggered") or [],
@@ -340,11 +370,29 @@ class Guard:
         }
 
     def _handle_network_error(self, err: BaseException, operation: str) -> None:
-        """Swallow (fail_open/default) or re-raise (strict) a network/API error."""
-        if self.fail_open:
-            return
-        if self.strict:
+        """Apply ``failure_mode`` + ``max_degraded_ms`` to a control-plane error: swallow or re-raise."""
+        now = _now_ms()
+        if self._degraded_since is None:
+            self._degraded_since = now
+            self._degraded_escalated = False
+            if self._on_degraded is not None:
+                try:
+                    self._on_degraded({"operation": operation, "since": now, "mode": self.failure_mode})
+                except Exception:  # noqa: BLE001 -- an alerting hook must never change the outcome
+                    pass
+        if self.failure_mode == "fail_closed":
             raise err
+        if self.max_degraded_ms is not None and now - self._degraded_since > self.max_degraded_ms:
+            if not self._degraded_escalated:
+                self._degraded_escalated = True
+                _LOGGER.error(
+                    "[praesidia] control plane unreachable for more than %sms (max_degraded_ms); "
+                    "failing closed until a call succeeds",
+                    self.max_degraded_ms,
+                )
+            raise err
+        if self.failure_mode == "fail_open":
+            return
         _LOGGER.warning("[praesidia] %s failed (degrading gracefully): %s", operation, err)
 
     # ── audit logging ───────────────────────────────────────────────────
@@ -378,6 +426,7 @@ class Guard:
         headers = {CHAIN_ID_HEADER: chain_id} if chain_id else None
         try:
             res = self._http.post(f"/organizations/{self._http.org_id}/tasks", json=body, headers=headers)
+            self._degraded_since = None
             return res.get("id")
         except Exception as err:  # noqa: BLE001
             self._handle_network_error(err, "logTask")

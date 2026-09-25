@@ -264,8 +264,36 @@ guard = Guard(
     base_url="https://api.praesidia.ai",  # falls back to PRAESIDIA_BASE_URL
     strict=False,     # True -> re-raise network errors (default: degrade gracefully)
     fail_open=False,  # True -> silently swallow network errors (default: warn + local fallback)
+    # SDK-0336 -- explicit control-plane failure policy (see "Control-plane failure mode")
+    failure_mode="local_rules",  # "fail_closed" | "local_rules" | "fail_open"; None = mapped from strict/fail_open
+    max_degraded_ms=300_000,     # optional bound: past it, degrading modes fail closed until a call succeeds
+    on_degraded=lambda info: alert(info["operation"], info["since"], info["mode"]),  # once per episode
 )
 ```
+
+#### Control-plane failure mode (SDK-0336, parity with TS SDK-0335)
+
+A "network error" here is any error from `guardrails/validate` (and `log_task`): unreachable host,
+timeout or non-2xx response.
+
+| `failure_mode` | On a control-plane error | Legacy flags that map to it (when `failure_mode` is unset) |
+|---|---|---|
+| `fail_closed` | Re-raises (`ServerError`, `httpx.ConnectError`, ...) | `strict=True` (and `fail_open` not set) |
+| `local_rules` | Serves the bundled local rules, `praesidia.guard` warning | neither flag (**today's default**) |
+| `fail_open` | Serves the bundled local rules silently | `fail_open=True` (wins over `strict`) |
+
+- Results served locally because the control plane failed carry `"local": True, "degraded": True`.
+  Offline mode (no API key / org id) is `"local": True` without a `"degraded"` key.
+- `max_degraded_ms` bounds a degraded episode. Once the control plane has been failing for longer
+  than this, `local_rules` and `fail_open` raise like `fail_closed` (with one `praesidia.guard`
+  error log) until a call succeeds. **Unset = unbounded**: an outage of any length degrades to
+  local rules.
+- `on_degraded({"operation", "since", "mode"})` fires once when an episode starts (`since` is epoch
+  ms), in every mode including `fail_closed`, and again only after a successful call has ended the
+  episode. Exceptions it raises are swallowed.
+- `strict` still controls output-block raising and missing-config errors independently of
+  `failure_mode`. The default stays `local_rules`; switching it to `fail_closed` would be a
+  breaking change and is not made here.
 
 ### `guard.run(fn, *, input, ...)` and `@guard.protect(...)` — the idiomatic decorator form
 
