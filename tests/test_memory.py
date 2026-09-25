@@ -162,26 +162,58 @@ def test_search_rejects_invalid_top_k_before_network(top_k):
         _client().memory.search("query", top_k=top_k)
 
 
+HASH = "a" * 64
+APPROVAL = {
+    "id": "appr-1",
+    "organizationId": ORG_ID,
+    "requesterId": "user-1",
+    "operationType": "DATA_SUBJECT_ERASE",
+    "status": "PENDING",
+    "description": f"Erase data subject (hash {HASH})",
+    "expiresAt": "2026-10-01T00:00:00.000Z",
+}
+
+
 @respx.mock
-def test_erase_posts_subject_and_reason():
+def test_erase_minimal_body_returns_pending_approval_as_is():
     route = respx.post(f"{MEMORIES}/erase").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "subjectExternalIdHash": "hash-abc",
-                "memoriesErased": 3,
-                "dekDestroyed": True,
-                "certificateId": "cert-1",
-            },
-        )
+        return_value=httpx.Response(202, json=APPROVAL)
     )
     res = _client().memory.erase("subject-9", "GDPR Art-17 request")
-    assert res["memoriesErased"] == 3
-    assert res["dekDestroyed"] is True
+    assert res == APPROVAL
     assert json.loads(route.calls.last.request.content) == {
         "subjectId": "subject-9",
         "reason": "GDPR Art-17 request",
     }
+
+
+@respx.mock
+def test_erase_sends_expected_subject_hash_and_cross_org_ack():
+    route = respx.post(f"{MEMORIES}/erase").mock(
+        return_value=httpx.Response(202, json=APPROVAL)
+    )
+    res = _client().memory.erase(
+        "subject-9",
+        "GDPR Art-17 request",
+        expected_subject_hash=HASH,
+        acknowledge_cross_org=True,
+    )
+    assert res["status"] == "PENDING"
+    assert json.loads(route.calls.last.request.content) == {
+        "subjectId": "subject-9",
+        "reason": "GDPR Art-17 request",
+        "expectedSubjectHash": HASH,
+        "acknowledgeCrossOrg": True,
+    }
+
+
+@pytest.mark.parametrize("bad", ["", "A" * 64, "a" * 63, "g" * 64, 123])
+@respx.mock
+def test_erase_rejects_bad_hash_before_network(bad):
+    route = respx.post(f"{MEMORIES}/erase")
+    with pytest.raises(ValueError, match="expected_subject_hash"):
+        _client().memory.erase("subject-9", "reason", expected_subject_hash=bad)
+    assert not route.called
 
 
 @respx.mock

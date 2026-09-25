@@ -9,6 +9,7 @@ authorized org readers and surface provenance + guardrail metadata per hit.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from ._http import HttpClient, path_segment
@@ -222,23 +223,54 @@ class MemoryResource:
             payload["topK"] = top_k
         return self._http.post(f"{self._base}/search", json=payload)
 
-    def erase(self, subject_id: str, reason: str) -> dict[str, Any]:
+    def erase(
+        self,
+        subject_id: str,
+        reason: str,
+        expected_subject_hash: Optional[str] = None,
+        acknowledge_cross_org: Optional[bool] = None,
+    ) -> dict[str, Any]:
         """
-        GDPR Art-17 crypto-shred a data subject's memories (DEK destroy +
-        certificate). ``POST .../memories/erase`` (MEMORY_ERASE).
+        Request a two-person GDPR Art-17 erasure of a data subject's memories.
+        ``POST .../memories/erase`` (MEMORY_ERASE).
+
+        This only *files* the request: nothing is destroyed and no erasure
+        certificate exists yet. The backend answers ``202`` with a PENDING
+        ``DATA_SUBJECT_ERASE`` approval; the crypto-shred (DEK destroy +
+        certificate) happens only when a different system admin confirms it.
 
         Args:
             subject_id: The data-subject identifier whose memories to erase.
             reason:     Reason for erasure (recorded on the erasure certificate).
+            expected_subject_hash: Optional server-issued subject HMAC
+                (64 lowercase hex, e.g. from a prior erasure receipt). Omit it
+                and the server derives it from ``subject_id``; if given it must
+                match, else the API returns 400 ``subject_hash_mismatch``.
+            acknowledge_cross_org: Set ``True`` to acknowledge that erasing a
+                shared platform user may affect other organisations.
 
         Returns:
-            A dict with ``subjectExternalIdHash``, ``memoriesErased``,
-            ``dekDestroyed`` and ``certificateId`` (str or None).
+            The pending ApprovalRequest dict as the API returns it (``id``,
+            ``status``, ``operationType``, ``expiresAt``, ...).
+
+        Raises:
+            ValueError: ``expected_subject_hash`` is not 64 lowercase hex, or
+                ``acknowledge_cross_org`` is not a bool (before any request).
         """
-        return self._http.post(
-            f"{self._base}/erase",
-            json={"subjectId": subject_id, "reason": reason},
-        )
+        payload: dict[str, Any] = {"subjectId": subject_id, "reason": reason}
+        if expected_subject_hash is not None:
+            if not isinstance(expected_subject_hash, str) or not re.fullmatch(
+                r"[a-f0-9]{64}", expected_subject_hash
+            ):
+                raise ValueError(
+                    "expected_subject_hash must be 64 lowercase hex characters"
+                )
+            payload["expectedSubjectHash"] = expected_subject_hash
+        if acknowledge_cross_org is not None:
+            if not isinstance(acknowledge_cross_org, bool):
+                raise ValueError("acknowledge_cross_org must be a bool")
+            payload["acknowledgeCrossOrg"] = acknowledge_cross_org
+        return self._http.post(f"{self._base}/erase", json=payload)
 
     def get(self, memory_id: str) -> dict[str, Any]:
         """

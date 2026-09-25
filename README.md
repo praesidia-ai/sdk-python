@@ -359,9 +359,21 @@ m = client.memory.create(
 )
 hits = client.memory.search("contact preference", top_k=5)
 rows = client.memory.list(limit=20, tag="crm")
-client.memory.erase("user-42", reason="GDPR Art-17 request")
+# Files a two-person GDPR Art-17 request; nothing is destroyed yet.
+approval = client.memory.erase("user-42", reason="GDPR Art-17 request")
+assert approval["status"] == "PENDING"  # 202 ApprovalRequest
 client.memory.delete(m["id"])
 ```
+
+`erase(subject_id, reason, expected_subject_hash=None, acknowledge_cross_org=None)`
+returns the pending `DATA_SUBJECT_ERASE` ApprovalRequest the API answers with (202),
+not a shred result. The crypto-shred and its erasure certificate only happen when a
+different system admin confirms the approval. `expected_subject_hash` is optional:
+if you omit it, the server derives it from `subject_id`. If you pass it, it must be 64
+lowercase hex characters (checked locally before the request) and must match the
+server's HMAC, otherwise the API returns 400 `subject_hash_mismatch`. Pass
+`acknowledge_cross_org=True` when the subject is a platform user who also belongs to
+other organisations.
 
 ## OTLP GenAI telemetry — become an OBSERVED agent (H1-02)
 
