@@ -27,7 +27,8 @@ class AuditBundle(bytes):
 
     ``effective_to`` is earlier than ``requested_to`` when the range end was clamped to
     the last Merkle-rooted hour; ``window_clamp`` says why (``none``,
-    ``clamped_to_last_rooted_hour``, ``no_rooted_hour`` or ``include_unrooted``).
+    ``clamped_to_last_rooted_hour``, ``clamped_to_unrooted_gap`` (an earlier hour with
+    rows has no root, BE-1638), ``no_rooted_hour`` or ``include_unrooted``).
     Each is ``None`` when the server did not send the header.
     """
 

@@ -1,12 +1,15 @@
 """SDK-0329: examples/refund_authorization (refusal paths, env parsing, no mock backend)."""
 import importlib.util
+import io
 import sys
+import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
 import pytest
 
-from praesidia.exceptions import InteractionDeniedError
+from praesidia.exceptions import ForbiddenError, InteractionDeniedError, ServerError
 
 EXAMPLE = Path(__file__).parents[1] / "examples/refund_authorization"
 if not EXAMPLE.is_dir():  # the example is excluded from the sdist
@@ -27,11 +30,13 @@ DECISION = {"verdict": "allow", "reasonCode": "approval_consumed", "approvalId":
 
 
 class Graph:
-    def __init__(self):
-        self.calls = []
+    def __init__(self, fail=None):
+        self.calls, self.fail = [], fail
 
     def put_asset_by_external_id(self, external_id, data):
         self.calls.append(external_id)
+        if self.fail:
+            raise self.fail
         return {"id": f"asset-{len(self.calls)}"}
 
     def put_relationship_by_external_id(self, external_id, data):
@@ -40,22 +45,32 @@ class Graph:
 
 
 class Audit:
+    def __init__(self, package=b"PK", effective_to=()):
+        self.package, self.effective_to, self.calls = package, list(effective_to), []
+
     def get_decision_receipt(self, decision_id):
         return {"decisionId": decision_id}
 
+    def export_bundle(self, *, from_date, to_date, include_unrooted=False):
+        self.calls.append(("bundle", from_date, to_date, include_unrooted))
+        bundle = type("B", (bytes,), {})(b"PK")  # the server keeps answering its last cut
+        bundle.effective_to = self.effective_to.pop(0) if len(self.effective_to) > 1 else self.effective_to[0]
+        return bundle
+
     def request_package(self):
+        self.calls.append(("request",))
         return {"id": "p1", "status": "queued"}
 
     def get_package(self, package_id):
         return {"id": package_id, "status": "done"}
 
     def download_package(self, package_id):
-        return b"PK"
+        return self.package
 
 
 class Client:
-    def __init__(self):
-        self.ai_systems, self.audit = Graph(), Audit()
+    def __init__(self, graph=None, audit=None):
+        self.ai_systems, self.audit = graph or Graph(), audit or Audit()
 
 
 class Hooks:
@@ -154,3 +169,115 @@ def test_refund_example_has_no_mock_backend():
         for marker in ("localhost", "127.0.0.1", "respx", "mocktransport", "file:", "-e "):
             assert marker not in text, (name, marker)
     assert (EXAMPLE / "requirements.txt").read_text().split() == ["praesidia>=0.5.0"]
+
+
+# SDK-0342: coverage of the refund by the package, --wait-rooted, the verify command, a 403 on step 1.
+NOW = datetime(2026, 9, 25, 10, 17, tzinfo=timezone.utc).timestamp()  # frozen clock: refunded_at
+HOUR_END = "2026-09-25T11:00:00.000Z"  # the refund's hour end, as refund.py computes it
+PAST, FUTURE = "2026-01-01T00:00:00.000Z", "2999-01-01T00:00:00.000Z"
+
+
+def iso(ts):
+    return datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def package(to, clamp):
+    """A package ZIP whose verification.txt carries be's buildVerificationTxt window lines."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("verification.txt", f"Praesidia Audit Package\nEvidence range: {PAST} .. {to}\n"
+                                       f"Requested range end: {iso(NOW)}\nRange end clamp: {clamp}\n")
+    return buf.getvalue()
+
+
+def approved_run(tmp_path, audit=None, graph=None, env=None, **kwargs):
+    lines, hooks = [], Hooks(DECISION)
+    client = Client(graph, audit)
+    code = refund.run(refund.load_config({**ENV, **(env or {})}), client=client, hooks=hooks,
+                      stripe=lambda *a: {"id": "re_1"}, out=lambda *a: lines.append(" ".join(map(str, a))),
+                      sleep=lambda s: None, package_path=tmp_path / "audit-package.zip", clock=lambda: NOW, **kwargs)
+    return code, lines, client, hooks
+
+
+def starts(lines, prefix):
+    return [line for line in lines if line.startswith(prefix)]
+
+
+def test_refund_example_403_on_inventory_still_reaches_the_decision(tmp_path):
+    code, lines, _, hooks = approved_run(tmp_path, graph=Graph(fail=ForbiddenError("forbidden")))
+    assert code == 0 and [o[:2] for o in hooks.outcomes] == [("ap_1", "succeeded")]
+    assert "graph: mapping skipped (403). The API key lacks the ai-systems:write scope; add it to the key (README.md)" in lines
+
+
+def test_refund_example_other_inventory_errors_still_raise(tmp_path):
+    with pytest.raises(ServerError):
+        approved_run(tmp_path, graph=Graph(fail=ServerError("boom", 500)))
+
+
+def test_refund_example_clamp_before_the_refund_prints_not_yet_covered(tmp_path):
+    code, lines, _, _ = approved_run(tmp_path, Audit(package("2026-09-25T10:00:00.000Z", "clamped_to_last_rooted_hour")))
+    assert code == 0 and not starts(lines, "refund covered: ")
+    (line,) = starts(lines, "refund not yet covered: ")
+    assert line == ("refund not yet covered: the package's evidence ends at 2026-09-25T10:00:00.000Z "
+                    "(clamp clamped_to_last_rooted_hour); the refund was at 2026-09-25T10:17:00.000Z. Its rows are "
+                    f"covered once the hour ending {HOUR_END} is Merkle-rooted (hourly, just after that hour closes). "
+                    "Request a new audit package after then, or pass --wait-rooted next time")
+
+
+def test_refund_example_window_end_is_exclusive(tmp_path):
+    _, lines, _, _ = approved_run(tmp_path, Audit(package(iso(NOW), "clamped_to_last_rooted_hour")))
+    assert starts(lines, "refund not yet covered: ")
+    _, lines, _, _ = approved_run(tmp_path, Audit(package(iso(NOW + 0.001), "clamped_to_last_rooted_hour")))
+    assert starts(lines, "refund covered: ") == [
+        "refund covered: the package's evidence ends at 2026-09-25T10:17:00.001Z (clamp clamped_to_last_rooted_hour), "
+        "after the refund at 2026-09-25T10:17:00.000Z"]
+
+
+@pytest.mark.parametrize("clamp", ["none", "clamped_to_last_rooted_hour", "no_rooted_hour", "clamped_to_unrooted_gap"])
+def test_refund_example_known_clamp_after_the_refund_is_covered(tmp_path, clamp):
+    _, lines, _, _ = approved_run(tmp_path, Audit(package(FUTURE, clamp)))
+    assert starts(lines, "refund covered: ") and not starts(lines, "refund not yet covered: ")
+
+
+def test_refund_example_unknown_clamp_or_unreadable_package_is_not_covered(tmp_path):
+    _, lines, _, _ = approved_run(tmp_path, Audit(package(FUTURE, "include_unrooted")))
+    assert "unknown clamp reason include_unrooted" in starts(lines, "refund not yet covered: ")[0]
+    _, lines, _, _ = approved_run(tmp_path, Audit(b"PK"))
+    assert "range could not be read from its verification.txt" in starts(lines, "refund not yet covered: ")[0]
+
+
+def test_refund_example_verify_command_carries_the_platform_key(tmp_path):
+    _, lines, _, _ = approved_run(tmp_path)
+    path = tmp_path / "audit-package.zip"
+    assert f"verify offline: npx @praesidia/audit-verifier {path} --platform-key <platform-key.pem> " \
+           "--platform-key-fingerprint <sha256hex> --summary" in lines
+    assert starts(lines, "platform key: ")
+    _, lines, _, _ = approved_run(tmp_path, env={"PRAESIDIA_PLATFORM_KEY_FILE": "k.pem",
+                                                 "PRAESIDIA_PLATFORM_KEY_FINGERPRINT": "ab" * 32})
+    assert f"verify offline: npx @praesidia/audit-verifier {path} --platform-key k.pem " \
+           f"--platform-key-fingerprint {'ab' * 32} --summary" in lines
+    assert not starts(lines, "platform key: ")
+
+
+def test_refund_example_wait_rooted_counts_effective_to_equal_to_the_hour_end_as_rooted(tmp_path):
+    audit = Audit(package(HOUR_END, "none"), effective_to=[PAST, HOUR_END])  # be clamps effectiveTo to `to`
+    _, lines, _, _ = approved_run(tmp_path, audit, wait_rooted=True)
+    probes = [c for c in audit.calls if c[0] == "bundle"]
+    assert probes == [("bundle", "2026-09-25T10:00:00.000Z", HOUR_END, False)] * 2
+    assert audit.calls.index(("request",)) == 2  # the package is requested after the root
+    assert f"--wait-rooted: rooted through {HOUR_END}" in lines and starts(lines, "refund covered: ")
+
+
+def test_refund_example_wait_rooted_is_bounded(tmp_path):
+    audit = Audit(package(PAST, "clamped_to_last_rooted_hour"), effective_to=[PAST])
+    code, lines, _, _ = approved_run(tmp_path, audit, wait_rooted=True)
+    assert code == 0 and len([c for c in audit.calls if c[0] == "bundle"]) == 41
+    assert "--wait-rooted: not rooted after 80 min; requesting the package anyway" in lines
+    assert ("request",) in audit.calls and starts(lines, "refund not yet covered: ")
+
+
+def test_refund_example_wait_rooted_without_the_header_does_not_wait(tmp_path):
+    audit = Audit(package(FUTURE, "none"), effective_to=[None])
+    _, lines, _, _ = approved_run(tmp_path, audit, wait_rooted=True)
+    assert len([c for c in audit.calls if c[0] == "bundle"]) == 1
+    assert "--wait-rooted: this server does not report the rooted window; not waiting" in lines
