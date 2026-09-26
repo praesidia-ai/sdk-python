@@ -36,7 +36,7 @@ from typing import Any, Callable, Literal, Optional, TypeVar, Union
 
 from ._http import CHAIN_ID_HEADER, HttpClient
 from ._retry import RetryConfig
-from .exceptions import GuardContentTooLargeError, GuardrailBlockedError, PraesidiaConfigError, _is_outage
+from .exceptions import GuardContentTooLargeError, GuardrailBlockedError, PraesidiaConfigError, PraesidiaError, _is_outage
 from .local_rules import run_local_rules
 
 _LOGGER = logging.getLogger("praesidia.guard")
@@ -385,7 +385,9 @@ class Guard:
         # SDK-0349 -- a caller-triggerable 4xx (400 oversized, 401/403, 429 on a
         # shared egress IP) must never switch the org's guardrails off.
         if not _is_outage(err):
-            raise err
+            if isinstance(err, PraesidiaError):
+                raise err
+            raise PraesidiaError(f"{operation} request could not be completed: {err}") from err
         now = _now_ms()
         if self._degraded_since is None:
             self._degraded_since = now

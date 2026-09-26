@@ -7,7 +7,10 @@ whole family with a single except clause if needed.
 
 from __future__ import annotations
 
+import json
 from typing import Any
+
+import httpx
 
 
 class PraesidiaError(Exception):
@@ -252,11 +255,15 @@ class InteractionDecisionUnavailableError(PraesidiaError):
 
 def _is_outage(err: BaseException) -> bool:
     """
-    The one degrade predicate (SDK-0349, SDK-0353; TS ``isOutage``): true only for a
-    real outage -- transport/timeout, 408, 5xx, or a malformed 2xx. Every other 4xx,
-    including a 429 an end user can trigger from a shared egress IP, is false and must raise.
+    The one degrade predicate (SDK-0349, SDK-0353, SDK-0355; TS ``isOutage``), an allowlist:
+    true only for a real outage -- transport/timeout, 408, 5xx, or a malformed 2xx. Every
+    other 4xx (including a 429 an end user can trigger from a shared egress IP) and every
+    local error (a lone surrogate or NaN that cannot be encoded, any programming error) is
+    false and must raise.
     """
-    if isinstance(err, PraesidiaConfigError):
-        return False
+    if isinstance(err, (httpx.RequestError, json.JSONDecodeError)):  # JSONDecodeError: a non-JSON 2xx body
+        return True
     status = err.status_code if isinstance(err, PraesidiaError) else None
-    return status is None or status < 400 or status >= 500 or status == 408
+    if status is None or isinstance(err, PraesidiaConfigError):
+        return False
+    return status < 400 or status >= 500 or status == 408

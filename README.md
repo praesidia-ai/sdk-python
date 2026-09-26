@@ -301,7 +301,9 @@ A "control-plane error" here is an outage of `guardrails/validate` (and `log_tas
 host, timeout, a 408 or 5xx response, or a malformed 2xx. Any other 4xx, **including 429**, raises
 the typed error (`AuthError`, `ForbiddenError`, `RateLimitError`, `PraesidiaError`) in every mode
 (SDK-0349, parity with TS SDK-0348): a 400 for oversized content or a 429 from a shared egress IP is
-caller-triggerable, so it must never switch the org's guardrails off. Content longer than
+caller-triggerable, so it must never switch the org's guardrails off. So is a request that cannot
+be encoded (a lone surrogate in content, NaN/Infinity in `context`): it raises `PraesidiaError` in
+every mode and is never sanitised (SDK-0355). Content longer than
 `MAX_GUARD_CONTENT_LENGTH` (100 000 code points, the server's cap) raises
 `GuardContentTooLargeError` (`code="CONTENT_TOO_LARGE"`, `.length`, `.max_length`) before any
 request; offline mode is not capped.

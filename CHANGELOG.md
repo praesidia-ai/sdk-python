@@ -25,6 +25,14 @@ change below. It is the first version intended for the PyPI registry.
 - The changelog moved out of `README.md` into this file.
 
 ### Fixed
+- **Behaviour change (SDK-0355, security):** `Guard` no longer degrades to local rules when the
+  request body cannot be encoded. A lone UTF-16 surrogate in content (which `json.loads` keeps)
+  or a NaN/Infinity in `context` made httpx raise before sending, and every `failure_mode` except
+  `fail_closed` then returned the local-rules verdict with `degraded: True`, skipping the org's
+  guardrails. The degrade predicate is now an allowlist (httpx transport/timeout error, 408, 5xx,
+  malformed 2xx); any other error raises a `PraesidiaError` (`__cause__` = the original error) in
+  every mode, from `check_input`/`check_output`/`run`/`protect` and `log_task`. Content is not
+  sanitised. Interaction hooks already rejected these arguments with `PraesidiaConfigError`.
 - **Behaviour change (SDK-0353, security, parity with TS SDK-0352):** interaction hooks no
   longer treat a 429 as an outage. A fail-open hook used to return
   `InteractionHookResult(decision=None)` on a rate limit an end user can trigger from a shared
