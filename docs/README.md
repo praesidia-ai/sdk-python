@@ -20,19 +20,16 @@ GenAI telemetry, and offline trust-passport verification, all via the Praesidia 
 
 **`praesidia` has never been published to PyPI.** `sdk-python/PUBLISHING.md:3` states
 `https://pypi.org/pypi/praesidia/json` returned `404` as of 2026-09-11. `PUBLISHING.md` describes
-the **intended** flow (tag push → `.github/workflows/publish.yml` → `twine upload` via
-`PYPI_API_TOKEN`) — a documented plan, not a completed action. `sdk-python/README.md:14-18`
+the **intended** flow (tag push → `.github/workflows/publish.yml` → PyPI trusted publishing,
+no stored token) — a documented plan, not a completed action. `sdk-python/README.md:14-18`
 already carries the correct disclaimer: it "describes the current source checkout", a registry
 release may lag, and unreleased features require a local `python -m build` + wheel install; a
 successful local build does not publish a PyPI release.
 
-**Found and not fixed here**: `pyproject.toml:58` sets `Documentation =
-"https://docs.praesidia.ai/sdk/python"`. That hostname does not currently resolve — `nslookup
-docs.praesidia.ai` returns "No answer"/NXDOMAIN (checked live 2026-09-12, matches this run's
-broader finding that several public promises are 404/NXDOMAIN). This is a metadata claim in
-`pyproject.toml`, which is package config, not a docs file — reporting it rather than editing it;
-`sdk-dev` should either stand up that URL or point `Documentation` at something that resolves
-(e.g. this `docs/` directory's GitHub path) before the next PyPI release.
+**Documentation URL (fixed in INTEG-0110)**: `docs.praesidia.ai` still does not resolve
+(checked 2026-09-26), so `pyproject.toml`'s `Documentation` URL now points at this repo's
+README (`https://github.com/praesidia-ai/sdk-python#readme`). Switch it back in the first
+release after `docs.praesidia.ai/sdk/python` is live.
 
 ## Where it sits in the platform
 

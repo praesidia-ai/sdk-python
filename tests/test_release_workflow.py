@@ -28,21 +28,53 @@ def test_ci_smokes_the_built_wheel_in_a_clean_venv_on_oldest_and_newest_python()
 
 
 # SDK-0344 — the tag uploads exactly the wheel the install smoke (SDK-0331) accepted:
-# one build, smoke on that dist/ wheel, then upload dist/* with no rebuild in between.
-def test_publish_smokes_the_uploaded_wheel_before_upload():
+# one build, smoke on that dist/ wheel, then hand dist/ over with no rebuild in between.
+# INTEG-0110 — trusted publishing: only the publish job holds `id-token: write`, it runs
+# no repo code, and no stored token exists anywhere in the workflow.
+def test_publish_uploads_the_smoked_wheel_via_trusted_publishing():
+    import re
+
     root = Path(__file__).resolve().parents[1]
     workflow = (root / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
-    upload = workflow.index("twine upload --non-interactive dist/*")
-    build = workflow.index("python -m build")
-    smoke = workflow.index("bash scripts/wheel_install_smoke.sh")
-    assert build < smoke < upload
+    build_job, publish_job = workflow.split("\n  publish:\n", 1)
+    build = build_job.index("python -m build")
+    smoke = build_job.index("bash scripts/wheel_install_smoke.sh")
+    handoff = build_job.index("name: dist\n")
+    assert build < smoke < handoff
     assert workflow.count("-m build") == 1
-    smoke_step = workflow[workflow.rindex("- name:", 0, smoke) : upload]
+    smoke_step = build_job[build_job.rindex("- name:", 0, smoke) : handoff]
     assert 'WHEEL="$(ls dist/*.whl)" bash scripts/wheel_install_smoke.sh' in smoke_step
-    assert "secrets.PYPI_API_TOKEN" in workflow
+
+    assert "secrets." not in workflow
+    assert "twine upload" not in workflow
+    assert "id-token" not in build_job
+    assert "needs: build" in publish_job
+    assert "id-token: write" in publish_job
+    assert "name: pypi\n" in publish_job
+    assert "actions/checkout" not in publish_job
+    assert "run:" not in publish_job
+    assert "name: dist\n" in publish_job
+    assert re.search(r"uses: pypa/gh-action-pypi-publish@[0-9a-f]{40} ", publish_job)
 
     script = (root / "scripts" / "wheel_install_smoke.sh").read_text(encoding="utf-8")
     assert '"${WHEEL:-}"' in script
+
+
+# INTEG-0110 — CrewAI 1.15.20 resolves ChromaDB 1.1.1 with open advisories. Until that
+# is resolved the published metadata must not offer it as an extra; CI still tests the
+# adapter through an unpublished dependency group.
+def test_crewai_is_not_a_published_extra_while_its_advisories_are_open():
+    root = Path(__file__).resolve().parents[1]
+    pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
+
+    def section(name):
+        body = pyproject.split(f"\n[{name}]\n", 1)[1].split("\n[", 1)[0]
+        return "\n".join(ln for ln in body.splitlines() if not ln.lstrip().startswith("#"))
+
+    assert "crewai" not in section("project.optional-dependencies")
+    assert "crewai = [" in section("dependency-groups")
+    ci = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "--extra frameworks --group crewai" in ci
 
 
 def test_first_public_release_is_0_5_0_everywhere_the_version_is_asserted():

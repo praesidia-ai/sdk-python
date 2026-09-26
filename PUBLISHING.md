@@ -1,125 +1,141 @@
 # Publishing `praesidia` to PyPI
 
 This package has **never been published**. `https://pypi.org/pypi/praesidia/json` returns `404`
-as of 2026-09-11. This document is for the human who runs the publish — it is intentionally
-self-contained; you should not need to read the rest of the repo first.
+(checked 2026-09-26). Version 0.5.0 is the first release. This document is for the person who runs
+the publish. It is self-contained, so you should not need to read the rest of the repo first.
 
-Publishing is a **tag push**, not a local `twine upload`. `.github/workflows/publish.yml` runs on
-`push: tags: ['v*']`, re-runs the full test suite + build, and is the only place
-`PYPI_API_TOKEN` is used. No local machine ever holds the publish credential.
+A publish is a **tag push**, never a local upload. `.github/workflows/publish.yml` runs on
+`push: tags: ['v*']` in two jobs:
+
+1. **build** (read-only token): checks that the tag equals `v` + `pyproject.toml`'s version and
+   that the tagged commit is on `origin/main`, runs pytest with the coverage floor,
+   `python -m build`, `twine check`, the clean-venv install smoke on that same wheel
+   (`scripts/wheel_install_smoke.sh`) and a CycloneDX SBOM, then hands `dist/` to the next job.
+2. **publish**: runs in the `pypi` GitHub environment, is the only job with `id-token: write`,
+   runs no repository code, and uploads that exact `dist/` with PyPI **trusted publishing**
+   (OIDC). It also uploads PEP 740 attestations. There is no PyPI token anywhere: not in the
+   repo, not in Actions secrets, not on a laptop.
 
 ## Prerequisites (one-time)
 
-1. **Register the project name on PyPI first.** Unlike npm scoped packages, `praesidia` on PyPI
-   is a global, unscoped name — confirm it is still unclaimed
-   (`https://pypi.org/project/praesidia/` should 404) before relying on this flow; a same-named
-   package landing there between now and your first publish would block you.
-2. A **PyPI API token** scoped to the `praesidia` project (create the project first via a manual
-   `twine upload` of the very first version if PyPI requires the project to exist before a
-   project-scoped token can be minted — otherwise use an account-scoped token for the first
-   publish only, then narrow it to project-scoped and rotate).
-3. `PYPI_API_TOKEN` repository secret set on `praesidia-ai/sdk-python` (GitHub → repo → Settings →
-   Secrets and variables → Actions).
-4. PyPI 2FA is mandatory account-wide for all publishers as of PyPI's 2023+ policy — this is
-   satisfied by using an **API token** (not username/password) for the upload, which is exactly
-   what `publish.yml` does (`TWINE_USERNAME: __token__`). No interactive 2FA prompt happens in CI.
-5. Trusted Publishing (OIDC, no stored token) is a stronger alternative PyPI now supports for
-   GitHub Actions — not configured here; using a stored `PYPI_API_TOKEN` secret is fine but is a
-   candidate follow-up hardening once the project exists on PyPI (chicken-and-egg: OIDC trusted
-   publishing can only be configured for a project that already exists).
+1. **PyPI account with 2FA.** PyPI requires 2FA for every account that manages a project.
+2. **Check the name is still free.** `praesidia` is a global, unscoped name on PyPI.
+   `https://pypi.org/project/praesidia/` must still 404.
+3. **Register a pending trusted publisher** on PyPI: *Your account → Publishing → Add a new
+   pending publisher → GitHub*, with exactly these values:
 
-## What ships (verified 2026-09-11, `python -m build` + `twine check`)
+   | Field | Value |
+   | --- | --- |
+   | PyPI project name | `praesidia` |
+   | Owner | `praesidia-ai` |
+   | Repository name | `sdk-python` |
+   | Workflow name | `publish.yml` |
+   | Environment name | `pypi` |
 
-The **wheel** (`praesidia-0.5.0-py3-none-any.whl`, what `pip install praesidia` actually pulls)
-contains only `praesidia/**` (23 modules + `integrations/` subpackage + `py.typed` marker) and
-`dist-info` metadata/license — **no tests, no `.env`, no CI config, no Dockerfile, no plugins/**.
-`twine check` passes on both artifacts.
+   A pending publisher lets the first upload create the project, so you do not need a token or a
+   manual first upload. It does **not** reserve the name: if someone else registers `praesidia`
+   before your first publish, the pending publisher is void.
+4. **Create the `pypi` environment** on `praesidia-ai/sdk-python` (*Settings → Environments →
+   New environment*). Add yourself as a **required reviewer**, so a pushed tag waits for your
+   approval before anything uploads. Under *Deployment branches and tags*, allow only tags
+   matching `v*`.
+5. **Public source repo.** Attestations link the release to a public GitHub workflow run.
+   `praesidia-ai/sdk-python` was public on 2026-09-26 (the unauthenticated GitHub API returns
+   200).
 
-The **sdist** (`praesidia-0.5.0.tar.gz`, a fallback source archive, rarely what a consumer
-actually installs since the wheel is pure-Python/universal) additionally includes `tests/`,
-`.github/`, `Dockerfile`, `uv.lock`, and `plugins/hermes/` — this is normal Python-ecosystem
-practice (hatchling includes all git-tracked files by default; there is no `MANIFEST.in`
-restricting it) and contains nothing sensitive, but if you want a leaner sdist add exclude
-patterns to `[tool.hatch.build.targets.sdist]` in `pyproject.toml` before the first tag — once
-published, that version's sdist contents cannot be changed.
+## What ships (verified 2026-09-26, `python -m build` + `twine check`)
+
+The **wheel** (`praesidia-0.5.0-py3-none-any.whl`, what `pip install praesidia` pulls) has 41
+entries: `praesidia/**` (modules, `integrations/`, `py.typed`) and `praesidia-0.5.0.dist-info/`
+(`METADATA`, `WHEEL`, `RECORD`, `licenses/LICENSE`). No tests, `.env`, CI config, Dockerfile,
+examples or `plugins/`. Metadata-Version 2.4 (pinned via `hatchling==1.27.0`; Twine 6.2 rejects
+2.5). `twine check` passes on both artifacts.
+
+Published extras: `openai-agents`, `google-adk`, `microsoft-agent-framework`, `agno`,
+`langgraph`, `frameworks` (all five) and `dev`. **CrewAI is not an extra** while its ChromaDB
+advisories are open (`docs/runtime-integrations.md`, "Known optional dependency advisory
+boundary"). CI still tests the adapter through the unpublished `crewai` dependency group. To
+publish it later, move it back to `[project.optional-dependencies]` after the advisories are
+resolved or a reviewed decision accepts them.
+
+The **sdist** (`praesidia-0.5.0.tar.gz`) also carries `tests/`, `docs/`, `examples/` (except
+`examples/refund_authorization`), `plugins/hermes/`, `.github/`, `Dockerfile`, `uv.lock` and
+`scripts/`. It excludes Git metadata. Once uploaded, a version's files can never be replaced, so
+before tagging, check:
+
+```bash
+python -m build && python -m twine check dist/*
+unzip -Z1 dist/*.whl | grep -v '^praesidia/'                    # only praesidia-0.5.0.dist-info/*
+tar tzf dist/*.tar.gz | grep -E '\.venv|/Users|\.env$|/\.git/'  # must print nothing
+```
 
 ## Steps
 
 ```bash
-# 1. From a clean main, decide the version (see semver policy below; first release keeps the
-#    manifest's current version — see README/PUBLISHING rationale in this repo's ticket report).
+# 1. From a clean, up-to-date main whose pyproject.toml version is the one to release.
 git checkout main && git pull
+grep '^version' pyproject.toml         # version = "0.5.0" for the first release
 
-# 2. Bump pyproject.toml's [project].version by hand (no `npm version`-equivalent tool wired here)
-#    and commit.
-#    e.g. edit pyproject.toml: version = "0.4.2"
-git add pyproject.toml
-git commit -m "chore: bump version to 0.4.2"
+# 2. Main must be on GitHub first: the workflow rejects a tag whose commit is not on origin/main.
 git push origin main
 
-# 3. Tag the exact commit that has that version and push the tag — this is the action that is
-#    otherwise irreversible below.
-git tag v0.4.2
-git push origin v0.4.2
+# 3. Tag that commit and push the tag. This starts the release.
+git tag -a v0.5.0 -m "praesidia 0.5.0"
+git push origin v0.5.0
 
-# 4. Watch the Actions run:
-#    https://github.com/praesidia-ai/sdk-python/actions/workflows/publish.yml
-#    It re-verifies tag == pyproject.toml version, re-runs pytest with coverage, `python -m
-#    build`, `twine check dist/*`, the clean-venv install smoke on that same dist/*.whl
-#    (scripts/wheel_install_smoke.sh), then `twine upload` — an artifact that fails the repo's own
-#    gates never reaches PyPI.
+# 4. Watch https://github.com/praesidia-ai/sdk-python/actions/workflows/publish.yml
+#    When the build job is green, approve the `pypi` environment deployment. A build that fails
+#    any check never reaches the publish job.
 ```
 
-If cutting the very first release, the manifest's current version has never been tagged — tag the
-current commit as-is (no bump needed): `git tag v0.5.0 && git push origin v0.5.0`.
+For later releases, bump `[project].version` in `pyproject.toml`, `praesidia/__init__.py`'s
+`__version__`, `plugins/hermes/pyproject.toml`'s `praesidia==` pin,
+`examples/refund_authorization/requirements.txt` and `uv.lock` (`uv lock`) in one commit.
+`tests/test_release_workflow.py` fails if they disagree. Add a `CHANGELOG.md` entry, then repeat
+steps 1-4 with the new tag.
 
-## After publishing — verify it actually landed
+## After publishing: check it landed
 
 ```bash
-curl -s https://pypi.org/pypi/praesidia/json | head -c 200   # should be real JSON, not 404
-pip index versions praesidia                                  # confirm the version list
-pip install --dry-run praesidia==<version>                    # or a real venv install + import
-python -c "from praesidia import Praesidia; print('OK')"
+curl -s https://pypi.org/pypi/praesidia/json | head -c 200   # real JSON, not 404
+pip index versions praesidia
+python -m venv /tmp/p && /tmp/p/bin/pip install praesidia==0.5.0 \
+  && /tmp/p/bin/python -c "from praesidia import Praesidia; print('OK')"
 ```
 
-Also check the PyPI project page renders correctly:
-`https://pypi.org/project/praesidia/` — README, license (MIT), classifiers, and the
-`Documentation` project URL. **Note**: `pyproject.toml`'s `Documentation =
-"https://docs.praesidia.ai/sdk/python"` **does not resolve in DNS today** (verified 2026-09-11) —
-the PyPI page will show a dead link until that host is live. This is a known, tracked gap
-(`MKT-0002`), not something this publish step can fix; flag to whoever owns DNS/docs hosting
-before or right after the first publish so the link isn't dead on day one.
+On `https://pypi.org/project/praesidia/`, check that the README renders, the license shows MIT,
+the classifiers are there, the project links work, and the files show attestations
+(*Provenance*). The `Documentation` link points at the GitHub README: `docs.praesidia.ai` does not
+resolve yet, and per-release metadata cannot be changed later. Switch it back in the first release
+after `docs.praesidia.ai/sdk/python` is live.
+
+Then update every install instruction that says "after publication" (`README.md` "Installation",
+`docs/runtime-integrations.md`, `examples/refund_authorization/README.md`), and the website's
+install pages.
 
 ## If the first publish is wrong
 
-PyPI has **no unpublish/yank-then-reuse** story for the version number — once uploaded, a
-filename can never be reused, even after deletion.
+PyPI never lets a filename be reused, even after deletion.
 
-- **`pip yank`** (via the PyPI web UI: Manage project → the version → "Yank release"): the
-  version stays visible in history but is excluded from unpinned resolution (`pip install
-  praesidia` skips it; `pip install praesidia==<that version>` still works with a warning). This
-  is the correct tool for "this version is broken, don't let new installs pick it up by default."
-  Prefer this over full deletion.
-- **Full delete** (PyPI UI "Remove release"): only for genuinely accidental/secret-leaking
-  publishes. The version number is burned forever either way — you cannot re-upload
-  `praesidia==0.5.0` after deleting it. The next fix must be a new version number.
-- **Wrong metadata only** (description, classifiers, URLs): PyPI project metadata (not
-  per-release) can be edited without a new release for description/URLs configured at the project
-  level; per-release metadata (what's baked into `PKG-INFO`) requires a new version.
+- **Yank** (PyPI web UI: *Manage project → the version → Options → Yank*): the version stays in
+  the history, but unpinned installs skip it. `pip install praesidia==<that version>` still works,
+  with a warning. Use this for "this version is broken, do not let new installs pick it up".
+- **Delete** (PyPI UI "Delete release"): only for an accidental or secret-leaking publish. The
+  version number is burned either way. The fix must be a new version number.
+- **Wrong metadata only** (description, classifiers, URLs): it is baked into the release's
+  `METADATA`, so it needs a new version.
 
-## Semver policy going forward
+## Semver policy
 
-Same as `sdk`'s (kept in lockstep intentionally, see that repo's `PUBLISHING.md`): standard
-SemVer, pre-1.0 (`0.x`) breaking changes land as a **minor** bump, patch is reserved for
-backward-compatible fixes. `1.0.0` is a deliberate decision, not automatic. Every hand-written API
-call in `praesidia/*.py` is checked against a fresh `ui/swagger.json` export by the
-contract-drift gate (`.github/workflows/contract-drift.yml`, mirrored locally via
-`sdk/scripts/audit-api-contract.mjs --lang py`) before any release, published or not — see this
-repo's ticket report for the current parity verdict.
+Same as `sdk`'s (kept in lockstep on purpose; see that repo's `PUBLISHING.md`): standard SemVer.
+Before 1.0, a breaking change bumps the **minor** version, and a patch is for backward-compatible
+fixes only. `1.0.0` is a deliberate decision, not automatic. Every hand-written API call in
+`praesidia/*.py` is checked against a fresh `ui/swagger.json` export by the contract-drift gate
+(`.github/workflows/contract-drift.yml`, run locally with
+`sdk/scripts/audit-api-contract.mjs --lang py`) before any release.
 
-## Plugins (`plugins/hermes`) — out of scope here
+## Plugins (`plugins/hermes`): not published by this workflow
 
-`plugins/hermes` is a separate PyPI-shaped package (`praesidia-hermes`, its own
-`pyproject.toml`/version) exercised by `ci.yml`'s `frameworks` job but has **no publish workflow
-of its own**. Pushing a `v*` tag on this repo's root does not publish it. Publishing
-`praesidia-hermes` is a separate, unscoped follow-up.
+`plugins/hermes` is a separate package (`praesidia-hermes`, its own `pyproject.toml` and version).
+`ci.yml`'s `frameworks` job tests it, but it has **no publish workflow**. Pushing a `v*` tag on
+this repo does not publish it. Publishing `praesidia-hermes` is a separate follow-up.

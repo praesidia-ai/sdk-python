@@ -104,7 +104,7 @@ jobs:
       - name: Install locked optional frameworks and local Hermes entry point
         run: |
           pip install uv==0.5.24
-          uv sync --frozen --extra dev --extra frameworks
+          uv sync --frozen --extra dev --extra frameworks --group crewai
           uv pip install --no-deps -e ./plugins/hermes
       - name: Actual native tools, durable approval and process restarts
         run: |

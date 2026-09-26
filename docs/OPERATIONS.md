@@ -46,8 +46,8 @@ A successful local build does not publish a PyPI release (`sdk-python/README.md:
 
 ## Publishing (summary — see `PUBLISHING.md` for the actual runbook)
 
-Publishing is a **tag push**, not a local `twine upload`; `.github/workflows/publish.yml` on
-`push: tags: ['v*']` is the only place `PYPI_API_TOKEN` is used. As of this writing the package
+Publishing is a **tag push**, never a local upload. `.github/workflows/publish.yml` on
+`push: tags: ['v*']` publishes through PyPI trusted publishing (OIDC); no PyPI token exists. As of this writing the package
 has never been published — `https://pypi.org/pypi/praesidia/json` returns `404`
 (`PUBLISHING.md:3`). PyPI's project-name registration is global/unscoped (unlike npm's `@praesidia`
 scope) — `PUBLISHING.md`'s prerequisite #1 flags confirming `praesidia` is still unclaimed before
@@ -60,7 +60,6 @@ relying on this flow.
 | `pip install praesidia` fails / 404 | Package genuinely unpublished | `PUBLISHING.md:3`; build a local wheel instead |
 | A documented method is missing at runtime | Consumer has an older/lagging registry release (once one exists) vs. this checkout | `sdk-python/README.md:14-18` |
 | Contract-drift job fails | `be`'s OpenAPI spec moved without a matching SDK update | re-run `audit-api-contract.mjs --lang py` against a fresh spec |
-| `docs.praesidia.ai/sdk/python` link (in `pyproject.toml`) doesn't resolve | Known — the hostname has no DNS record as of 2026-09-12 | `docs/README.md`'s "Publishing status" section; report to `sdk-dev`, don't silently point elsewhere |
 | Integration adapter import fails | `praesidia/integrations/*` are optional; check `pyproject.toml`'s `[project.optional-dependencies]` for the extra that ships the adapter's own dependency | `pyproject.toml:33-` |
 
 ## Verification limits

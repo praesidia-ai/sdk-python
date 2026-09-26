@@ -3859,9 +3859,6 @@ dependencies = [
 agno = [
     { name = "agno", marker = "python_full_version >= '3.10'" },
 ]
-crewai = [
-    { name = "crewai", marker = "python_full_version >= '3.10' and python_full_version < '3.14'" },
-]
 dev = [
     { name = "coverage", version = "7.10.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "coverage", version = "7.15.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
@@ -3873,7 +3870,6 @@ dev = [
 frameworks = [
     { name = "agent-framework-core", marker = "python_full_version >= '3.10'" },
     { name = "agno", marker = "python_full_version >= '3.10'" },
-    { name = "crewai", marker = "python_full_version >= '3.10' and python_full_version < '3.14'" },
     { name = "google-adk", marker = "python_full_version >= '3.10'" },
     { name = "langgraph", marker = "python_full_version >= '3.10'" },
     { name = "langgraph-checkpoint-sqlite", marker = "python_full_version >= '3.10'" },
@@ -3893,6 +3889,11 @@ openai-agents = [
     { name = "openai-agents", marker = "python_full_version >= '3.10'" },
 ]
 
+[package.dev-dependencies]
+crewai = [
+    { name = "crewai", marker = "python_full_version >= '3.10' and python_full_version < '3.14'" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "agent-framework-core", marker = "python_full_version >= '3.10' and extra == 'frameworks'", specifier = "==1.17.0" },
@@ -3900,8 +3901,6 @@ requires-dist = [
     { name = "agno", marker = "python_full_version >= '3.10' and extra == 'agno'", specifier = "==3.0.6" },
     { name = "agno", marker = "python_full_version >= '3.10' and extra == 'frameworks'", specifier = "==3.0.6" },
     { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.6.0,<8" },
-    { name = "crewai", marker = "python_full_version >= '3.10' and python_full_version < '3.14' and extra == 'crewai'", specifier = "==1.15.20" },
-    { name = "crewai", marker = "python_full_version >= '3.10' and python_full_version < '3.14' and extra == 'frameworks'", specifier = "==1.15.20" },
     { name = "google-adk", marker = "python_full_version >= '3.10' and extra == 'frameworks'", specifier = "==2.8.0" },
     { name = "google-adk", marker = "python_full_version >= '3.10' and extra == 'google-adk'", specifier = "==2.8.0" },
     { name = "httpx", specifier = ">=0.27.0,<1" },
@@ -3915,6 +3914,9 @@ requires-dist = [
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.14.0" },
     { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21.0" },
 ]
+
+[package.metadata.requires-dev]
+crewai = [{ name = "crewai", marker = "python_full_version >= '3.10' and python_full_version < '3.14'", specifier = "==1.15.20" }]
 
 [[package]]
 name = "prompt-toolkit"

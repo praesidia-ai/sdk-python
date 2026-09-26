@@ -18,6 +18,7 @@ keywords = ["praesidia", "ai-governance", "guardrails", "audit", "llm", "agent"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
@@ -27,18 +28,18 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
 
 [project.optional-dependencies]
 langgraph = ["langgraph>=1.0,<2; python_version >= '3.10'", "langgraph-checkpoint-sqlite>=3,<4; python_version >= '3.10'"]
-crewai = ["crewai==1.15.20; python_version >= '3.10' and python_version < '3.14'"]
 openai-agents = ["openai-agents==0.20.0; python_version >= '3.10'"]
 google-adk = ["google-adk==2.8.0; python_version >= '3.10'"]
 microsoft-agent-framework = ["agent-framework-core==1.17.0; python_version >= '3.10'"]
 agno = ["agno==3.0.6; python_version >= '3.10'"]
 frameworks = [
-    "crewai==1.15.20; python_version >= '3.10' and python_version < '3.14'",
     "openai-agents==0.20.0; python_version >= '3.10'",
     "google-adk==2.8.0; python_version >= '3.10'",
     "agent-framework-core==1.17.0; python_version >= '3.10'",
@@ -53,11 +54,19 @@ dev = [
     "respx>=0.21.0",   # httpx request mocking
 ]
 
+# INTEG-0110 — CrewAI 1.15.20 pulls ChromaDB 1.1.1 with four open advisories
+# (docs/runtime-integrations.md). Until that is resolved it is a dependency
+# group, not an extra: CI still installs and tests it (`--group crewai`), but
+# the published metadata offers no `praesidia[crewai]` to install.
+[dependency-groups]
+crewai = ["crewai==1.15.20; python_version >= '3.10' and python_version < '3.14'"]
+
 [project.urls]
 Homepage = "https://praesidia.ai"
-Documentation = "https://docs.praesidia.ai/sdk/python"
+Documentation = "https://github.com/praesidia-ai/sdk-python#readme"
 Repository = "https://github.com/praesidia-ai/sdk-python"
 "Bug Tracker" = "https://github.com/praesidia-ai/sdk-python/issues"
+Changelog = "https://github.com/praesidia-ai/sdk-python/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["praesidia"]

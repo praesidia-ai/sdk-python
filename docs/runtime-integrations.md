@@ -7,9 +7,12 @@ This is not universal interception of a framework, agent, provider or MCP server
 
 Install the reviewed local 0.5.0 wheel with one optional extra, for example
 `pip install 'praesidia[google-adk]==0.5.0'` after that version is published, or
-`pip install -e '.[google-adk]'` from this checkout now. All six tested extras can
-coexist in Python 3.11 using `.[frameworks]`; CrewAI's selected release does not
-support Python 3.14. Base management SDK support remains Python 3.9+.
+`pip install -e '.[google-adk]'` from this checkout now. The five published
+framework extras can coexist in Python 3.11 using `.[frameworks]`. CrewAI is not a
+published extra while its [dependency advisories](#known-optional-dependency-advisory-boundary-2026-09-06)
+are open; from a checkout, `uv sync --extra frameworks --group crewai` adds it for
+testing. CrewAI's selected release does not support Python 3.14. Base management
+SDK support remains Python 3.9+.
 
 | Runtime | Tested package | Actual tool/context seam | Persisted identity/state |
 | --- | --- | --- | --- |
@@ -160,7 +163,7 @@ in repository branch protection; a base-only success is insufficient.
 To reproduce native checks locally in an isolated Python3.11 environment:
 
 ```bash
-uv sync --frozen --extra dev --extra frameworks
+uv sync --frozen --extra dev --extra frameworks --group crewai
 uv pip install --no-deps -e ./plugins/hermes
 # Obtain the pinned Hermes checkout documented above, outside this package.
 PRAESIDIA_HERMES_SOURCE=/path/to/pinned/hermes \
@@ -194,6 +197,6 @@ concerns Chroma's server authorization provider. This adapter's tested profile
 uses a BaseTool/Flow, never starts a Chroma server or enables Chroma-backed memory,
 and dispatches only through Praesidia. That narrows tested execution scope; it
 is not a remediation for applications that separately enable affected Chroma
-features. Production adoption of the CrewAI extra needs an explicit upstream
+features. Publishing CrewAI as an extra, or adopting it in production, needs an explicit upstream
 resolution or separately reviewed deployment decision. Other native adapters
 remain independently installable and testable without selecting CrewAI.

@@ -71,7 +71,6 @@ OpenAPI spec by the **same** scanner the TypeScript SDK uses
 
 ## PyPI packaging note
 
-`pyproject.toml:58` sets `Documentation = "https://docs.praesidia.ai/sdk/python"` — that hostname
-does not currently resolve (checked live 2026-09-12, `docs/README.md`'s "Publishing status"
-section). This affects the PyPI project page's metadata once published, not this SDK's runtime
-behavior.
+`pyproject.toml`'s `Documentation` URL points at the GitHub README, because
+`docs.praesidia.ai` does not resolve yet (`docs/README.md`, "Publishing status"). It is PyPI
+page metadata only, not runtime behavior.

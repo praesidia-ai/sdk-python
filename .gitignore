@@ -9,8 +9,8 @@ sbom.cdx.json
 wheels/
 
 # virtualenvs
-.venv/
-venv/
+.venv
+venv
 env/
 
 # test / coverage caches
