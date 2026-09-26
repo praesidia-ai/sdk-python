@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Fixed
+- **Behaviour change (SDK-0349, security):** `Guard` no longer degrades to local rules on a
+  caller-triggerable 4xx. Only an outage (transport error, timeout, 408, 5xx, malformed 2xx)
+  follows `failure_mode`; any other 4xx including 429 now raises in `local_rules` and `fail_open`
+  too, from `check_input`/`check_output`/`guard_*`/`run`/`protect` and `log_task`. Previously an
+  end user could send >100 000 characters (400) or trip the 20/min throttle (429) and have the
+  org's guardrails silently skipped. New: `MAX_GUARD_CONTENT_LENGTH` and
+  `GuardContentTooLargeError`, raised locally before sending oversized content.
 - **Behaviour change (SDK-0339):** an `http:` `base_url` / `PRAESIDIA_BASE_URL` to a non-loopback
   host now raises `PraesidiaConfigError` instead of sending the API key in cleartext. Loopback
   (`localhost`, `127.0.0.0/8`, `::1`) is unaffected. Opt back in with the new keyword

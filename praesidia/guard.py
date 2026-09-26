@@ -36,7 +36,7 @@ from typing import Any, Callable, Literal, Optional, TypeVar, Union
 
 from ._http import CHAIN_ID_HEADER, HttpClient
 from ._retry import RetryConfig
-from .exceptions import GuardrailBlockedError, PraesidiaConfigError
+from .exceptions import GuardContentTooLargeError, GuardrailBlockedError, PraesidiaConfigError, PraesidiaError
 from .local_rules import run_local_rules
 
 _LOGGER = logging.getLogger("praesidia.guard")
@@ -55,6 +55,18 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 #: SDK-0336 (parity with TS SDK-0335) -- behaviour when the control plane is unreachable.
 FailureMode = Literal["fail_closed", "local_rules", "fail_open"]
 _FAILURE_MODES = ("fail_closed", "local_rules", "fail_open")
+
+#: SDK-0349 (parity with TS SDK-0348) -- server cap on ``guardrails/validate``
+#: content in code points (``@MaxLength(100000)`` on ValidateContentDto).
+MAX_GUARD_CONTENT_LENGTH = 100_000
+
+
+def _may_degrade(err: BaseException) -> bool:
+    """Only an outage (transport error, timeout, 408, 5xx, malformed 2xx) may degrade; any other 4xx incl. 429 raises."""
+    if isinstance(err, PraesidiaConfigError):
+        return False
+    status = err.status_code if isinstance(err, PraesidiaError) else None
+    return status is None or status < 400 or status >= 500 or status == 408
 
 
 def _now_ms() -> int:
@@ -188,7 +200,10 @@ class Guard:
         before the wrapped call runs.
       - Output blocks are returned for inspection by default; ``strict=True``
         (or ``guard_output(..., throw_on_block=True)``) raises instead.
-      - Network errors talking to Praesidia follow ``failure_mode`` (SDK-0336):
+      - Outages (network error, timeout, 408, 5xx) follow ``failure_mode`` (SDK-0336);
+        any other 4xx, including 429, always raises, and content over
+        ``MAX_GUARD_CONTENT_LENGTH`` code points raises
+        :class:`~praesidia.exceptions.GuardContentTooLargeError` (SDK-0349):
         ``local_rules`` (default) serves local rules + a ``praesidia.guard``
         warning, ``fail_open`` serves local rules silently, ``fail_closed``
         re-raises. Legacy mapping when unset: ``fail_open=True`` ->
@@ -345,6 +360,8 @@ class Guard:
     ) -> dict[str, Any]:
         if self._http is None:
             return run_local_rules(content)
+        if len(content) > MAX_GUARD_CONTENT_LENGTH:
+            raise GuardContentTooLargeError(len(content), MAX_GUARD_CONTENT_LENGTH)
 
         headers = {CHAIN_ID_HEADER: chain_id} if chain_id else None
         try:
@@ -358,7 +375,7 @@ class Guard:
                 },
                 headers=headers,
             )
-        except Exception as err:  # noqa: BLE001 -- must degrade on ANY transport/HTTP failure
+        except Exception as err:  # noqa: BLE001 -- _handle_network_error re-raises a non-outage
             self._handle_network_error(err, "guardrails/validate")
             return {**run_local_rules(content), "degraded": True}
 
@@ -373,6 +390,10 @@ class Guard:
 
     def _handle_network_error(self, err: BaseException, operation: str) -> None:
         """Apply ``failure_mode`` + ``max_degraded_ms`` to a control-plane error: swallow or re-raise."""
+        # SDK-0349 -- a caller-triggerable 4xx (400 oversized, 401/403, 429 on a
+        # shared egress IP) must never switch the org's guardrails off.
+        if not _may_degrade(err):
+            raise err
         now = _now_ms()
         if self._degraded_since is None:
             self._degraded_since = now

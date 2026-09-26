@@ -121,6 +121,23 @@ class GuardrailBlockedError(PraesidiaError):
         self.triggered = triggered
 
 
+class GuardContentTooLargeError(PraesidiaError):
+    """
+    SDK-0349 -- raised by ``Guard.check_input``/``check_output``/``run`` before
+    any request when content exceeds ``MAX_GUARD_CONTENT_LENGTH`` code points.
+    Never degraded to local rules: oversized content is caller-controlled, not
+    an outage. Mirrors the TS SDK's ``GuardContentTooLargeError``.
+    """
+
+    def __init__(self, length: int, max_length: int) -> None:
+        super().__init__(
+            f"Guard content is {length} code points; the maximum is {max_length}",
+            code="CONTENT_TOO_LARGE",
+        )
+        self.length = length
+        self.max_length = max_length
+
+
 class PraesidiaConfigError(PraesidiaError):
     """
     TOP-0008 — raised when ``Guard`` is used without a valid configuration

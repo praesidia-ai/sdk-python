@@ -49,7 +49,7 @@ from .audit import AuditBundle
 from .client import Praesidia
 # SDK-0313 — tag gateway calls with an MCP server id (GW-0776).
 from .gateway import MCP_SERVER_ID_HEADER, gateway_headers
-from .guard import Guard, TaskHandle
+from .guard import MAX_GUARD_CONTENT_LENGTH, Guard, TaskHandle
 from .identity import IdentityClient, IdentityError
 from .local_rules import run_local_rules
 # SDK-0301 — advisory in-runtime interaction hooks (parity with the TS SDK's SDK-0300).
@@ -68,6 +68,7 @@ from .interaction_hooks import (
 from .exceptions import (
     AuthError,
     ForbiddenError,
+    GuardContentTooLargeError,
     GuardrailBlockedError,
     InteractionDecisionUnavailableError,
     InteractionDeniedError,
@@ -112,6 +113,8 @@ __all__ = [
     "Guard",
     "TaskHandle",
     "GuardrailBlockedError",
+    "GuardContentTooLargeError",
+    "MAX_GUARD_CONTENT_LENGTH",
     "PraesidiaConfigError",
     "run_local_rules",
     # H3-02f — standalone offline trust-passport verification (no account needed)

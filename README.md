@@ -285,8 +285,14 @@ guard = Guard(
 
 #### Control-plane failure mode (SDK-0336, parity with TS SDK-0335)
 
-A "network error" here is any error from `guardrails/validate` (and `log_task`): unreachable host,
-timeout or non-2xx response.
+A "control-plane error" here is an outage of `guardrails/validate` (and `log_task`): unreachable
+host, timeout, a 408 or 5xx response, or a malformed 2xx. Any other 4xx, **including 429**, raises
+the typed error (`AuthError`, `ForbiddenError`, `RateLimitError`, `PraesidiaError`) in every mode
+(SDK-0349, parity with TS SDK-0348): a 400 for oversized content or a 429 from a shared egress IP is
+caller-triggerable, so it must never switch the org's guardrails off. Content longer than
+`MAX_GUARD_CONTENT_LENGTH` (100 000 code points, the server's cap) raises
+`GuardContentTooLargeError` (`code="CONTENT_TOO_LARGE"`, `.length`, `.max_length`) before any
+request; offline mode is not capped.
 
 | `failure_mode` | On a control-plane error | Legacy flags that map to it (when `failure_mode` is unset) |
 |---|---|---|
