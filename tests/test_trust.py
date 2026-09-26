@@ -939,3 +939,97 @@ def test_praesidia_trust_is_additive_and_validates_its_config():
     # The authenticated client still requires a real credential.
     with pytest.raises(ValueError, match="api_key"):
         Praesidia(api_key=None, org_id=ORG_ID, base_url=BASE_URL)  # type: ignore[arg-type]
+
+
+
+# ── SDK-0351 (F2-02): passport subject binding — TS twin SDK-0350 ─────────────
+# A genuine same-org passport for a DIFFERENT subject must not verify for the id
+# the caller asked about, even under a pinned key.
+
+SUBJECT_UUID = "0f8e2c1a-5b3d-4e6f-9a7b-1c2d3e4f5a6b"
+# AI_SYSTEM_UNSIGNED with subject id ``did:web:praesidia.ai:ai-systems:<SUBJECT_UUID>``,
+# Ed25519-signed by node:crypto over the SDK canonical_json.
+UUID_SUBJECT_JWK = {
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "x": "k1DC7INpbSGS9skj8NbluiVN81XULunAFheOVTLtt2I",
+}
+UUID_SUBJECT_PROOF_VALUE = (
+    "i1yltgTrM5sgtcPqKS/F98FNaeHYFbQMvkSveBhRMq3as+nt0dWCYZSJPGOlpvFD8K9RfkFM0cZOB0BvCTqDCQ=="
+)
+
+
+def _serve(url, passport, public_key_jwk):
+    respx.get(url).mock(
+        return_value=httpx.Response(
+            200, json={"passport": passport, "publicKeyJwk": public_key_jwk}
+        )
+    )
+    return PraesidiaTrust(base_url=BASE_URL)
+
+
+@respx.mock
+def test_fetch_and_verify_rejects_agent_1_passport_served_for_agent_2_under_trusted_key():
+    trust = _serve(f"{BASE_URL}/trust/passport/agent-2/verify", PASSPORT, PUBLIC_KEY_JWK)
+    result = trust.fetch_and_verify("agent-2", trusted_keys=[PUBLIC_KEY_JWK])
+    assert result["verified"] is False
+    assert result["signatureValid"] is True
+    assert result["reason"] == "subject_mismatch"
+
+
+@respx.mock
+def test_fetch_and_verify_reports_subject_mismatch_not_unpinned_key_without_anchor():
+    trust = _serve(f"{BASE_URL}/trust/passport/agent-2/verify", PASSPORT, PUBLIC_KEY_JWK)
+    result = trust.fetch_and_verify("agent-2")
+    assert result["verified"] is False
+    assert result["reason"] == "subject_mismatch"
+
+
+@respx.mock
+def test_fetch_and_verify_ai_system_rejects_sys_1_passport_served_for_sys_2():
+    passport, jwk = _signed_ai_system("Ed25519")
+    trust = _serve(f"{AI_SYSTEM_ROUTE}/sys-2/verify", passport, jwk)
+    result = trust.fetch_and_verify_ai_system("sys-2", trusted_keys=[jwk])
+    assert result["verified"] is False
+    assert result["signatureValid"] is True
+    assert result["reason"] == "subject_mismatch"
+
+
+@respx.mock
+def test_fetch_and_verify_ai_system_matches_uppercase_uuid_request_to_lowercase_subject():
+    passport = copy.deepcopy(AI_SYSTEM_UNSIGNED)
+    passport["credentialSubject"]["id"] = f"did:web:praesidia.ai:ai-systems:{SUBJECT_UUID}"
+    passport["proof"] = {
+        "type": "Ed25519Signature2020",
+        "created": passport["issuanceDate"],
+        "proofPurpose": "assertionMethod",
+        "verificationMethod": f"{passport['issuer']}#key-2",
+        "keyVersion": 2,
+        "proofValue": UUID_SUBJECT_PROOF_VALUE,
+    }
+    upper = SUBJECT_UUID.upper()
+    trust = _serve(f"{AI_SYSTEM_ROUTE}/{upper}/verify", passport, UUID_SUBJECT_JWK)
+    result = trust.fetch_and_verify_ai_system(upper, trusted_keys=[UUID_SUBJECT_JWK])
+    assert result["verified"] is True
+    assert result["reason"] == "ok"
+
+
+def test_verify_passport_binds_to_expected_subject_and_empty_string_fails_closed():
+    ok = {"verified": True, "signatureValid": True, "expired": False, "reason": "ok"}
+    trust = PraesidiaTrust(base_url=BASE_URL)
+    for verify in (verify_passport, trust.verify_passport):
+        assert verify(PASSPORT, PUBLIC_KEY_JWK, "did:web:praesidia.ai:agents:agent-1") == ok
+        for expected in ("did:web:praesidia.ai:agents:agent-2", ""):
+            assert verify(PASSPORT, PUBLIC_KEY_JWK, expected) == {
+                "verified": False,
+                "signatureValid": True,
+                "expired": False,
+                "reason": "subject_mismatch",
+            }
+        # Omitted -> no binding (offline callers keep today's behaviour).
+        assert verify(PASSPORT, PUBLIC_KEY_JWK)["reason"] == "ok"
+    passport, jwk = _signed_ai_system("Ed25519")
+    for verify in (verify_ai_system_passport, trust.verify_ai_system_passport):
+        assert verify(passport, jwk, "did:web:praesidia.ai:ai-systems:sys-2")["reason"] == (
+            "subject_mismatch"
+        )

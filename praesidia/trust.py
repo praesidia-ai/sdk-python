@@ -51,6 +51,7 @@ _CANONICAL_INSTANT_RE = re.compile(
 def verify_passport(
     passport: dict[str, Any],
     public_key_jwk: dict[str, Any],
+    expected_subject: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     OFFLINE-verify a passport's detached Ed25519/ES256 proof against a JWK.
@@ -62,6 +63,13 @@ def verify_passport(
 
     Pure local computation against the supplied trust anchor. Never raises; a
     malformed passport / key yields ``{"verified": False, "reason": ...}``.
+
+    ``expected_subject`` (SDK-0351) — the DID the passport must be about, e.g.
+    ``did:web:praesidia.ai:agents:<agent_id>``. When given, a validly signed
+    passport whose ``credentialSubject.id`` differs (compared case-insensitively;
+    the ids are UUIDs) is ``verified: False, reason="subject_mismatch"`` with
+    ``signatureValid: True``. An empty string never matches. ``None`` → no
+    subject binding.
 
     Returns a dict::
 
@@ -76,15 +84,19 @@ def verify_passport(
                     | "malformed-passport" | "expired"
                     # trust-anchor outcomes from fetch_and_verify (MCPSDK-04):
                     | "unpinned_key" | "untrusted_key"
-                    | "fingerprint_mismatch",
+                    | "fingerprint_mismatch"
+                    | "subject_mismatch",
         }
     """
-    return _verify_credential(passport, public_key_jwk, _passport_envelope_well_formed)
+    return _verify_credential(
+        passport, public_key_jwk, _passport_envelope_well_formed, expected_subject
+    )
 
 
 def verify_ai_system_passport(
     passport: dict[str, Any],
     public_key_jwk: dict[str, Any],
+    expected_subject: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     OFFLINE-verify an AI System passport (BE-0540) against a JWK.
@@ -94,11 +106,15 @@ def verify_ai_system_passport(
     check differs — ``type`` must include ``AiSystemTrustPassport`` and the AI
     System credential subject must match be's contract. An agent passport is
     ``malformed-passport`` here, and an AI System passport is
-    ``malformed-passport`` in :func:`verify_passport`. Never raises; returns the
-    same result dict as :func:`verify_passport`.
+    ``malformed-passport`` in :func:`verify_passport`. ``expected_subject`` as in
+    :func:`verify_passport` (``did:web:praesidia.ai:ai-systems:<ai_system_id>``).
+    Never raises; returns the same result dict as :func:`verify_passport`.
     """
     return _verify_credential(
-        passport, public_key_jwk, _ai_system_passport_envelope_well_formed
+        passport,
+        public_key_jwk,
+        _ai_system_passport_envelope_well_formed,
+        expected_subject,
     )
 
 
@@ -106,10 +122,11 @@ def _verify_credential(
     passport: dict[str, Any],
     public_key_jwk: dict[str, Any],
     envelope_well_formed: Callable[[dict[str, Any]], bool],
+    expected_subject: Optional[str] = None,
 ) -> dict[str, Any]:
     try:
         return _verify_passport_unchecked(
-            passport, public_key_jwk, envelope_well_formed
+            passport, public_key_jwk, envelope_well_formed, expected_subject
         )
     except Exception:
         return _result(False, False, False, "malformed-passport")
@@ -119,6 +136,7 @@ def _verify_passport_unchecked(
     passport: dict[str, Any],
     public_key_jwk: dict[str, Any],
     envelope_well_formed: Callable[[dict[str, Any]], bool],
+    expected_subject: Optional[str] = None,
 ) -> dict[str, Any]:
     proof = passport.get("proof") if isinstance(passport, dict) else None
     if not isinstance(proof, dict) or not isinstance(
@@ -175,6 +193,12 @@ def _verify_passport_unchecked(
 
     if not signature_valid:
         return _result(False, False, expired, "signature-mismatch")
+    # Genuine signature, wrong subject: a substituted same-org passport.
+    if (
+        expected_subject is not None
+        and passport["credentialSubject"]["id"].lower() != expected_subject.lower()
+    ):
+        return _result(False, True, expired, "subject_mismatch")
     if expiration == "invalid":
         return _result(False, True, False, "invalid-expiration")
     if expired:
@@ -494,9 +518,10 @@ class TrustResource:
         self,
         passport: dict[str, Any],
         public_key_jwk: dict[str, Any],
+        expected_subject: Optional[str] = None,
     ) -> dict[str, Any]:
         """Offline-verify a passport (delegates to :func:`verify_passport`)."""
-        return verify_passport(passport, public_key_jwk)
+        return verify_passport(passport, public_key_jwk, expected_subject)
 
     def fetch_and_verify(
         self,
@@ -534,13 +559,19 @@ class TrustResource:
         substituted one — but the result is ``verified: False`` with
         ``reason="unpinned_key"``: an integrity check against an unauthenticated
         key is not an assurance and must not read like one.
+
+        The passport is also bound to ``agent_id`` (SDK-0351): its
+        ``credentialSubject.id`` must be ``did:web:praesidia.ai:agents:<agent_id>``
+        (case-insensitive), else ``verified: False, reason="subject_mismatch"``.
         """
         bundle = self.fetch_verify_bundle(agent_id)
+        subject = f"did:web:praesidia.ai:agents:{agent_id}"
         result = _verify_against_anchor(
             bundle["passport"],
             bundle["publicKeyJwk"],
             trusted_keys=trusted_keys,
             expected_fingerprint=expected_fingerprint,
+            verify=lambda passport, jwk: verify_passport(passport, jwk, subject),
         )
         result["passport"] = bundle["passport"]
         result["publicKeyJwk"] = bundle["publicKeyJwk"]
@@ -551,9 +582,10 @@ class TrustResource:
         self,
         passport: dict[str, Any],
         public_key_jwk: dict[str, Any],
+        expected_subject: Optional[str] = None,
     ) -> dict[str, Any]:
         """Offline-verify an AI System passport (delegates to :func:`verify_ai_system_passport`)."""
-        return verify_ai_system_passport(passport, public_key_jwk)
+        return verify_ai_system_passport(passport, public_key_jwk, expected_subject)
 
     def fetch_and_verify_ai_system(
         self,
@@ -571,16 +603,18 @@ class TrustResource:
         (MCPSDK-04) — no anchor → ``verified: False, reason="unpinned_key"``;
         ``trusted_keys`` without the signing key → ``"untrusted_key"``;
         ``expected_fingerprint`` differing from the served key →
-        ``"fingerprint_mismatch"``. Returns the result with ``passport`` and
-        ``publicKeyJwk`` merged in.
+        ``"fingerprint_mismatch"``; subject not
+        ``did:web:praesidia.ai:ai-systems:<ai_system_id>`` → ``"subject_mismatch"``.
+        Returns the result with ``passport`` and ``publicKeyJwk`` merged in.
         """
         bundle = self.fetch_ai_system_verify_bundle(ai_system_id)
+        subject = f"did:web:praesidia.ai:ai-systems:{ai_system_id}"
         result = _verify_against_anchor(
             bundle["passport"],
             bundle["publicKeyJwk"],
             trusted_keys=trusted_keys,
             expected_fingerprint=expected_fingerprint,
-            verify=verify_ai_system_passport,
+            verify=lambda passport, jwk: verify_ai_system_passport(passport, jwk, subject),
         )
         result["passport"] = bundle["passport"]
         result["publicKeyJwk"] = bundle["publicKeyJwk"]

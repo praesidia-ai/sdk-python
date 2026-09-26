@@ -570,11 +570,16 @@ jwk_thumbprint(issuer_jwk)  # base64url; jwk_thumbprint_hex() for hex
 
 # Or verify a passport handed to you out-of-band — no client / account needed:
 from praesidia import verify_passport
-result = verify_passport(passport, my_trusted_jwk)
+result = verify_passport(
+    passport,
+    my_trusted_jwk,
+    f"did:web:praesidia.ai:agents:{peer_agent_id}",  # optional expected_subject
+)
 # result["reason"] ∈ ok | missing-proof | malformed-public-key
 #                    | malformed-passport | signature-mismatch
 #                    | invalid-expiration | expired
 #                    | unpinned_key | untrusted_key | fingerprint_mismatch
+#                    | subject_mismatch
 ```
 
 | `fetch_and_verify` anchor | Outcome |
@@ -584,6 +589,14 @@ result = verify_passport(passport, my_trusted_jwk)
 | `trusted_keys` without the signing key | `verified: False`, `reason: "untrusted_key"` |
 | `expected_fingerprint` matches the served key | verified normally against that key |
 | `expected_fingerprint` differs | `verified: False`, `reason: "fingerprint_mismatch"` |
+| any anchor, passport is for another subject | `verified: False`, `reason: "subject_mismatch"`, `signatureValid: True` |
+
+`fetch_and_verify(agent_id)` / `fetch_and_verify_ai_system(ai_system_id)` bind the
+passport to the id you asked for: `credentialSubject.id` must equal
+`did:web:praesidia.ai:agents:<agent_id>` / `did:web:praesidia.ai:ai-systems:<ai_system_id>`
+(case-insensitive — the ids are UUIDs). A genuine passport for a different agent of
+the same org therefore does not verify, even under a pinned key. `verify_passport` /
+`verify_ai_system_passport` apply the same check when you pass `expected_subject`.
 
 A human-readable PDF of an **AI System's** signed passport (signature
 fingerprint + verification URL printed on it) is a public download too:

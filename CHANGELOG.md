@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Fixed
+- **Behaviour change (SDK-0351, security):** `fetch_and_verify(agent_id)` and
+  `fetch_and_verify_ai_system(ai_system_id)` now bind the passport to the requested id.
+  Previously a genuine same-org passport for a different agent verified, even under
+  pinned keys. A `credentialSubject.id` other than `did:web:praesidia.ai:agents:<agent_id>` /
+  `did:web:praesidia.ai:ai-systems:<ai_system_id>` (case-insensitive) now returns
+  `verified: False, signatureValid: True, reason: "subject_mismatch"`. `verify_passport` and
+  `verify_ai_system_passport` (module functions and `client.trust` methods) take a new optional
+  `expected_subject` that applies the same check. TS parity: `@praesidia/sdk` SDK-0350.
 - **Behaviour change (SDK-0349, security):** `Guard` no longer degrades to local rules on a
   caller-triggerable 4xx. Only an outage (transport error, timeout, 408, 5xx, malformed 2xx)
   follows `failure_mode`; any other 4xx including 429 now raises in `local_rules` and `fail_open`
