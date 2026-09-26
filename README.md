@@ -893,20 +893,22 @@ JSON `null` result, Python cannot tell it from "not given"). A second report, or
 approval that was not consumed, is refused with a single `PraesidiaError` (`status_code`
 409); it is not retried. The async hooks return an awaitable.
 
-**Fail mode.** An outage is a network error, a timeout, a 408 / 429 / 5xx, or a malformed
+**Fail mode.** An outage is a network error, a timeout, a 408 / 5xx, or a malformed
 response. `timeout` (seconds, default 30) is httpx's: it bounds the connect, the request write,
 the wait for a pooled connection and each read of the response separately, not the whole
 request, so a hook can wait longer than `timeout` before its fail mode applies. A fail-closed
 hook then raises `InteractionDecisionUnavailableError` (the outage is its
 `__cause__`); a fail-open hook returns `InteractionHookResult(decision=None, fail_open_error=err)`.
-Any other 4xx (bad key, unknown agent, feature not enabled) always raises the typed
-`PraesidiaError` (`AuthError`, `ForbiddenError`, ...), on every hook. The defaults fail closed
+Any other 4xx (bad key, unknown agent, feature not enabled, and 429) always raises the typed
+`PraesidiaError` (`AuthError`, `ForbiddenError`, `RateLimitError`, ...), on every hook (SDK-0353,
+parity with TS SDK-0352): an end user can cause a 429 from a shared egress IP, so it must never
+open a fail-open hook; `Guard` uses the same predicate. The defaults fail closed
 where a skipped check can do irreversible local damage with no other Praesidia control in the
 path (shell / code execution, filesystem writes), and fail open for read-only and lower-impact
 checks so a Praesidia outage does not stop every agent. Override per class with
 `fail_mode={"tool_call" | "exec" | "fs_read" | "fs_write" | "browser": "open" | "closed"}`. An
 outage while waiting for an approval never turns into an allow: the hook keeps waiting, then
-times out.
+times out; a 429 or other 4xx while waiting raises.
 
 **Cache.** A verdict is reused for its `ttlSeconds` for the identical request, in memory, per
 hooks instance (at most 1000 entries). be sends 30, or 0 (never reused) when the answer came

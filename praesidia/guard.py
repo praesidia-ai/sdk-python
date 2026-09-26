@@ -36,7 +36,7 @@ from typing import Any, Callable, Literal, Optional, TypeVar, Union
 
 from ._http import CHAIN_ID_HEADER, HttpClient
 from ._retry import RetryConfig
-from .exceptions import GuardContentTooLargeError, GuardrailBlockedError, PraesidiaConfigError, PraesidiaError
+from .exceptions import GuardContentTooLargeError, GuardrailBlockedError, PraesidiaConfigError, _is_outage
 from .local_rules import run_local_rules
 
 _LOGGER = logging.getLogger("praesidia.guard")
@@ -59,14 +59,6 @@ _FAILURE_MODES = ("fail_closed", "local_rules", "fail_open")
 #: SDK-0349 (parity with TS SDK-0348) -- server cap on ``guardrails/validate``
 #: content in code points (``@MaxLength(100000)`` on ValidateContentDto).
 MAX_GUARD_CONTENT_LENGTH = 100_000
-
-
-def _may_degrade(err: BaseException) -> bool:
-    """Only an outage (transport error, timeout, 408, 5xx, malformed 2xx) may degrade; any other 4xx incl. 429 raises."""
-    if isinstance(err, PraesidiaConfigError):
-        return False
-    status = err.status_code if isinstance(err, PraesidiaError) else None
-    return status is None or status < 400 or status >= 500 or status == 408
 
 
 def _now_ms() -> int:
@@ -392,7 +384,7 @@ class Guard:
         """Apply ``failure_mode`` + ``max_degraded_ms`` to a control-plane error: swallow or re-raise."""
         # SDK-0349 -- a caller-triggerable 4xx (400 oversized, 401/403, 429 on a
         # shared egress IP) must never switch the org's guardrails off.
-        if not _may_degrade(err):
+        if not _is_outage(err):
             raise err
         now = _now_ms()
         if self._degraded_since is None:

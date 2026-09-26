@@ -238,7 +238,7 @@ class InteractionDeniedError(PraesidiaError):
 class InteractionDecisionUnavailableError(PraesidiaError):
     """
     SDK-0301 — raised by a fail-closed interaction hook when no decision could be
-    obtained (network error, timeout, 408/429/5xx, or a malformed response).
+    obtained (network error, timeout, 408/5xx, or a malformed response).
     ``__cause__`` is the underlying error. A fail-open hook returns instead.
     """
 
@@ -248,3 +248,15 @@ class InteractionDecisionUnavailableError(PraesidiaError):
         )
         self.interaction_type = interaction_type
         self.action_name = action_name
+
+
+def _is_outage(err: BaseException) -> bool:
+    """
+    The one degrade predicate (SDK-0349, SDK-0353; TS ``isOutage``): true only for a
+    real outage -- transport/timeout, 408, 5xx, or a malformed 2xx. Every other 4xx,
+    including a 429 an end user can trigger from a shared egress IP, is false and must raise.
+    """
+    if isinstance(err, PraesidiaConfigError):
+        return False
+    status = err.status_code if isinstance(err, PraesidiaError) else None
+    return status is None or status < 400 or status >= 500 or status == 408

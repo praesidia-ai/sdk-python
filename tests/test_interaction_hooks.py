@@ -32,6 +32,7 @@ from praesidia import (
     PraesidiaConfigError,
     PraesidiaError,
     PraesidiaInteractionHooks,
+    RateLimitError,
     interaction_hooks,
 )
 
@@ -197,9 +198,9 @@ def test_defaults_fail_closed_for_exec_and_fs_writes_only():
 @both
 @pytest.mark.parametrize(
     "outcome",
-    [503, 429, 408, {"verdict": "maybe"}, {**PENDING, "approvalId": None}, {**ALLOW, "ttlSeconds": 1.5},
+    [503, 408, {"verdict": "maybe"}, {**PENDING, "approvalId": None}, {**ALLOW, "ttlSeconds": 1.5},
      httpx.ReadTimeout("slow")],
-    ids=["503", "429", "408", "bad verdict", "approval without id", "non-int ttl", "timeout"],
+    ids=["503", "408", "bad verdict", "approval without id", "non-int ttl", "timeout"],
 )
 def test_fail_closed_exec_treats_as_an_outage(api, mode, outcome):
     api.mock(side_effect=seq(outcome))
@@ -222,6 +223,31 @@ def test_a_caller_error_raises_even_on_a_fail_open_hook(api, mode, status, error
     with pytest.raises(error) as err:
         run(hooks(mode).before_fs_access("/a", "read"))
     assert err.value.status_code == status
+
+
+# SDK-0353 (parity with TS SDK-0352) -- the guard's degrade predicate: a 429 is caller-triggerable
+# (shared egress IP), so it must never open a fail-open hook; a 503 still degrades.
+@both
+@pytest.mark.parametrize("fail", ["open", "closed"])
+def test_a_429_raises_on_a_fail_open_and_a_fail_closed_hook(api, mode, fail):
+    api.respond(429, text="slow")
+    with pytest.raises(RateLimitError) as err:
+        run(hooks(mode, fail_mode={"tool_call": fail}).before_tool_call("search.web", {}))
+    assert err.value.status_code == 429
+
+
+@both
+def test_a_503_degrades_a_fail_open_hook(api, mode):
+    api.respond(503, text="down")
+    result = run(hooks(mode).before_tool_call("search.web", {}))
+    assert result.decision is None and result.fail_open_error.status_code == 503
+
+
+@both
+def test_a_429_while_waiting_for_approval_raises(api, mode):
+    api.mock(side_effect=seq(PENDING, 429))
+    with pytest.raises(RateLimitError):
+        run(hooks(mode, approval_timeout=0.05).before_browser_action("click"))
 
 
 @both

@@ -40,6 +40,7 @@ from .exceptions import (
     PraesidiaConfigError,
     PraesidiaError,
     ResponseTooLargeError,
+    _is_outage,
 )
 
 #: be ``InteractionType`` (``be/src/protected-actions/interaction-type.ts``), same order.
@@ -464,18 +465,6 @@ def _decision(r: httpx.Response, raw: bytearray) -> InteractionDecision:
     ):
         raise PraesidiaError("malformed interaction decision response", status_code=r.status_code)
     return d  # type: ignore[return-value]
-
-
-def _is_outage(err: BaseException) -> bool:
-    """No decision was obtained: transport/timeout, 408/429/5xx, or a malformed 2xx. Other 4xx are caller errors."""
-    if isinstance(err, httpx.RequestError):
-        return True
-    status = getattr(err, "status_code", None)
-    return (
-        isinstance(err, PraesidiaError)
-        and not isinstance(err, PraesidiaConfigError)
-        and (status is None or status < 400 or status >= 500 or status in (408, 429))
-    )
 
 
 def _action(name: str, arguments: Optional[Mapping[str, Any]]) -> dict[str, Any]:

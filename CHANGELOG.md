@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Fixed
+- **Behaviour change (SDK-0353, security, parity with TS SDK-0352):** interaction hooks no
+  longer treat a 429 as an outage. A fail-open hook used to return
+  `InteractionHookResult(decision=None)` on a rate limit an end user can trigger from a shared
+  egress IP, and a fail-closed one raised `InteractionDecisionUnavailableError`; both now raise
+  `RateLimitError`, and a 429 while waiting for an approval raises instead of re-polling. Hooks
+  and `Guard` now share one degrade predicate (transport error, timeout, 408, 5xx, malformed 2xx).
 - **Behaviour change (SDK-0351, security):** `fetch_and_verify(agent_id)` and
   `fetch_and_verify_ai_system(ai_system_id)` now bind the passport to the requested id.
   Previously a genuine same-org passport for a different agent verified, even under
