@@ -27,23 +27,8 @@ def test_ci_smokes_the_built_wheel_in_a_clean_venv_on_oldest_and_newest_python()
         assert needle in script
 
 
-# SDK-0344 — the tag uploads exactly the wheel the install smoke (SDK-0331) accepted:
-# one build, smoke on that dist/ wheel, then hand dist/ over with no rebuild in between.
-# INTEG-0110 — trusted publishing: only the publish job holds `id-token: write`, it runs
-# no repo code, and no stored token exists anywhere in the workflow.
-def test_publish_uploads_the_smoked_wheel_via_trusted_publishing():
+def _assert_trusted_publish_job(workflow, build_job, publish_job):
     import re
-
-    root = Path(__file__).resolve().parents[1]
-    workflow = (root / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
-    build_job, publish_job = workflow.split("\n  publish:\n", 1)
-    build = build_job.index("python -m build")
-    smoke = build_job.index("bash scripts/wheel_install_smoke.sh")
-    handoff = build_job.index("name: dist\n")
-    assert build < smoke < handoff
-    assert workflow.count("-m build") == 1
-    smoke_step = build_job[build_job.rindex("- name:", 0, smoke) : handoff]
-    assert 'WHEEL="$(ls dist/*.whl)" bash scripts/wheel_install_smoke.sh' in smoke_step
 
     assert "secrets." not in workflow
     assert "twine upload" not in workflow
@@ -55,6 +40,25 @@ def test_publish_uploads_the_smoked_wheel_via_trusted_publishing():
     assert "run:" not in publish_job
     assert "name: dist\n" in publish_job
     assert re.search(r"uses: pypa/gh-action-pypi-publish@[0-9a-f]{40} ", publish_job)
+
+
+# SDK-0344 — the tag uploads exactly the wheel the install smoke (SDK-0331) accepted:
+# one build, smoke on that dist/ wheel, then hand dist/ over with no rebuild in between.
+# INTEG-0110 — trusted publishing: only the publish job holds `id-token: write`, it runs
+# no repo code, and no stored token exists anywhere in the workflow.
+def test_publish_uploads_the_smoked_wheel_via_trusted_publishing():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
+    build_job, publish_job = workflow.split("\n  publish:\n", 1)
+    build = build_job.index("python -m build")
+    smoke = build_job.index("bash scripts/wheel_install_smoke.sh")
+    handoff = build_job.index("name: dist\n")
+    assert build < smoke < handoff
+    assert workflow.count("-m build") == 1
+    smoke_step = build_job[build_job.rindex("- name:", 0, smoke) : handoff]
+    assert 'WHEEL="$(ls dist/*.whl)" bash scripts/wheel_install_smoke.sh' in smoke_step
+
+    _assert_trusted_publish_job(workflow, build_job, publish_job)
 
     script = (root / "scripts" / "wheel_install_smoke.sh").read_text(encoding="utf-8")
     assert '"${WHEEL:-}"' in script
@@ -117,3 +121,40 @@ def test_hermes_plugin_admits_sdk_patches_but_not_the_next_breaking_minor():
 
     version = re.search(r'^version = "(.*)"$', meta, re.M).group(1)
     assert f"## {version} " in (plugin / "CHANGELOG.md").read_text(encoding="utf-8")
+
+
+# INTEG-0125 — praesidia-hermes has its own tag namespace and workflow file (a PyPI trusted
+# publisher is bound to one workflow file), refuses a tag that disagrees with the plugin's
+# version or a praesidia range PyPI cannot satisfy, and uploads the wheel it tested and smoked.
+def test_hermes_plugin_publishes_from_its_own_tag_via_trusted_publishing():
+    from fnmatch import fnmatch
+
+    root = Path(__file__).resolve().parents[1]
+    workflows = root / ".github" / "workflows"
+    workflow = (workflows / "publish-hermes.yml").read_text(encoding="utf-8")
+    assert "tags: ['hermes-v*']" in workflow
+    assert "tags: ['v*']" in (workflows / "publish.yml").read_text(encoding="utf-8")
+    assert not fnmatch("hermes-v0.1.1", "v*") and not fnmatch("v0.5.0", "hermes-v*")
+
+    build_job, publish_job = workflow.split("\n  publish:\n", 1)
+    steps = [
+        '"$RELEASE_TAG" != "hermes-v$PLUGIN_VERSION"',
+        'git merge-base --is-ancestor "$GITHUB_SHA" origin/main',
+        "pip download --no-deps",
+        "python -m build plugins/hermes",
+        "twine check plugins/hermes/dist/*",
+        "PRAESIDIA_REQUIRE_HERMES: '1'",
+        "pytest tests/test_hermes_plugin.py",
+        '"$SMOKE/bin/pip" check',
+        "path: plugins/hermes/dist/",
+    ]
+    at = [build_job.index(s) for s in steps]
+    assert at == sorted(at)
+    assert build_job.count("plugins/hermes/pyproject.toml") >= 2  # tag check + range check
+    assert workflow.count("-m build") == 1
+    assert "url: https://pypi.org/project/praesidia-hermes/" in publish_job
+    _assert_trusted_publish_job(workflow, build_job, publish_job)
+
+    guide = (root / "PUBLISHING.md").read_text(encoding="utf-8")
+    assert "| PyPI project name | `praesidia-hermes` |" in guide
+    assert "| Workflow name | `publish-hermes.yml` |" in guide

@@ -38,7 +38,7 @@ A publish is a **tag push**, never a local upload. `.github/workflows/publish.ym
 4. **Create the `pypi` environment** on `praesidia-ai/sdk-python` (*Settings → Environments →
    New environment*). Add yourself as a **required reviewer**, so a pushed tag waits for your
    approval before anything uploads. Under *Deployment branches and tags*, allow only tags
-   matching `v*`.
+   matching `v*` and `hermes-v*` (the plugin workflow below uses the same environment).
 5. **Public source repo.** Attestations link the release to a public GitHub workflow run.
    `praesidia-ai/sdk-python` was public on 2026-09-26 (the unauthenticated GitHub API returns
    200).
@@ -135,15 +135,68 @@ fixes only. `1.0.0` is a deliberate decision, not automatic. Every hand-written 
 (`.github/workflows/contract-drift.yml`, run locally with
 `sdk/scripts/audit-api-contract.mjs --lang py`) before any release.
 
-## Plugins (`plugins/hermes`): not published by this workflow
+## Plugins (`plugins/hermes`): `praesidia-hermes`, its own tag and workflow
 
 `plugins/hermes` is a separate package (`praesidia-hermes` 0.1.1, its own `pyproject.toml`,
 version and `plugins/hermes/CHANGELOG.md`). `https://pypi.org/pypi/praesidia-hermes/json` returns
-`404` (checked 2026-09-26). It depends on `praesidia>=0.5.0,<0.6`, so publish `praesidia` 0.5.0
-first. `ci.yml`'s `frameworks` job tests it against the pinned Hermes checkout.
+`404` (checked 2026-09-26). It depends on `praesidia>=0.5.0,<0.6`, so **publish `praesidia` 0.5.0
+first**. `ci.yml`'s `frameworks` job tests it against the pinned Hermes checkout on every push.
 
-Its metadata and artifacts are release-ready (`cd plugins/hermes && python -m build && python -m
-twine check dist/*` passes; the wheel holds only `praesidia_hermes/__init__.py` plus
-`dist-info`). It has **no publish workflow**: pushing a `v*` tag on this repo does not publish
-it. Publishing it needs a tag-triggered job like `publish.yml`'s, building from `plugins/hermes`,
-and a second pending trusted publisher on PyPI for project `praesidia-hermes`.
+It publishes from `.github/workflows/publish-hermes.yml`, on `push: tags: ['hermes-v*']`. A `v*`
+tag never publishes the plugin and a `hermes-v*` tag never publishes `praesidia`. Same two-job
+shape as `publish.yml`:
+
+1. **build** (read-only token): refuses unless the tag equals `hermes-v` + the version in
+   `plugins/hermes/pyproject.toml`, the tagged commit is on `origin/main`, and PyPI already has a
+   `praesidia` release inside the plugin's dependency range. Then it runs `python -m build
+   plugins/hermes` and `twine check`, runs `tests/test_hermes_plugin.py` on that built wheel
+   against the pinned Hermes checkout, installs the wheel in a clean venv outside the repo
+   (`praesidia` comes from PyPI, as it does for a user), checks the `hermes_agent.plugins` entry
+   point and `pip check`, and hands `plugins/hermes/dist/` to the next job.
+2. **publish**: `pypi` environment, the only job with `id-token: write`, runs no repository code,
+   and uploads that exact `dist/` with trusted publishing and PEP 740 attestations.
+
+### One-time setup (in addition to the `praesidia` prerequisites above)
+
+1. **Check the name is still free.** `https://pypi.org/project/praesidia-hermes/` must 404.
+2. **Register a second pending trusted publisher** on PyPI (*Your account → Publishing → Add a
+   new pending publisher → GitHub*). Each PyPI project needs its own:
+
+   | Field | Value |
+   | --- | --- |
+   | PyPI project name | `praesidia-hermes` |
+   | Owner | `praesidia-ai` |
+   | Repository name | `sdk-python` |
+   | Workflow name | `publish-hermes.yml` |
+   | Environment name | `pypi` |
+
+3. **Allow `hermes-v*`** on the `pypi` environment's *Deployment branches and tags* (prerequisite
+   4 above). Otherwise the publish job cannot start.
+
+### Steps
+
+```bash
+# 1. praesidia 0.5.0 must be live first: this must print JSON, not 404.
+curl -s https://pypi.org/pypi/praesidia/json | head -c 100
+
+# 2. From a clean, up-to-date main that is already on GitHub.
+git checkout main && git pull
+grep '^version' plugins/hermes/pyproject.toml   # version = "0.1.1"
+cd plugins/hermes && python -m build && python -m twine check dist/* && cd ../..
+
+# 3. Tag and push the tag. This starts the plugin release.
+git tag -a hermes-v0.1.1 -m "praesidia-hermes 0.1.1"
+git push origin hermes-v0.1.1
+
+# 4. Watch https://github.com/praesidia-ai/sdk-python/actions/workflows/publish-hermes.yml and
+#    approve the `pypi` deployment once the build job is green.
+
+# 5. Check it landed.
+python -m venv /tmp/h && /tmp/h/bin/pip install praesidia-hermes==0.1.1 \
+  && /tmp/h/bin/python -c "import praesidia_hermes; print('OK')"
+```
+
+For later plugin releases, bump `version` in `plugins/hermes/pyproject.toml` and add a
+`plugins/hermes/CHANGELOG.md` entry in one commit, then tag `hermes-v<version>`. A `praesidia`
+minor bump (0.6) needs a plugin release that widens its range; `tests/test_release_workflow.py`
+fails until it does.
