@@ -89,9 +89,10 @@ git push origin v0.5.0
 ```
 
 For later releases, bump `[project].version` in `pyproject.toml`, `praesidia/__init__.py`'s
-`__version__`, `plugins/hermes/pyproject.toml`'s `praesidia==` pin,
-`examples/refund_authorization/requirements.txt` and `uv.lock` (`uv lock`) in one commit.
-`tests/test_release_workflow.py` fails if they disagree. Add a `CHANGELOG.md` entry, then repeat
+`__version__`, `examples/refund_authorization/requirements.txt` and `uv.lock` (`uv lock`) in one
+commit. `tests/test_release_workflow.py` fails if they disagree. A patch release leaves
+`plugins/hermes` alone (it accepts `praesidia>=0.5.0,<0.6`); a minor bump fails that test until the
+plugin's range, version and `CHANGELOG.md` move too. Add a `CHANGELOG.md` entry, then repeat
 steps 1-4 with the new tag.
 
 ## After publishing: check it landed
@@ -136,6 +137,13 @@ fixes only. `1.0.0` is a deliberate decision, not automatic. Every hand-written 
 
 ## Plugins (`plugins/hermes`): not published by this workflow
 
-`plugins/hermes` is a separate package (`praesidia-hermes`, its own `pyproject.toml` and version).
-`ci.yml`'s `frameworks` job tests it, but it has **no publish workflow**. Pushing a `v*` tag on
-this repo does not publish it. Publishing `praesidia-hermes` is a separate follow-up.
+`plugins/hermes` is a separate package (`praesidia-hermes` 0.1.1, its own `pyproject.toml`,
+version and `plugins/hermes/CHANGELOG.md`). `https://pypi.org/pypi/praesidia-hermes/json` returns
+`404` (checked 2026-09-26). It depends on `praesidia>=0.5.0,<0.6`, so publish `praesidia` 0.5.0
+first. `ci.yml`'s `frameworks` job tests it against the pinned Hermes checkout.
+
+Its metadata and artifacts are release-ready (`cd plugins/hermes && python -m build && python -m
+twine check dist/*` passes; the wheel holds only `praesidia_hermes/__init__.py` plus
+`dist-info`). It has **no publish workflow**: pushing a `v*` tag on this repo does not publish
+it. Publishing it needs a tag-triggered job like `publish.yml`'s, building from `plugins/hermes`,
+and a second pending trusted publisher on PyPI for project `praesidia-hermes`.

@@ -5,11 +5,32 @@ build-backend = "hatchling.build"
 [project]
 name = "praesidia-hermes"
 version = "0.1.1"
-description = "Hermes managed protected HTTP tool and explicit tool boundary"
-requires-python = ">=3.11"
-dependencies = ["praesidia==0.5.0"]
+description = "Praesidia protected HTTP tool and strict tool boundary for Nous Hermes Agent"
 readme = "README.md"
-license = {file = "LICENSE"}
+license = { text = "MIT" }
+requires-python = ">=3.11"
+# Any 0.5.x SDK patch; 0.6 is a breaking minor (pre-1.0 semver) and needs a plugin release.
+dependencies = ["praesidia>=0.5.0,<0.6"]
+authors = [{ name = "Praesidia", email = "hello@praesidia.ai" }]
+keywords = ["praesidia", "hermes", "hermes-agent", "ai-governance", "approval", "agent"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://praesidia.ai"
+Documentation = "https://github.com/praesidia-ai/sdk-python/tree/main/plugins/hermes#readme"
+Repository = "https://github.com/praesidia-ai/sdk-python"
+"Bug Tracker" = "https://github.com/praesidia-ai/sdk-python/issues"
+Changelog = "https://github.com/praesidia-ai/sdk-python/blob/main/plugins/hermes/CHANGELOG.md"
 
 [project.entry-points."hermes_agent.plugins"]
 praesidia = "praesidia_hermes"

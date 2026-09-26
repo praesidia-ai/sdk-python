@@ -90,7 +90,30 @@ def test_first_public_release_is_0_5_0_everywhere_the_version_is_asserted():
     version = re.search(r'^version = "(.*)"$', read("pyproject.toml"), re.M).group(1)
     assert version == "0.5.0"
     assert praesidia.__version__ == version
-    assert f'dependencies = ["praesidia=={version}"]' in read("plugins/hermes/pyproject.toml")
     assert f'name = "praesidia"\nversion = "{version}"' in read("uv.lock")
     reqs = read("examples/refund_authorization/requirements.txt").split()
     assert reqs == [f"praesidia>={version}"]
+
+
+def test_hermes_plugin_admits_sdk_patches_but_not_the_next_breaking_minor():
+    import re
+
+    from packaging.requirements import Requirement
+    from packaging.version import Version
+
+    import praesidia
+
+    plugin = Path(__file__).resolve().parents[1] / "plugins" / "hermes"
+    meta = (plugin / "pyproject.toml").read_text(encoding="utf-8")
+    deps = re.search(r"^dependencies = \[(.*)\]$", meta, re.M).group(1)
+    (req,) = [Requirement(d) for d in re.findall(r'"([^"]+)"', deps)]
+    sdk = Version(praesidia.__version__)
+
+    assert req.name == "praesidia"
+    assert sdk in req.specifier
+    assert Version(f"{sdk.major}.{sdk.minor}.{sdk.micro + 1}") in req.specifier
+    # Pre-1.0 a minor bump is breaking, and the plugin imports praesidia.integrations internals.
+    assert Version(f"{sdk.major}.{sdk.minor + 1}.0") not in req.specifier
+
+    version = re.search(r'^version = "(.*)"$', meta, re.M).group(1)
+    assert f"## {version} " in (plugin / "CHANGELOG.md").read_text(encoding="utf-8")

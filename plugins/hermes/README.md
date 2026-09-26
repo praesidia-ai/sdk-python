@@ -5,8 +5,18 @@ default strict tool boundary. It targets **Nous Hermes Agent**, not the unrelate
 formerly named HermesOS hosting service. Tested against upstream commit
 `0390ace8179f4cf75bd3941e590dd74e638672b6` (2026-09-06).
 
-Install the locally built `praesidia` 0.5.0 wheel, then `pip install ./plugins/hermes`
-in the Hermes Python environment. Nothing is published by this repository.
+Install it into the Hermes Python environment (Python 3.11+). It needs
+`praesidia>=0.5.0,<0.6`, which pip resolves for you:
+
+```bash
+pip install praesidia-hermes          # after publication to PyPI
+pip install ./plugins/hermes          # until then, from a checkout of this repository
+```
+
+Neither package is on PyPI yet. Until `praesidia` 0.5.0 is published, install its locally built
+wheel first (`python -m build` in the repository root), then the plugin. Release notes are in
+[CHANGELOG.md](CHANGELOG.md).
+
 Enable the `praesidia` entry-point plugin in the intended Hermes profile and set:
 
 ```yaml
