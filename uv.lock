@@ -286,7 +286,7 @@ wheels = [
 
 [[package]]
 name = "anyio"
-version = "4.14.2"
+version = "4.15.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
@@ -305,11 +305,11 @@ resolution-markers = [
 dependencies = [
     { name = "exceptiongroup", marker = "python_full_version == '3.10.*'" },
     { name = "idna", marker = "python_full_version >= '3.10'" },
-    { name = "typing-extensions", marker = "python_full_version >= '3.10' and python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.10' and python_full_version < '3.15'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/61/cc/a381afa6efea9f496eff839d4a6a1aed3bfafc7b3ab4b0d1b243a12573dd/anyio-4.14.2.tar.gz", hash = "sha256:cfa139f3ed1a23ee8f88a145ddb5ac7605b8bbfd8592baacd7ce3d8bb4313c7f", size = 260176 }
+sdist = { url = "https://files.pythonhosted.org/packages/a9/d2/f4d173e22df740bc37b1db102b386ba719b66e95b0f0d751f556b387e6d2/anyio-4.15.1.tar.gz", hash = "sha256:9f28306018cbd6d329e64a36d58256edff76dd996fe423bc957326e578b82a94", size = 276966 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/da/35/f2287558c17e29fafc8ef3daf819bb9834061cfa43bff8014f7df7f63bdc/anyio-4.14.2-py3-none-any.whl", hash = "sha256:9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494", size = 125813 },
+    { url = "https://files.pythonhosted.org/packages/12/b8/4bd346e22b28902df4d651910f5242c28d84e4a5c2435ca5c3f797ed7e2e/anyio-4.15.1-py3-none-any.whl", hash = "sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101", size = 132079 },
 ]
 
 [[package]]
@@ -1531,7 +1531,7 @@ name = "google-genai"
 version = "2.22.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "distro", marker = "python_full_version >= '3.10'" },
     { name = "google-auth", extra = ["requests"], marker = "python_full_version >= '3.10'" },
     { name = "httpx", marker = "python_full_version >= '3.10'" },
@@ -1844,7 +1844,7 @@ version = "0.28.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio", version = "4.12.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
-    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "certifi" },
     { name = "httpcore" },
     { name = "idna" },
@@ -1873,7 +1873,7 @@ name = "httpx2"
 version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10' and sys_platform != 'emscripten'" },
+    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10' and sys_platform != 'emscripten'" },
     { name = "httpcore2", marker = "python_full_version >= '3.10' and sys_platform != 'emscripten'" },
     { name = "httpx2-jsfetch", marker = "python_full_version >= '3.12' and sys_platform == 'emscripten'" },
     { name = "idna", marker = "python_full_version >= '3.10'" },
@@ -2412,7 +2412,7 @@ name = "langsmith"
 version = "0.12.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "distro", marker = "python_full_version >= '3.10'" },
     { name = "httpx2", marker = "python_full_version >= '3.10'" },
     { name = "orjson", marker = "python_full_version >= '3.10' and platform_python_implementation != 'PyPy'" },
@@ -2568,7 +2568,7 @@ name = "mcp"
 version = "1.28.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "httpx", marker = "python_full_version >= '3.10'" },
     { name = "httpx-sse", marker = "python_full_version >= '3.10'" },
     { name = "jsonschema", marker = "python_full_version >= '3.10'" },
@@ -3313,7 +3313,7 @@ name = "openai"
 version = "2.54.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "distro", marker = "python_full_version >= '3.10'" },
     { name = "httpx", marker = "python_full_version >= '3.10'" },
     { name = "jiter", marker = "python_full_version >= '3.10'" },
@@ -5330,7 +5330,7 @@ name = "sse-starlette"
 version = "3.4.11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "starlette", marker = "python_full_version >= '3.10'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/2b/54/6767bb789b2f2fed6e0f953df949cd39dc263a384c1b65a95232598621d6/sse_starlette-3.4.11.tar.gz", hash = "sha256:1bae716c02f3e6f294be41ff333220692dae7c3cbab077c900f159676719dade", size = 34972 }
@@ -5343,7 +5343,7 @@ name = "starlette"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "typing-extensions", marker = "python_full_version >= '3.10' and python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b5/b4/205b0d5241d934e8add0c38aa924c4f9fb7330834ff11e5444db964ec3f9/starlette-1.6.0.tar.gz", hash = "sha256:d4e3ac5e546444960c710297a3c9fc3f7ebae1b7e963f3d36173b49da535be9b", size = 2716969 }
@@ -5832,7 +5832,7 @@ name = "watchfiles"
 version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10' and python_full_version < '3.14'" },
+    { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10' and python_full_version < '3.14'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cd/41/5e1a4bb12aac5f1493fa1bdc11154eca3b258ca4eba65d39c473fe19d8e9/watchfiles-1.2.0.tar.gz", hash = "sha256:c995fba777f1ea992f090f9236e9284cf7a5d1a0130dd5a3d82c598cacd76838", size = 108252 }
 wheels = [
