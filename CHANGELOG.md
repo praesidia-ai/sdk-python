@@ -3,6 +3,17 @@
 All notable changes to `praesidia`. Versions follow SemVer; while on `0.x`, a breaking change
 bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 
+## Unreleased
+
+### Fixed
+- **Behaviour change (SDK-0359, security; TS twin SDK-0358):** a request header httpx would refuse
+  (a `chain_id` or caller header containing CR, LF, NUL, another control character, or any
+  non-ASCII character; a header name that is not an RFC 9110 token; a non-`str` value) now raises
+  `PraesidiaConfigError` before any request is built, naming the header but never its value. Before,
+  httpx's `LocalProtocolError` read as a transport outage and `Guard` degraded to local rules in
+  `local_rules`/`fail_open`. Config errors are never retried. Non-UUID ASCII chain ids stay legal.
+  Unlike the TS SDK, obs-text (0x80-0xff) is refused: httpx encodes `str` header values as ASCII.
+
 ## 0.5.0 — 2026-09-26 (first PyPI release)
 
 No earlier version reached PyPI (0.2.x to 0.4.x existed only in source), so 0.5.0 carries every

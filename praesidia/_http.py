@@ -10,6 +10,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import re
 import time
 from threading import RLock
 from typing import Any, Callable, Optional, Union
@@ -62,6 +63,11 @@ CAPABILITY_TOKEN_HEADER = "X-Praesidia-Capability-Token"
 #: verify paths behind one header — a confused-deputy hazard for a security
 #: primitive. Never reuse CAPABILITY_TOKEN_HEADER for a Permit.
 PERMIT_HEADER = "X-Praesidia-Permit"
+
+#: SDK-0359 (TS SDK-0358) -- RFC 9110 token / field-value httpx can send. httpx encodes a str
+#: value as ASCII, so obs-text (0x80-0xff) is refused here where the TS SDK allows it.
+_HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
+_HEADER_VALUE = re.compile(r"[\t\x20-\x7e]*")
 
 
 def path_segment(value: str, name: str = "path segment") -> str:
@@ -300,9 +306,18 @@ class HttpClient:
             base = dict(self._headers)
         if not include_auth:
             base.pop("Authorization", None)
-        if not extra:
-            return base
-        return {**base, **extra}
+        merged = {**base, **extra} if extra else base
+        # SDK-0359 -- a header httpx would refuse (e.g. a chain_id with a newline) is a caller
+        # error, raised before the request exists so it can never read as an outage.
+        for name, value in merged.items():
+            if not (isinstance(name, str) and _HEADER_NAME.fullmatch(name)) or not (
+                isinstance(value, str) and _HEADER_VALUE.fullmatch(value)
+            ):
+                raise PraesidiaConfigError(
+                    f"header {name!r} must be an RFC 9110 token with an ASCII field-value "
+                    "(no CR, LF, NUL or other control characters)"
+                )
+        return merged
 
     # ------------------------------------------------------------------
     # FINDING-4 -- bounded retry wrapper
