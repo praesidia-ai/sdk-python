@@ -46,6 +46,20 @@ _STANDARD_BASE64_RE = re.compile(
 _CANONICAL_INSTANT_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$"
 )
+# ADR-0004 signature format 2: ``b"praesidia:<purpose>:v2\n" + canonical``.
+# Agent and AI System passports share the ``trust-passport`` purpose. The
+# purpose comes from what is being verified, never from the passport.
+_TRUST_PASSPORT_V2_TAG = b"praesidia:trust-passport:v2\n"
+
+
+def _signature_format(proof: dict[str, Any]) -> Optional[int]:
+    """``proof.signatureFormat``: absent = 1; 1 or 2 as a JSON integer; else
+    ``None`` (``null``, ``"2"``, ``3``, and ``True``/``False``, which Python
+    would otherwise compare equal to 1/0) — AV-0018 contract, fails closed."""
+    if "signatureFormat" not in proof:
+        return 1
+    value = proof["signatureFormat"]
+    return value if type(value) is int and value in (1, 2) else None
 
 
 def verify_passport(
@@ -166,9 +180,12 @@ def _verify_passport_unchecked(
         return _result(False, False, False, "malformed-public-key")
 
     # Sign-the-doc / attach-the-proof: strip `proof`, canonicalize the rest.
+    # Format 2 (ADR-0004) signs the purpose-tagged bytes instead.
     try:
         unsigned = {k: v for k, v in passport.items() if k != "proof"}
         message = canonical_json(unsigned)
+        if _signature_format(proof) == 2:
+            message = _TRUST_PASSPORT_V2_TAG + message
     except (AttributeError, TypeError, UnicodeError, ValueError):
         return _result(False, False, False, "malformed-passport")
     try:
@@ -245,6 +262,7 @@ def _credential_envelope_well_formed(
             )
         )
         and _nonempty_string(proof.get("type"))
+        and _signature_format(proof) is not None
         and proof.get("created") == passport.get("issuanceDate")
         and proof.get("proofPurpose") == "assertionMethod"
         and _positive_integer(key_version)

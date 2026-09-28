@@ -6,6 +6,12 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 ## Unreleased
 
 ### Added
+- **SDK-0366 (TS twin SDK-0363; ADR-0004):** `verify_passport` / `verify_ai_system_passport` /
+  `fetch_and_verify*` read `proof.signatureFormat` (absent = 1). Format 2 verifies over
+  `b"praesidia:trust-passport:v2\n" + canonical JSON`; format 1 passports verify unchanged. A
+  signature made for another purpose (e.g. `governance-badge`) does not verify. **Behaviour change:**
+  a `signatureFormat` other than absent or the JSON integer `1`/`2` (`None`, `"2"`, `3`, `True`,
+  `2.0`) is `malformed-passport`. Minor bump under the 0.x policy.
 - **SDK-0362 (needs be BE-1808; TS twin SDK-0361):** `report_outcome(status=..., decision_id=...)`
   reports the outcome of a plain `allow` (`approvalId` `None`) by its `decisionId`. Pass exactly one
   of `approval_id` / `decision_id`; neither or both raises a `PraesidiaConfigError` that is also a

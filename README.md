@@ -539,6 +539,12 @@ an online verification call. Offline verification is pure-Python and
 **dependency-free** (compact Ed25519 + ECDSA-P256 verification and canonical
 JSON in `praesidia._crypto`), so it needs no `cryptography` install.
 
+Signature formats (ADR-0004): `proof.signatureFormat` absent or `1` means the signature is
+over the canonical JSON of the passport without `proof`; `2` means it is over
+`b"praesidia:trust-passport:v2\n" + canonical JSON` (agent and AI System passports alike).
+Any other value (`None`, `"2"`, `3`, `True`, `2.0`) is `malformed-passport`. A format-2
+signature made for another purpose (e.g. `governance-badge`) is `signature-mismatch`.
+
 **No Praesidia account needed.** Every trust route is public, so a third-party
 verifier builds the client with no API key and no org (SDK-0311; TS parity:
 `new PraesidiaTrust()`). `PraesidiaTrust` has every `client.trust` method shown
