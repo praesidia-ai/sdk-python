@@ -9,7 +9,7 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 - **SDK-2504 (needs be BE-1759; TS twin SDK-2503):** interaction hooks send an `Idempotency-Key`
   (UUID v4 per call; a caller key via `decide(..., idempotency_key=)` /
   `report_outcome(..., idempotency_key=)`) on the decision and outcome POSTs and retry a call
-  under the same key after a network error, timeout, 429/5xx, or an in-flight 409. Each approval
+  under the same key after a network error, timeout or 429/5xx (never a 409). Each approval
   poll gets a fresh key. New `IdempotencyKeyReusedError` (409 `IDEMPOTENCY_KEY_REUSED`, never
   retried), raised by every client. New `retry=` hooks constructor argument (default policy on;
   `retry=False` restores one attempt). **Behaviour change:** the hooks previously never retried;

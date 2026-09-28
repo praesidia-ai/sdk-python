@@ -652,8 +652,8 @@ def report(h):
 
 
 @both
-@pytest.mark.parametrize("first", [httpx.Response(503, text="down"), httpx.ConnectError("reset"), httpx.Response(409, json=IN_FLIGHT)],
-                         ids=["503", "transport", "409 in flight"])
+@pytest.mark.parametrize("first", [httpx.Response(503, text="down"), httpx.Response(429), httpx.ConnectError("reset")],
+                         ids=["503", "429", "transport"])
 def test_a_retried_call_resends_the_same_key(outcome_api, mode, first):
     decide, outcome = outcome_api
     decide.mock(side_effect=[first, httpx.Response(200, json=ALLOW)])
@@ -715,6 +715,19 @@ def test_409_idempotency_key_reused_raises_the_typed_error_once(outcome_api, mod
             run(call())  # a fail-open hook raises too: a 409 is never an outage
         assert err.value.status_code == 409 and err.value.code == "IDEMPOTENCY_KEY_REUSED" and not err.value.retryable
     assert decide.call_count == 2 and outcome.call_count == 1
+
+
+@both
+def test_a_409_without_a_code_is_the_plain_error_not_retried(outcome_api, mode):
+    decide, outcome = outcome_api
+    for route in (decide, outcome):
+        route.mock(return_value=httpx.Response(409, json=IN_FLIGHT))
+    h = hooks(mode)
+    for call in (lambda: h.decide("agent_to_email", EMAIL), lambda: report(h)):
+        with pytest.raises(PraesidiaError) as err:
+            run(call())
+        assert err.value.status_code == 409 and not isinstance(err.value, IdempotencyKeyReusedError)
+    assert decide.call_count == 1 and outcome.call_count == 1
 
 
 @both

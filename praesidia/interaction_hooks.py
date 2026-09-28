@@ -28,7 +28,6 @@ import httpx
 from ._http import (
     _DEFAULT_TIMEOUT,
     HttpClient,
-    _parse_error_envelope,
     _validate_api_key,
     _validate_idempotency_key,
     _validate_timeout,
@@ -449,10 +448,10 @@ class _SyncPost:
                     for chunk in r.iter_bytes():
                         _append(raw, chunk, r)
             except httpx.RequestError:
-                if (delay := _retry_delay(self.retry, attempt, start, None, raw)) is None:
+                if (delay := _retry_delay(self.retry, attempt, start, None)) is None:
                     raise
             else:
-                if (delay := _retry_delay(self.retry, attempt, start, r, raw)) is None:
+                if (delay := _retry_delay(self.retry, attempt, start, r)) is None:
                     return parse(r, raw)
             time.sleep(delay)
             attempt += 1
@@ -472,17 +471,13 @@ class _AsyncPost:
                     async for chunk in r.aiter_bytes():
                         _append(raw, chunk, r)
             except httpx.RequestError:
-                if (delay := _retry_delay(self.retry, attempt, start, None, raw)) is None:
+                if (delay := _retry_delay(self.retry, attempt, start, None)) is None:
                     raise
             else:
-                if (delay := _retry_delay(self.retry, attempt, start, r, raw)) is None:
+                if (delay := _retry_delay(self.retry, attempt, start, r)) is None:
                     return parse(r, raw)
             await asyncio.sleep(delay)
             attempt += 1
-
-
-#: be ``withIdempotency`` (BE-1759): a 409 for a key whose first request is still running, no ``code``.
-_IN_FLIGHT = "A request with this Idempotency-Key is already in progress"
 
 
 def _idempotency_key(key: Optional[str]) -> str:
@@ -498,19 +493,16 @@ def _idempotency_key(key: Optional[str]) -> str:
     return key
 
 
-def _retry_delay(cfg: Optional[RetryConfig], attempt: int, start: float, r: Optional[httpx.Response], raw: bytearray) -> Optional[float]:
+def _retry_delay(cfg: Optional[RetryConfig], attempt: int, start: float, r: Optional[httpx.Response]) -> Optional[float]:
     """
     Seconds to wait before re-sending the same key, or ``None`` to stop. Retried: a transport error
-    (``r`` is ``None``), 429/5xx, and the 409 for a key whose first request is still running. Never a
-    409 ``IDEMPOTENCY_KEY_REUSED`` or any other 4xx. Budget and backoff as for the management client.
+    (``r`` is ``None``) or 429/5xx, never a 409 or any other 4xx (TS SDK-2503). Budget and backoff as
+    for the management client.
     """
     if cfg is None or attempt >= cfg.max_attempts:
         return None
     if r is not None and not is_retryable_status(r.status_code):
-        envelope = (_parse_error_envelope(bytes(raw).decode("utf-8", "replace")) if r.status_code == 409 else None) or {}
-        message = envelope.get("message")
-        if not (isinstance(message, str) and message.startswith(_IN_FLIGHT) and envelope.get("code") is None):
-            return None
+        return None
     retry_after = None if r is None else parse_retry_after_s(r.headers.get("retry-after"))
     delay = retry_after if retry_after is not None else compute_backoff_s(attempt, cfg.base_delay_s, cfg.max_delay_s)
     return None if time.monotonic() - start + delay >= cfg.max_elapsed_s else delay

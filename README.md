@@ -960,8 +960,8 @@ replaying be's recorded `test-fixtures/interaction-decision-v1.json` in both SDK
 carries an `Idempotency-Key`: a fresh UUID v4 per call, or yours via
 `decide(..., idempotency_key=...)` / `report_outcome(..., idempotency_key=...)` (at most 255
 printable ASCII characters, else `PraesidiaConfigError` before any request). The hooks retry a
-call under the same key after a network error, a timeout, a 429 / 5xx, or a 409 saying the key's
-first request is still running; be then replays the stored response, so a retry never writes a
+call under the same key after a network error, a timeout or a 429 / 5xx (never after a 409 or
+other 4xx; a 409 without a `code` is the plain `PraesidiaError`); be then replays the stored response, so a retry never writes a
 second Decision Record or outcome. Each approval poll is a new call with a new key (it adds
 `approvalId`, a different body). The same key with a different body is a 409
 `IDEMPOTENCY_KEY_REUSED`, raised once as `IdempotencyKeyReusedError` (never retried, never an
