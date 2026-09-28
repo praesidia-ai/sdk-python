@@ -70,6 +70,7 @@ from .exceptions import (
     ForbiddenError,
     GuardContentTooLargeError,
     GuardrailBlockedError,
+    IdempotencyKeyReusedError,
     InteractionDecisionUnavailableError,
     InteractionDeniedError,
     InvalidMcpServerIdError,
@@ -104,6 +105,7 @@ __all__ = [
     "RateLimitError",
     "ResponseTooLargeError",
     "ServerError",
+    "IdempotencyKeyReusedError",
     "tool_call_headers_from_task",
     # SDK-0313 — gateway MCP server id header
     "gateway_headers",

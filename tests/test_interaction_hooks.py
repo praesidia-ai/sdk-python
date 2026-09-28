@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import inspect
 import json
+import re
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,6 +27,7 @@ from praesidia import (
     AsyncPraesidiaInteractionHooks,
     AuthError,
     ForbiddenError,
+    IdempotencyKeyReusedError,
     InteractionDecisionUnavailableError,
     InteractionDeniedError,
     InteractionHookResult,
@@ -33,6 +35,7 @@ from praesidia import (
     PraesidiaError,
     PraesidiaInteractionHooks,
     RateLimitError,
+    RetryConfig,
     interaction_hooks,
 )
 
@@ -47,6 +50,7 @@ DENY = CASES["deny_by_policy"]["response"]
 PENDING = CASES["require_approval_minted"]["response"]
 CONSUMED = CASES["approval_granted_consumed"]["response"]
 MODES = ("sync", "async")
+NO_WAIT = RetryConfig(base_delay_s=0, max_delay_s=0)  # the default 3 attempts, without sleeping
 
 
 def wire(body):
@@ -57,7 +61,7 @@ def wire(body):
 def hooks(mode, **extra):
     cls = PraesidiaInteractionHooks if mode == "sync" else AsyncPraesidiaInteractionHooks
     config = {"api_key": "pk_test", "org_id": FIXTURE["orgId"], "agent_id": AGENT, "base_url": BASE}
-    return cls(**{**config, "approval_poll_interval": 0.001, **extra})
+    return cls(**{**config, "approval_poll_interval": 0.001, "retry": NO_WAIT, **extra})
 
 
 def run(value):
@@ -630,3 +634,96 @@ def test_constrained_by_is_passed_through(api, mode, constrained_by):
 def test_invalid_task_id_raises_at_construction(bad):
     with pytest.raises(PraesidiaConfigError, match="task_id"):
         hooks("sync", task_id=bad)
+
+
+# ── Idempotency-Key (SDK-2504, be BE-1759; TS twin SDK-2503) ────────────────
+
+UUID4 = r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+REUSED = {"code": "IDEMPOTENCY_KEY_REUSED", "message": "Idempotency-Key was already used with a different request body"}
+IN_FLIGHT = {"message": "A request with this Idempotency-Key is already in progress. Retry after it completes."}
+
+
+def keys(route):
+    return [c.request.headers.get("idempotency-key") for c in route.calls]
+
+
+def report(h):
+    return h.report_outcome(RECEIPT["approvalId"], "succeeded")
+
+
+@both
+@pytest.mark.parametrize("first", [httpx.Response(503, text="down"), httpx.ConnectError("reset"), httpx.Response(409, json=IN_FLIGHT)],
+                         ids=["503", "transport", "409 in flight"])
+def test_a_retried_call_resends_the_same_key(outcome_api, mode, first):
+    decide, outcome = outcome_api
+    decide.mock(side_effect=[first, httpx.Response(200, json=ALLOW)])
+    outcome.mock(side_effect=[first, httpx.Response(200, json=RECEIPT)])
+    h = hooks(mode)
+    assert run(h.decide("agent_to_email", EMAIL)) == ALLOW and run(report(h)) == RECEIPT
+    for route in (decide, outcome):
+        assert route.call_count == 2 and keys(route)[0] == keys(route)[1]
+        assert re.fullmatch(UUID4, keys(route)[0])
+        assert route.calls[0].request.content == route.calls[1].request.content
+
+
+@both
+def test_every_logical_call_and_every_approval_poll_gets_a_fresh_key(outcome_api, mode):
+    decide, outcome = outcome_api
+    decide.mock(side_effect=seq(ALLOW, PENDING, CONSUMED))
+    outcome.mock(return_value=httpx.Response(200, json=RECEIPT))
+    h = hooks(mode)
+    run(h.decide("agent_to_email", EMAIL))
+    run(h.before_interaction("agent_to_email", EMAIL))  # PENDING, then a poll carrying approvalId
+    run(report(h))
+    run(report(h))
+    sent_keys = keys(decide) + keys(outcome)
+    assert len(sent_keys) == 5 and len(set(sent_keys)) == 5
+    assert all(re.fullmatch(UUID4, k) for k in sent_keys)
+
+
+@both
+def test_a_caller_supplied_key_is_sent_verbatim(outcome_api, mode):
+    decide, outcome = outcome_api
+    decide.mock(side_effect=[httpx.Response(502), httpx.Response(200, json=ALLOW)])
+    outcome.mock(return_value=httpx.Response(200, json=RECEIPT))
+    h = hooks(mode)
+    run(h.decide("agent_to_email", EMAIL, idempotency_key="order-42:send"))
+    run(h.report_outcome(RECEIPT["approvalId"], "succeeded", idempotency_key="k" * 255))
+    assert keys(decide) == ["order-42:send", "order-42:send"] and keys(outcome) == ["k" * 255]
+
+
+@both
+@pytest.mark.parametrize("key", ["k" * 256, "", " padded", "café", "a\nb", 42])
+def test_a_bad_caller_key_raises_before_any_request(outcome_api, mode, key):
+    decide, outcome = outcome_api
+    h = hooks(mode)
+    for call in (lambda: h.decide("agent_to_email", EMAIL, idempotency_key=key),
+                 lambda: h.report_outcome(RECEIPT["approvalId"], "succeeded", idempotency_key=key)):
+        with pytest.raises(PraesidiaConfigError):
+            run(call())
+    assert decide.call_count == 0 and outcome.call_count == 0
+
+
+@both
+def test_409_idempotency_key_reused_raises_the_typed_error_once(outcome_api, mode):
+    decide, outcome = outcome_api
+    for route in (decide, outcome):
+        route.mock(return_value=httpx.Response(409, json=REUSED))  # every attempt would get it again
+    h = hooks(mode)
+    for call in (lambda: h.decide("agent_to_email", EMAIL), lambda: report(h), lambda: h.before_tool_call("search.web")):
+        with pytest.raises(IdempotencyKeyReusedError) as err:
+            run(call())  # a fail-open hook raises too: a 409 is never an outage
+        assert err.value.status_code == 409 and err.value.code == "IDEMPOTENCY_KEY_REUSED" and not err.value.retryable
+    assert decide.call_count == 2 and outcome.call_count == 1
+
+
+@both
+def test_retry_false_sends_once(api, mode):
+    api.respond(503, text="down")
+    result = run(hooks(mode, retry=False).before_tool_call("search.web"))
+    assert result.fail_open_error.status_code == 503 and api.call_count == 1
+
+
+def test_an_invalid_retry_config_is_a_config_error():
+    with pytest.raises(PraesidiaConfigError):
+        hooks("sync", retry=RetryConfig(max_attempts=0))

@@ -29,6 +29,7 @@ from ._retry import (
 from .exceptions import (
     AuthError,
     ForbiddenError,
+    IdempotencyKeyReusedError,
     NotFoundError,
     PraesidiaConfigError,
     PraesidiaError,
@@ -660,6 +661,8 @@ class HttpClient:
             raise NotFoundError(r.text, **envelope_kwargs)
         if r.status_code == 429:
             raise RateLimitError(r.text, **envelope_kwargs)
+        if r.status_code == 409 and envelope_kwargs["code"] == "IDEMPOTENCY_KEY_REUSED":
+            raise IdempotencyKeyReusedError(r.text, **envelope_kwargs)
         if r.status_code >= 500:
             raise ServerError(r.text, r.status_code, **envelope_kwargs)
         try:

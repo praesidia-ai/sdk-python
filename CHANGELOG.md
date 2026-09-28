@@ -6,6 +6,15 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 ## Unreleased
 
 ### Added
+- **SDK-2504 (needs be BE-1759; TS twin SDK-2503):** interaction hooks send an `Idempotency-Key`
+  (UUID v4 per call; a caller key via `decide(..., idempotency_key=)` /
+  `report_outcome(..., idempotency_key=)`) on the decision and outcome POSTs and retry a call
+  under the same key after a network error, timeout, 429/5xx, or an in-flight 409. Each approval
+  poll gets a fresh key. New `IdempotencyKeyReusedError` (409 `IDEMPOTENCY_KEY_REUSED`, never
+  retried), raised by every client. New `retry=` hooks constructor argument (default policy on;
+  `retry=False` restores one attempt). **Behaviour change:** the hooks previously never retried;
+  a transient failure now retries within the 15 s budget before the fail mode applies. Additive
+  signatures, minor bump under the 0.x policy.
 - **SDK-0366 (TS twin SDK-0363; ADR-0004):** `verify_passport` / `verify_ai_system_passport` /
   `fetch_and_verify*` read `proof.signatureFormat` (absent = 1). Format 2 verifies over
   `b"praesidia:trust-passport:v2\n" + canonical JSON`; format 1 passports verify unchanged. A

@@ -18,20 +18,24 @@ import os
 import re
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Awaitable, Callable, Generic, Mapping, Optional, Sequence, TypedDict, TypeVar
+from typing import Any, Awaitable, Callable, Generic, Mapping, Optional, Sequence, TypedDict, TypeVar, Union
 
 import httpx
 
 from ._http import (
     _DEFAULT_TIMEOUT,
     HttpClient,
+    _parse_error_envelope,
     _validate_api_key,
+    _validate_idempotency_key,
     _validate_timeout,
     normalize_base_url,
     path_segment,
 )
+from ._retry import RetryConfig, compute_backoff_s, is_retryable_status, parse_retry_after_s, resolve_retry_config
 from .agents import _UUID_RE
 from ._jcs_canonical import JcsCanonicalizationError, jcs_commitment
 from .exceptions import (
@@ -144,6 +148,7 @@ class _InteractionHooksBase(Generic[_R]):
         approval_timeout: float = 600.0,
         on_approval_required: Optional[Callable[[InteractionDecision], None]] = None,
         task_id: Optional[str] = None,
+        retry: Union[RetryConfig, bool, None] = None,
     ) -> None:
         api_key = api_key or os.environ.get("PRAESIDIA_API_KEY")
         org_id = org_id or os.environ.get("PRAESIDIA_ORG_ID")
@@ -170,7 +175,12 @@ class _InteractionHooksBase(Generic[_R]):
         self._cache: dict[str, tuple[InteractionDecision, float]] = {}
         self._fingerprint: Optional[str] = None
         self._lock = threading.Lock()
+        try:
+            retry_config = resolve_retry_config(retry)
+        except ValueError as exc:
+            raise PraesidiaConfigError(str(exc)) from exc
         self._http = self._open(
+            retry_config,
             base_url=normalize_base_url(base_url or os.environ.get("PRAESIDIA_BASE_URL") or "https://api.praesidia.ai", allow_insecure_http),
             headers={
                 "Authorization": f"Bearer {_validate_api_key(api_key)}",
@@ -180,7 +190,7 @@ class _InteractionHooksBase(Generic[_R]):
             timeout=_validate_timeout(_DEFAULT_TIMEOUT if timeout is None else timeout),
         )
 
-    def _open(self, **client_args: Any) -> Any:
+    def _open(self, retry: Optional[RetryConfig], **client_args: Any) -> Any:
         raise NotImplementedError
 
     def _guard(self, interaction_type: str, action: Mapping[str, Any], fail_mode: str) -> _R:
@@ -217,15 +227,15 @@ class _InteractionHooksBase(Generic[_R]):
             raise PraesidiaConfigError("fail_mode must be 'open' or 'closed'")
         return self._guard(interaction_type, action, fail_mode)
 
-    def _send(self, interaction_type: str, act: dict[str, Any], approval_id: Optional[str]) -> Any:
-        # Not retried: every POST writes a Decision Record and may mint an approval. Key order = be DTO = TS SDK.
-        return self._http.post(self._path, json={
+    def _send(self, interaction_type: str, act: dict[str, Any], approval_id: Optional[str], key: Optional[str] = None) -> Any:
+        # One Idempotency-Key per call (BE-1759): retries replay it; a poll adds approvalId, so it is a new call. Key order = be DTO = TS SDK.
+        return self._http.post(self._path, {
             "interactionType": interaction_type,
             "agentId": self.agent_id,
             "action": act,
             **({} if approval_id is None else {"approvalId": approval_id}),
             **({} if self.task_id is None else {"taskId": self.task_id}),
-        })
+        }, _decision, _idempotency_key(key))
 
     def report_outcome(
         self,
@@ -236,6 +246,7 @@ class _InteractionHooksBase(Generic[_R]):
         result: Any = None,
         target_system: Optional[str] = None,
         target_transaction_id: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Any:
         """
         Record the result of an approved interaction, once (BE-1582). ``approval_id`` is
@@ -245,6 +256,7 @@ class _InteractionHooksBase(Generic[_R]):
         committed locally (sha256 of its JCS form) and never sent; ``None`` sends no commitment. Any
         refusal (unknown, not consumed, not approved, already reported) is one ``PraesidiaError`` with
         ``status_code`` 409 (403 when the decision was issued to another principal); it is not retried. Returns an ``InteractionOutcomeReceipt``.
+        ``idempotency_key`` (default: a fresh UUID v4) is sent as ``Idempotency-Key`` and reused by the SDK's retries.
         """
         keys = {k: v for k, v in (("approvalId", approval_id), ("decisionId", decision_id)) if v is not None}
         if len(keys) != 1:
@@ -260,8 +272,9 @@ class _InteractionHooksBase(Generic[_R]):
             raise PraesidiaConfigError(f"result must be a JSON value: {exc}") from exc
         optional = {"resultCommitment": commitment, "targetSystem": target_system, "targetTransactionId": target_transaction_id}
         body = {"agentId": self.agent_id, key: value, "status": status}
-        # Key order = be DTO = TS SDK; not retried (the server records the outcome once).
-        return self._http.post(f"{self._path}/outcome", {**body, **{k: v for k, v in optional.items() if v is not None}}, _receipt)
+        key = _idempotency_key(idempotency_key)  # validated before anything is sent
+        # Key order = be DTO = TS SDK; a retry under the same key replays the recorded outcome (BE-1759).
+        return self._http.post(f"{self._path}/outcome", {**body, **{k: v for k, v in optional.items() if v is not None}}, _receipt, key)
 
     def _cached(self, key: str) -> Optional[InteractionDecision]:
         with self._lock:
@@ -303,12 +316,14 @@ class _InteractionHooksBase(Generic[_R]):
 class PraesidiaInteractionHooks(_InteractionHooksBase[InteractionHookResult]):
     """Blocking hooks over one pooled ``httpx.Client`` (thread-safe). ``close()`` it, or use ``with``."""
 
-    def _open(self, **client_args: Any) -> _SyncPost:
-        return _SyncPost(httpx.Client(**client_args))
+    def _open(self, retry: Optional[RetryConfig], **client_args: Any) -> _SyncPost:
+        return _SyncPost(httpx.Client(**client_args), retry)
 
-    def decide(self, interaction_type: str, action: Mapping[str, Any], approval_id: Optional[str] = None) -> InteractionDecision:
-        """One raw decision request: no cache, no approval wait, no fail mode."""
-        return self._send(interaction_type, _check(interaction_type, action)[1], approval_id)
+    def decide(
+        self, interaction_type: str, action: Mapping[str, Any], approval_id: Optional[str] = None, idempotency_key: Optional[str] = None
+    ) -> InteractionDecision:
+        """One raw decision request: no cache, no approval wait, no fail mode. ``idempotency_key``: see README."""
+        return self._send(interaction_type, _check(interaction_type, action)[1], approval_id, idempotency_key)
 
     def guarded(self, tool: Callable[..., Any], tool_name: Optional[str] = None) -> Callable[..., Any]:
         """Wrap a keyword-argument tool so every call runs ``before_tool_call`` first (name: ``tool.__name__``)."""
@@ -362,12 +377,14 @@ class PraesidiaInteractionHooks(_InteractionHooksBase[InteractionHookResult]):
 class AsyncPraesidiaInteractionHooks(_InteractionHooksBase[Awaitable[InteractionHookResult]]):
     """The same hooks over one ``httpx.AsyncClient``; every hook is awaited. ``await aclose()``, or ``async with``."""
 
-    def _open(self, **client_args: Any) -> _AsyncPost:
-        return _AsyncPost(httpx.AsyncClient(**client_args))
+    def _open(self, retry: Optional[RetryConfig], **client_args: Any) -> _AsyncPost:
+        return _AsyncPost(httpx.AsyncClient(**client_args), retry)
 
-    async def decide(self, interaction_type: str, action: Mapping[str, Any], approval_id: Optional[str] = None) -> InteractionDecision:
-        """One raw decision request: no cache, no approval wait, no fail mode."""
-        return await self._send(interaction_type, _check(interaction_type, action)[1], approval_id)
+    async def decide(
+        self, interaction_type: str, action: Mapping[str, Any], approval_id: Optional[str] = None, idempotency_key: Optional[str] = None
+    ) -> InteractionDecision:
+        """One raw decision request: no cache, no approval wait, no fail mode. ``idempotency_key``: see README."""
+        return await self._send(interaction_type, _check(interaction_type, action)[1], approval_id, idempotency_key)
 
     def guarded(self, tool: Callable[..., Any], tool_name: Optional[str] = None) -> Callable[..., Awaitable[Any]]:
         """Wrap a keyword-argument tool (sync or async) so every call awaits ``before_tool_call`` first."""
@@ -419,27 +436,84 @@ class AsyncPraesidiaInteractionHooks(_InteractionHooksBase[Awaitable[Interaction
 
 
 class _SyncPost:
-    def __init__(self, client: httpx.Client) -> None:
+    def __init__(self, client: httpx.Client, retry: Optional[RetryConfig]) -> None:
         self.client = client
+        self.retry = retry
 
-    def post(self, path: str, json: dict[str, Any], parse: Optional[Callable[..., Any]] = None) -> Any:
-        with self.client.stream("POST", path, content=_dumps(json)) as r:
+    def post(self, path: str, json: dict[str, Any], parse: Callable[..., Any], key: str) -> Any:
+        content, headers, start, attempt = _dumps(json), {"Idempotency-Key": key}, time.monotonic(), 1
+        while True:
             raw = bytearray()
-            for chunk in r.iter_bytes():
-                _append(raw, chunk, r)
-        return (parse or _decision)(r, raw)
+            try:
+                with self.client.stream("POST", path, content=content, headers=headers) as r:
+                    for chunk in r.iter_bytes():
+                        _append(raw, chunk, r)
+            except httpx.RequestError:
+                if (delay := _retry_delay(self.retry, attempt, start, None, raw)) is None:
+                    raise
+            else:
+                if (delay := _retry_delay(self.retry, attempt, start, r, raw)) is None:
+                    return parse(r, raw)
+            time.sleep(delay)
+            attempt += 1
 
 
 class _AsyncPost:
-    def __init__(self, client: httpx.AsyncClient) -> None:
+    def __init__(self, client: httpx.AsyncClient, retry: Optional[RetryConfig]) -> None:
         self.client = client
+        self.retry = retry
 
-    async def post(self, path: str, json: dict[str, Any], parse: Optional[Callable[..., Any]] = None) -> Any:
-        async with self.client.stream("POST", path, content=_dumps(json)) as r:
+    async def post(self, path: str, json: dict[str, Any], parse: Callable[..., Any], key: str) -> Any:
+        content, headers, start, attempt = _dumps(json), {"Idempotency-Key": key}, time.monotonic(), 1
+        while True:
             raw = bytearray()
-            async for chunk in r.aiter_bytes():
-                _append(raw, chunk, r)
-        return (parse or _decision)(r, raw)
+            try:
+                async with self.client.stream("POST", path, content=content, headers=headers) as r:
+                    async for chunk in r.aiter_bytes():
+                        _append(raw, chunk, r)
+            except httpx.RequestError:
+                if (delay := _retry_delay(self.retry, attempt, start, None, raw)) is None:
+                    raise
+            else:
+                if (delay := _retry_delay(self.retry, attempt, start, r, raw)) is None:
+                    return parse(r, raw)
+            await asyncio.sleep(delay)
+            attempt += 1
+
+
+#: be ``withIdempotency`` (BE-1759): a 409 for a key whose first request is still running, no ``code``.
+_IN_FLIGHT = "A request with this Idempotency-Key is already in progress"
+
+
+def _idempotency_key(key: Optional[str]) -> str:
+    """A caller key, checked like be's (at most 255 chars) plus a printable-ASCII header value; else a fresh UUID v4."""
+    if key is None:
+        return str(uuid.uuid4())
+    try:
+        key = _validate_idempotency_key(key)
+    except ValueError as exc:
+        raise PraesidiaConfigError(str(exc)) from exc
+    if len(key) > 255 or not key.isascii():
+        raise PraesidiaConfigError("idempotency_key must be at most 255 printable ASCII characters")
+    return key
+
+
+def _retry_delay(cfg: Optional[RetryConfig], attempt: int, start: float, r: Optional[httpx.Response], raw: bytearray) -> Optional[float]:
+    """
+    Seconds to wait before re-sending the same key, or ``None`` to stop. Retried: a transport error
+    (``r`` is ``None``), 429/5xx, and the 409 for a key whose first request is still running. Never a
+    409 ``IDEMPOTENCY_KEY_REUSED`` or any other 4xx. Budget and backoff as for the management client.
+    """
+    if cfg is None or attempt >= cfg.max_attempts:
+        return None
+    if r is not None and not is_retryable_status(r.status_code):
+        envelope = (_parse_error_envelope(bytes(raw).decode("utf-8", "replace")) if r.status_code == 409 else None) or {}
+        message = envelope.get("message")
+        if not (isinstance(message, str) and message.startswith(_IN_FLIGHT) and envelope.get("code") is None):
+            return None
+    retry_after = None if r is None else parse_retry_after_s(r.headers.get("retry-after"))
+    delay = retry_after if retry_after is not None else compute_backoff_s(attempt, cfg.base_delay_s, cfg.max_delay_s)
+    return None if time.monotonic() - start + delay >= cfg.max_elapsed_s else delay
 
 
 def _dumps(body: dict[str, Any]) -> bytes:

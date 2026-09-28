@@ -90,6 +90,17 @@ class ServerError(PraesidiaError):
         super().__init__(message, status_code=status_code, **envelope_kwargs)
 
 
+class IdempotencyKeyReusedError(PraesidiaError):
+    """
+    SDK-2504 -- HTTP 409 ``IDEMPOTENCY_KEY_REUSED`` (be BE-1759): the ``Idempotency-Key`` was
+    already used with a different request body. Never retried; send a fresh key for a new body.
+    Mirrors the TS SDK's ``IdempotencyKeyReusedError``.
+    """
+
+    def __init__(self, message: str, **envelope_kwargs: Any) -> None:
+        super().__init__(message, status_code=409, **envelope_kwargs)
+
+
 class ResponseTooLargeError(PraesidiaError):
     """Raised before an upstream response can exceed the SDK's memory cap."""
 

@@ -956,6 +956,19 @@ omit an argument whose value is `None` (and `arguments` when none is left);
 scope, `AGENT_POLICIES` feature); the request and response bytes match the TS SDK's, proven by
 replaying be's recorded `test-fixtures/interaction-decision-v1.json` in both SDKs.
 
+**Idempotency and retries (SDK-2504, needs be BE-1759).** Every decision POST and outcome POST
+carries an `Idempotency-Key`: a fresh UUID v4 per call, or yours via
+`decide(..., idempotency_key=...)` / `report_outcome(..., idempotency_key=...)` (at most 255
+printable ASCII characters, else `PraesidiaConfigError` before any request). The hooks retry a
+call under the same key after a network error, a timeout, a 429 / 5xx, or a 409 saying the key's
+first request is still running; be then replays the stored response, so a retry never writes a
+second Decision Record or outcome. Each approval poll is a new call with a new key (it adds
+`approvalId`, a different body). The same key with a different body is a 409
+`IDEMPOTENCY_KEY_REUSED`, raised once as `IdempotencyKeyReusedError` (never retried, never an
+outage, so it raises on a fail-open hook too). The policy is `retry=` as for `Praesidia`
+(default 3 attempts in 15 s, `Retry-After` honoured); `retry=False` sends once. Retries run
+before the fail mode applies, so an outage reaches it after the retry budget, not the first error.
+
 ## Retry (FINDING-4) — bounded, idempotency-safe by default
 
 The client retries **only** requests that are safe to repeat: GET, DELETE, and
@@ -1025,6 +1038,9 @@ except RateLimitError:
 
 `ProtectedActionDeniedError` and `UnsupportedProtectedActionTargetError` (PA01 DX-002) are raised
 only by `client.agents.protect_action` — see [above](#protect-a-dispatch--protect_action-pa01-dx-002).
+
+`IdempotencyKeyReusedError` (409 `IDEMPOTENCY_KEY_REUSED`, a subclass of `PraesidiaError`) is
+never retried: the `Idempotency-Key` was already used with a different body.
 
 `InteractionDeniedError` (`interaction_type`, `action_name`, `reason_code`, `decision`) and
 `InteractionDecisionUnavailableError` (`__cause__` = the outage) are raised only by the interaction
