@@ -12,8 +12,11 @@ import pytest
 from praesidia.exceptions import ForbiddenError, InteractionDeniedError, ServerError
 
 EXAMPLE = Path(__file__).parents[1] / "examples/refund_authorization"
-if not EXAMPLE.is_dir():  # the example is excluded from the sdist
-    pytest.skip("examples/refund_authorization not present", allow_module_level=True)
+# SDK-0364: the example is excluded from the sdist, so skip only outside a Git checkout; in a
+# checkout a deleted or renamed example must fail, since the INFRA-1303 acceptance chain relies on it.
+if not (EXAMPLE.parents[1] / ".git").exists():
+    pytest.skip("not a git checkout (e.g. an sdist without examples/refund_authorization)", allow_module_level=True)
+assert EXAMPLE.is_dir(), f"{EXAMPLE} is missing (renamed or deleted?)"
 spec = importlib.util.spec_from_file_location("refund_example", EXAMPLE / "refund.py")
 refund = sys.modules["refund_example"] = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(refund)
