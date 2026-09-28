@@ -902,6 +902,14 @@ hooks.report_outcome(
 )  # -> {"approvalId": ..., "decisionId": ...}
 ```
 
+A plain `allow` (`decision["approvalId"] is None`) reports by its decision id instead:
+`hooks.report_outcome(status="succeeded", decision_id=decision["decisionId"])` returns
+`{"approvalId": None, "decisionId": ..., "reportedDecisionId": ...}`. Pass exactly one of
+`approval_id` / `decision_id` (else a `PraesidiaConfigError`, also a `ValueError`). Only the
+principal the `allow` was issued to may report it (else 403), once per `decisionId`: a verdict
+reused from the cache shares its `decisionId`, so only its first run can report. The receipt's
+`decisionId` keys `GET /organizations/:orgId/audit/decisions/:decisionId/receipt`.
+
 `result` never leaves your process; `result=None` sends no commitment (the TS SDK commits a
 JSON `null` result, Python cannot tell it from "not given"). A second report, or one for an
 approval that was not consumed, is refused with a single `PraesidiaError` (`status_code`

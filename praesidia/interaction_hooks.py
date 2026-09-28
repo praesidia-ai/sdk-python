@@ -96,11 +96,23 @@ class InteractionDecision(_InteractionDecisionRequired, total=False):
     constrainedBy: Optional[str]
 
 
-class InteractionOutcomeReceipt(TypedDict):
-    """be ``InteractionOutcomeResponseDto``: ``decisionId`` is the Decision Record id of the outcome."""
-
-    approvalId: str
+class _InteractionOutcomeReceiptRequired(TypedDict):
+    approvalId: Optional[str]
     decisionId: str
+
+
+class InteractionOutcomeReceipt(_InteractionOutcomeReceiptRequired, total=False):
+    """be ``InteractionOutcomeResponseDto``: ``decisionId`` is the Decision Record id of the outcome.
+
+    ``approvalId`` is ``None`` and ``reportedDecisionId`` echoes the request on the
+    ``decision_id`` path (BE-1808); ``reportedDecisionId`` is absent from older servers.
+    """
+
+    reportedDecisionId: Optional[str]
+
+
+class _OutcomeKeyError(PraesidiaConfigError, ValueError):
+    """``report_outcome`` got neither or both of ``approval_id`` / ``decision_id``."""
 
 
 @dataclass(frozen=True)
@@ -217,22 +229,29 @@ class _InteractionHooksBase(Generic[_R]):
 
     def report_outcome(
         self,
-        approval_id: str,
-        status: str,
+        approval_id: Optional[str] = None,
+        status: Optional[str] = None,
         *,
+        decision_id: Optional[str] = None,
         result: Any = None,
         target_system: Optional[str] = None,
         target_transaction_id: Optional[str] = None,
     ) -> Any:
         """
         Record the result of an approved interaction, once (BE-1582). ``approval_id`` is
-        ``decision["approvalId"]`` of an ``allow`` with reasonCode ``approval_consumed``. ``result`` is
+        ``decision["approvalId"]`` of an ``allow`` with reasonCode ``approval_consumed``; for a plain
+        ``allow`` (``approvalId`` ``None``) pass ``decision_id=decision["decisionId"]`` instead (BE-1808).
+        Exactly one of the two, else a ``PraesidiaConfigError`` that is also a ``ValueError``. ``result`` is
         committed locally (sha256 of its JCS form) and never sent; ``None`` sends no commitment. Any
         refusal (unknown, not consumed, not approved, already reported) is one ``PraesidiaError`` with
-        ``status_code`` 409; it is not retried. Returns an ``InteractionOutcomeReceipt``.
+        ``status_code`` 409 (403 when the decision was issued to another principal); it is not retried. Returns an ``InteractionOutcomeReceipt``.
         """
-        if not isinstance(approval_id, str) or not approval_id:
-            raise PraesidiaConfigError("approval_id is required")
+        keys = {k: v for k, v in (("approvalId", approval_id), ("decisionId", decision_id)) if v is not None}
+        if len(keys) != 1:
+            raise _OutcomeKeyError("pass exactly one of approval_id or decision_id")
+        ((key, value),) = keys.items()
+        if not isinstance(value, str) or not value:
+            raise _OutcomeKeyError(f"{'approval_id' if key == 'approvalId' else 'decision_id'} must be a non-empty string")
         if status not in INTERACTION_OUTCOME_STATUSES:
             raise PraesidiaConfigError(f"status must be one of {', '.join(INTERACTION_OUTCOME_STATUSES)}")
         try:
@@ -240,7 +259,7 @@ class _InteractionHooksBase(Generic[_R]):
         except JcsCanonicalizationError as exc:
             raise PraesidiaConfigError(f"result must be a JSON value: {exc}") from exc
         optional = {"resultCommitment": commitment, "targetSystem": target_system, "targetTransactionId": target_transaction_id}
-        body = {"agentId": self.agent_id, "approvalId": approval_id, "status": status}
+        body = {"agentId": self.agent_id, key: value, "status": status}
         # Key order = be DTO = TS SDK; not retried (the server records the outcome once).
         return self._http.post(f"{self._path}/outcome", {**body, **{k: v for k, v in optional.items() if v is not None}}, _receipt)
 
@@ -445,7 +464,11 @@ def _json(r: httpx.Response, raw: bytearray) -> Any:
 
 def _receipt(r: httpx.Response, raw: bytearray) -> InteractionOutcomeReceipt:
     d = _json(r, raw)
-    if not (isinstance(d, dict) and isinstance(d.get("approvalId"), str) and isinstance(d.get("decisionId"), str)):
+    if not (
+        isinstance(d, dict)
+        and isinstance(d.get("decisionId"), str)
+        and (isinstance(d.get("approvalId"), str) or isinstance(d.get("reportedDecisionId"), str))
+    ):
         raise PraesidiaError("malformed interaction outcome response", status_code=r.status_code)
     return d  # type: ignore[return-value]
 

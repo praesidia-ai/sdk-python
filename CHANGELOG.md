@@ -5,6 +5,14 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 
 ## Unreleased
 
+### Added
+- **SDK-0362 (needs be BE-1808; TS twin SDK-0361):** `report_outcome(status=..., decision_id=...)`
+  reports the outcome of a plain `allow` (`approvalId` `None`) by its `decisionId`. Pass exactly one
+  of `approval_id` / `decision_id`; neither or both raises a `PraesidiaConfigError` that is also a
+  `ValueError`, before any request. Existing `report_outcome(approval_id, status)` calls are
+  unchanged. `InteractionOutcomeReceipt.approvalId` is now `Optional[str]` (typing only: `None` on
+  the decision path) and gains `reportedDecisionId`. A second report is 409; another principal 403.
+
 ### Fixed
 - **Behaviour change (SDK-0359, security; TS twin SDK-0358):** a request header httpx would refuse
   (a `chain_id` or caller header containing CR, LF, NUL, another control character, or any

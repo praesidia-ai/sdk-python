@@ -373,6 +373,56 @@ def test_report_rejects_bad_input_before_any_request(outcome_api, mode, args, kw
     assert report.call_count == 0
 
 
+# BE-1808: a plain ALLOW (approvalId None) reports by its decisionId.
+DECISION_RECEIPT = {"approvalId": None, "decisionId": "66666666-6666-4666-8666-666666666602", "reportedDecisionId": ALLOW["decisionId"]}
+
+
+@both
+def test_plain_allow_reports_by_decision_id(outcome_api, mode):
+    decide, report = outcome_api
+    decide.mock(return_value=httpx.Response(200, json=ALLOW))
+    report.mock(return_value=httpx.Response(200, json=DECISION_RECEIPT))
+    h = hooks(mode)
+    decision = run(h.before_interaction("agent_to_email", EMAIL)).decision
+    assert decision["approvalId"] is None
+    receipt = run(h.report_outcome(status="succeeded", decision_id=decision["decisionId"], target_system="smtp"))
+    assert receipt == DECISION_RECEIPT and report.call_count == 1
+    assert report.calls[0].request.content == wire(
+        {"agentId": AGENT, "decisionId": ALLOW["decisionId"], "status": "succeeded", "targetSystem": "smtp"}
+    )
+
+
+@both
+@pytest.mark.parametrize(
+    "args,kwargs",
+    [((None, "succeeded"), {}), ((RECEIPT["approvalId"], "succeeded"), {"decision_id": ALLOW["decisionId"]}), ((), {"status": "succeeded", "decision_id": ""})],
+    ids=["neither", "both", "empty decision_id"],
+)
+def test_report_needs_exactly_one_key(outcome_api, mode, args, kwargs):
+    _, report = outcome_api
+    with pytest.raises(ValueError, match="approval_id|decision_id") as err:
+        run(hooks(mode).report_outcome(*args, **kwargs))
+    assert isinstance(err.value, PraesidiaConfigError) and report.call_count == 0
+
+
+@both
+@pytest.mark.parametrize("status", [409, 403])
+def test_report_by_decision_id_refusal_is_one_typed_error_not_retried(outcome_api, mode, status):
+    _, report = outcome_api
+    report.mock(side_effect=[httpx.Response(status, json={"message": "refused"}), httpx.Response(200, json=DECISION_RECEIPT)])
+    with pytest.raises(PraesidiaError) as err:
+        run(hooks(mode).report_outcome(status="succeeded", decision_id=ALLOW["decisionId"]))
+    assert err.value.status_code == status and report.call_count == 1
+
+
+@both
+def test_receipt_without_either_echo_is_malformed(outcome_api, mode):
+    _, report = outcome_api
+    report.mock(return_value=httpx.Response(200, json={"approvalId": None, "decisionId": DECISION_RECEIPT["decisionId"]}))
+    with pytest.raises(PraesidiaError, match="malformed"):
+        run(hooks(mode).report_outcome(status="unknown", decision_id=ALLOW["decisionId"]))
+
+
 def test_outcome_statuses_equal_the_be_enum():
     assert interaction_hooks.INTERACTION_OUTCOME_STATUSES == ("succeeded", "failed_no_effect", "partial", "unknown")
 
