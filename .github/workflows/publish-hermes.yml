@@ -18,12 +18,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
 
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.11'
 
@@ -56,11 +56,11 @@ jobs:
 
       - name: Build wheel + sdist
         run: |
-          pip install build==1.3.0 twine==6.2.0
+          pip install build==1.6.1 twine==7.0.0
           python -m build plugins/hermes
           twine check plugins/hermes/dist/*
 
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: NousResearch/hermes-agent
           ref: 0390ace8179f4cf75bd3941e590dd74e638672b6
@@ -74,7 +74,7 @@ jobs:
           PRAESIDIA_HERMES_SOURCE: ${{ github.workspace }}/upstream/hermes
           OTEL_SDK_DISABLED: 'true'
         run: |
-          pip install uv==0.5.24
+          pip install uv==0.12.20
           uv sync --frozen --extra dev --extra frameworks --group crewai
           uv pip install --no-deps plugins/hermes/dist/*.whl
           .venv/bin/python -m pytest tests/test_hermes_plugin.py -q

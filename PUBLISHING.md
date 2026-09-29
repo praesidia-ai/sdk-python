@@ -48,8 +48,8 @@ A publish is a **tag push**, never a local upload. `.github/workflows/publish.ym
 The **wheel** (`praesidia-0.5.0-py3-none-any.whl`, what `pip install praesidia` pulls) has 41
 entries: `praesidia/**` (modules, `integrations/`, `py.typed`) and `praesidia-0.5.0.dist-info/`
 (`METADATA`, `WHEEL`, `RECORD`, `licenses/LICENSE`). No tests, `.env`, CI config, Dockerfile,
-examples or `plugins/`. Metadata-Version 2.4 (pinned via `hatchling==1.27.0`; Twine 6.2 rejects
-2.5). `twine check` passes on both artifacts.
+examples or `plugins/`. Metadata-Version 2.5 (pinned via `hatchling==1.32.4`; Twine 7.0 and
+`pypa/gh-action-pypi-publish` v1.14.2 accept it). `twine check` passes on both artifacts.
 
 Published extras: `openai-agents`, `google-adk`, `microsoft-agent-framework`, `agno`,
 `langgraph`, `frameworks` (all five) and `dev`. **CrewAI is not an extra** while its ChromaDB

@@ -13,7 +13,7 @@ with `path:line` anchors, and a condensed build/test/publish reference.
 `praesidia` is a Python management SDK for the Praesidia AI agent platform: agents, agent-tasks,
 workflows, connections, audit log, analytics, EU AI Act compliance reports, agent memory, OTLP
 GenAI telemetry, and offline trust-passport verification, all via the Praesidia REST API
-(`sdk-python/README.md:1-7`). Requires Python 3.9+ and `httpx`
+(`sdk-python/README.md:1-7`). Requires Python 3.11+ and `httpx`
 (`sdk-python/README.md:20`).
 
 ## Publishing status — read this before writing install instructions anywhere

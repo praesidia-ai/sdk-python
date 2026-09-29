@@ -31,7 +31,7 @@ A standalone, installed-package example of the governed refund path (decision,
 approval, Stripe test-mode refund, outcome, receipt, audit package) is in
 [`examples/refund_authorization/`](examples/refund_authorization/README.md).
 
-Requires Python 3.9+ and [`httpx`](https://www.python-httpx.org/) (installed automatically).
+Requires Python 3.11+ and [`httpx`](https://www.python-httpx.org/) (installed automatically).
 
 ## Managed runtime tools (0.5.0 source)
 
@@ -1130,6 +1130,6 @@ carry an SDK-level breaking change (see [CHANGELOG.md](CHANGELOG.md)).
 
 ### Durable protected HTTP execution
 
-`client.protected_http` exposes `prepare`, `checkpoint`, `resume`, `revoke` and `acknowledge`. Install `praesidia[langgraph]` on Python 3.10+ to use `praesidia.integrations.langgraph.protected_http_graph` with a durable checkpointer. The wake-up value never substitutes for a distinct human approval in Praesidia.
+`client.protected_http` exposes `prepare`, `checkpoint`, `resume`, `revoke` and `acknowledge`. Install `praesidia[langgraph]` to use `praesidia.integrations.langgraph.protected_http_graph` with a durable checkpointer. The wake-up value never substitutes for a distinct human approval in Praesidia.
 
 See `examples/protected_http_langgraph.py` for separate-process preparation and resume against a real backend, including independent target receipt verification and caller acknowledgment. The versioned wire contract is documented in the [TypeScript SDK protected HTTP guide](https://github.com/praesidia-ai/sdk/blob/main/docs/protected-http.md). Unknown outcomes must be inspected through checkpoint readback; resume is never transparently retried.

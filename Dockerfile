@@ -3,24 +3,27 @@
 # deployable service — the package is a wheel published to PyPI. The image
 # exists so the build + test pipeline is reproducible on any host.
 #
-# Base: python:3.14-slim. Runs as a non-root user.
+# Base: python:3.14.7-slim-trixie (digest-pinned). Runs as a non-root user.
 
-FROM python:3.14-slim@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015 AS build
-# python:3.14-slim
+FROM python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS build
+# python:3.14.7-slim-trixie
 WORKDIR /app
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
-COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY pyproject.toml uv.lock README.md LICENSE PUBLISHING.md ./
 COPY praesidia ./praesidia
 COPY tests ./tests
 COPY test-fixtures ./test-fixtures
 COPY examples ./examples
-COPY .github/workflows/publish.yml ./.github/workflows/publish.yml
+# tests/test_release_workflow.py reads the workflows, smoke script and plugin metadata.
+COPY .github/workflows ./.github/workflows
+COPY scripts ./scripts
+COPY plugins ./plugins
 # Install with dev extras, run import + base SDK compatibility tests, then build
 # the exact runtime wheelhouse. The final stage consumes /wheels, which makes
 # this gate load-bearing (an unreferenced test stage is pruned by BuildKit).
 # Required CI frameworks job separately enforces full-source 90% coverage on
-# Python3.11, where the pinned native runtimes are supported and installed.
-RUN pip install "uv==0.5.24" \
+# Python 3.11, where the pinned native runtimes are supported and installed.
+RUN pip install "uv==0.12.20" \
  && uv sync --frozen --extra dev --extra langgraph \
  && .venv/bin/python -c "from praesidia import Praesidia; print('SDK import OK')" \
  && .venv/bin/python -m pytest -q \
@@ -29,8 +32,8 @@ RUN pip install "uv==0.5.24" \
  && uv build --wheel --out-dir /wheels
 
 # ---- runtime: minimal, non-root, installs only the package (no dev/test deps) ----
-FROM python:3.14-slim@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015 AS runtime
-# python:3.14-slim
+FROM python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS runtime
+# python:3.14.7-slim-trixie
 WORKDIR /app
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN useradd --create-home --uid 10001 praesidia

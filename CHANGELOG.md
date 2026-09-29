@@ -28,7 +28,18 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
   unchanged. `InteractionOutcomeReceipt.approvalId` is now `Optional[str]` (typing only: `None` on
   the decision path) and gains `reportedDecisionId`. A second report is 409; another principal 403.
 
+### Changed
+- **Breaking (SDK-2511):** `requires-python` is now `>=3.11` (was `>=3.9`; 3.9 is EOL, 3.10 is
+  EOL 2026-10-31). Base dependency floor `httpx>=0.28.1,<1`. Framework extras pinned to
+  `google-adk==2.10.0`, `agent-framework-core==1.19.0`, `agno==3.0.11`, `langgraph==1.2.12`
+  (CrewAI test group `1.15.23`); `openai-agents` stays `0.20.0` because CrewAI still requires
+  `openai<3`. Wheels now carry Core Metadata 2.5 (hatchling 1.32.4). Needs a 0.x minor bump.
+
 ### Fixed
+- **SDK-2511:** `memory.list(source_type="IMPORT")` raised `NameError` (a `create()`-only
+  `access_source_id` check had been copied into `list()`); it now sends the filter.
+- Public type hints: return/parameter annotations written `list[...]` inside classes with a
+  `list()` method resolved to the method under type checkers; they now use `builtins.list`.
 - **Behaviour change (SDK-0359, security; TS twin SDK-0358):** a request header httpx would refuse
   (a `chain_id` or caller header containing CR, LF, NUL, another control character, or any
   non-ASCII character; a header name that is not an RFC 9110 token; a non-`str` value) now raises

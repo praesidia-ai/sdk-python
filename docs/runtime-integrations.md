@@ -12,16 +12,16 @@ framework extras can coexist in Python 3.11 using `.[frameworks]`. CrewAI is not
 published extra while its [dependency advisories](#known-optional-dependency-advisory-boundary-2026-09-06)
 are open; from a checkout, `uv sync --extra frameworks --group crewai` adds it for
 testing. CrewAI's selected release does not support Python 3.14. Base management
-SDK support remains Python 3.9+.
+SDK support is Python 3.11+.
 
 | Runtime | Tested package | Actual tool/context seam | Persisted identity/state |
 | --- | --- | --- | --- |
-| CrewAI | `crewai==1.15.20` | `BaseTool.run/_run` and a host binding from real Flow state | Flow `id`, stable host-issued logical step ID, `praesidia_tools` |
+| CrewAI | `crewai==1.15.23` | `BaseTool.run/_run` and a host binding from real Flow state | Flow `id`, stable host-issued logical step ID, `praesidia_tools` |
 | OpenAI Agents Python | `openai-agents==0.20.0` | `FunctionTool`, native `ToolContext`, `needs_approval`, Runner interruptions | Native tool-call ID; host session ID/context plus serialized `RunState` |
-| Google ADK | `google-adk==2.8.0` | `FunctionTool.run_async`, injected `ToolContext` | Native session ID/function-call ID, state delta `praesidia_tools` |
-| Microsoft Agent Framework Python | `agent-framework-core==1.17.0` | Actual `FunctionTool.invoke` captures its separate native `tool_call_id` | `AgentSession.session_id/state`; ID is not model arguments |
-| Agno | `agno==3.0.6` | Actual Function/FunctionCall and injected `RunContext`/`fc` | Session ID, native `fc.call_id`, `session_state.praesidia_tools` |
-| LangGraph | `langgraph==1.2.11`, `langgraph-checkpoint-sqlite==3.1.1` | `StructuredTool` in `ToolNode`, injected call ID/state, returned `Command` | Configurable thread ID, native tool-call ID, graph state cursor |
+| Google ADK | `google-adk==2.10.0` | `FunctionTool.run_async`, injected `ToolContext` | Native session ID/function-call ID, state delta `praesidia_tools` |
+| Microsoft Agent Framework Python | `agent-framework-core==1.19.0` | Actual `FunctionTool.invoke` captures its separate native `tool_call_id` | `AgentSession.session_id/state`; ID is not model arguments |
+| Agno | `agno==3.0.11` | Actual Function/FunctionCall and injected `RunContext`/`fc` | Session ID, native `fc.call_id`, `session_state.praesidia_tools` |
+| LangGraph | `langgraph==1.2.12`, `langgraph-checkpoint-sqlite==3.1.1` | `StructuredTool` in `ToolNode`, injected call ID/state, returned `Command` | Configurable thread ID, native tool-call ID, graph state cursor |
 | Nous Hermes Agent | upstream commit `0390ace8179f4cf75bd3941e590dd74e638672b6` | Installed module entry point, PluginManager, pre-tool hook, execution middleware, actual tool dispatcher | Native session/tool-call ID, private middleware context, atomic native PluginState |
 
 These are tested Python profiles, not claims about other languages or all future
@@ -153,7 +153,7 @@ is authoritative for the tested profiles where rolling docs differ:
 
 ## Required verification profiles
 
-CI requires both base management compatibility on Python3.9/3.11/3.14 and the
+CI requires both base management compatibility on Python 3.11/3.12/3.13/3.14 and the
 locked Python3.11 native-framework job. The **unchanged 90% full-source coverage
 floor** now runs in that full dependency profile, with no source exclusions.
 The base legs and Python3.14 import-smoke image do not claim coverage for optional

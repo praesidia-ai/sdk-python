@@ -5,7 +5,7 @@ publish runbook — read that in full before ever pushing a release tag.
 
 ## Requirements
 
-Python `>=3.9` (`pyproject.toml:14`). `httpx` is the only required runtime dependency
+Python `>=3.11` (`pyproject.toml:14`). `httpx` is the only required runtime dependency
 (`sdk-python/README.md:20`). Packaged with `hatch` (`pyproject.toml:62-68`).
 
 ## Local development
