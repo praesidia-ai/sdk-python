@@ -1,15 +1,18 @@
 """Managed effects require native execution context and live backend authority."""
 from __future__ import annotations
 
-from contextvars import ContextVar
 import json
 import os
+from contextvars import ContextVar
 from typing import Any
 
 from praesidia import Praesidia
 from praesidia.integrations import FileRuntimeAttemptStore
 from praesidia.integrations.protected_tool import (
-    ManagedProtectedTool, RuntimeBinding, RuntimeCall, decode_body,
+    ManagedProtectedTool,
+    RuntimeBinding,
+    RuntimeCall,
+    decode_body,
 )
 
 TOOL_NAME = "praesidia_protected_http"
@@ -56,7 +59,7 @@ def register(ctx):
         try:
             RuntimeCall("hermes", session_id, tool_call_id).checkpoint(TOOL_NAME)
             decode_body(json.dumps(args, allow_nan=False))
-        except Exception:
+        except Exception:  # noqa: BLE001 - fail closed
             return {"action": "block", "message": "Managed tool requires valid native session, call and JSON arguments."}
         return None
 
@@ -71,7 +74,7 @@ def register(ctx):
             call = RuntimeCall("hermes", session_id, tool_call_id)
             call.checkpoint(TOOL_NAME)
             decode_body(json.dumps(args, allow_nan=False))
-        except Exception:
+        except Exception:  # noqa: BLE001 - fail closed
             return json.dumps({"error": "Managed tool requires valid native session, call and JSON arguments."})
         token = native.set(call)
         try:
@@ -86,7 +89,7 @@ def register(ctx):
         try:
             body = decode_body(json.dumps(args, allow_nan=False))
             return json.dumps(managed.invoke(body, RuntimeBinding(call, state)), allow_nan=False)
-        except Exception:
+        except Exception:  # noqa: BLE001 - fail closed
             # Do not expose HTTP headers, response bodies or signing material in
             # Hermes' generic exception logger. Durable state permits inspection.
             return json.dumps({"error": "Managed request failed closed; inspect its Praesidia checkpoint before retrying."})

@@ -14,10 +14,10 @@ import pytest
 
 from praesidia import Praesidia, ResponseTooLargeError
 from praesidia._http import (
-    HttpClient,
     _DOWNLOAD_TIMEOUT,
     _MAX_ERROR_RESPONSE_BYTES,
     _MAX_JSON_RESPONSE_BYTES,
+    HttpClient,
     path_segment,
 )
 from praesidia.exceptions import (

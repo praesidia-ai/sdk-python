@@ -13,8 +13,8 @@ def agno_tool(managed: ManagedProtectedTool):
     tool uses Praesidia approval authority; AgentOS's separate approval UI is not
     implicitly wired or claimed. Re-enter the same call after the decision.
     """
-    from agno.tools import tool
     from agno.run import RunContext
+    from agno.tools import tool
     from agno.tools.function import FunctionCall
 
     def invoke(body: dict[str, Any], run_context, fc) -> dict[str, Any]:

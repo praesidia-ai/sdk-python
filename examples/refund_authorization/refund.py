@@ -13,14 +13,20 @@ import re
 import sys
 import time
 import zipfile
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any
 
 import httpx
 
-from praesidia import ForbiddenError, InteractionDeniedError, Praesidia, PraesidiaInteractionHooks
+from praesidia import (
+    ForbiddenError,
+    InteractionDeniedError,
+    Praesidia,
+    PraesidiaInteractionHooks,
+)
 
 PRAESIDIA_API = "https://api.praesidia.ai"
 STRIPE_API = "https://api.stripe.com"
@@ -62,7 +68,7 @@ def load_config(env: Mapping[str, str]) -> Config:
                   env.get("PRAESIDIA_PLATFORM_KEY_FILE", ""), env.get("PRAESIDIA_PLATFORM_KEY_FINGERPRINT", ""))
 
 
-def stripe_refund(stripe_key: str, charge: str, idempotency_key: str, *, http: Optional[httpx.Client] = None) -> Any:
+def stripe_refund(stripe_key: str, charge: str, idempotency_key: str, *, http: httpx.Client | None = None) -> Any:
     """POST /v1/refunds. The approval id is the Idempotency-Key: a retry cannot refund twice at Stripe."""
     request = dict(
         auth=(stripe_key, ""),
@@ -95,14 +101,14 @@ def _put_graph(graph: Any, agent_id: str) -> None:
 
 
 def _iso(ts: float) -> str:
-    return datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.fromtimestamp(ts, UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _ts(value: str) -> float:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
 
-def read_package_window(package: bytes) -> Optional[dict]:
+def read_package_window(package: bytes) -> dict | None:
     """The evidence window be wrote into the package's verification.txt (the package job response
     carries none): ``{"to", "requested_to", "clamp_reason"}``, or None when it cannot be read."""
     try:
@@ -110,8 +116,8 @@ def read_package_window(package: bytes) -> Optional[dict]:
     except (zipfile.BadZipFile, KeyError, UnicodeDecodeError):
         return None
 
-    def field(label: str) -> Optional[str]:
-        match = re.search(rf"^{label}: (.+)$", text, re.M)
+    def field(label: str) -> str | None:
+        match = re.search(rf"^{label}: (.+)$", text, re.MULTILINE)
         return match.group(1).strip() if match else None
 
     evidence_range = (field("Evidence range") or "").split(" .. ")
@@ -120,7 +126,7 @@ def read_package_window(package: bytes) -> Optional[dict]:
     return {"to": evidence_range[1], "requested_to": field("Requested range end"), "clamp_reason": field("Range end clamp")}
 
 
-def report_coverage(window: Optional[dict], refunded_at: float, out: Callable[..., None]) -> None:
+def report_coverage(window: dict | None, refunded_at: float, out: Callable[..., None]) -> None:
     """Only a known clamp reason whose (exclusive) rooted end is after the refund counts as covered."""
     at = _iso(refunded_at)
     known = bool(window) and window["clamp_reason"] in KNOWN_CLAMPS
@@ -216,7 +222,7 @@ def run(cfg: Config, *, client: Any, hooks: Any, stripe: Callable[..., Any] = st
     return 0
 
 
-def main(env: Optional[Mapping[str, str]] = None, argv: Optional[list] = None) -> int:
+def main(env: Mapping[str, str] | None = None, argv: list | None = None) -> int:
     try:
         cfg = load_config(os.environ if env is None else env)
     except ConfigError as err:

@@ -64,7 +64,7 @@ def test_publish_uploads_the_smoked_wheel_via_trusted_publishing():
     assert '"${WHEEL:-}"' in script
 
 
-# INTEG-0110 — CrewAI 1.15.20 resolves ChromaDB 1.1.1 with open advisories. Until that
+# INTEG-0110 — CrewAI 1.15.x resolves ChromaDB 1.1.x with open advisories. Until that
 # is resolved the published metadata must not offer it as an extra; CI still tests the
 # adapter through an unpublished dependency group.
 def test_crewai_is_not_a_published_extra_while_its_advisories_are_open():
@@ -91,7 +91,7 @@ def test_first_public_release_is_0_5_0_everywhere_the_version_is_asserted():
     def read(p):
         return (root / p).read_text(encoding="utf-8")
 
-    version = re.search(r'^version = "(.*)"$', read("pyproject.toml"), re.M).group(1)
+    version = re.search(r'^version = "(.*)"$', read("pyproject.toml"), re.MULTILINE).group(1)
     assert version == "0.5.0"
     assert praesidia.__version__ == version
     assert f'name = "praesidia"\nversion = "{version}"' in read("uv.lock")
@@ -109,7 +109,7 @@ def test_hermes_plugin_admits_sdk_patches_but_not_the_next_breaking_minor():
 
     plugin = Path(__file__).resolve().parents[1] / "plugins" / "hermes"
     meta = (plugin / "pyproject.toml").read_text(encoding="utf-8")
-    deps = re.search(r"^dependencies = \[(.*)\]$", meta, re.M).group(1)
+    deps = re.search(r"^dependencies = \[(.*)\]$", meta, re.MULTILINE).group(1)
     (req,) = [Requirement(d) for d in re.findall(r'"([^"]+)"', deps)]
     sdk = Version(praesidia.__version__)
 
@@ -119,7 +119,7 @@ def test_hermes_plugin_admits_sdk_patches_but_not_the_next_breaking_minor():
     # Pre-1.0 a minor bump is breaking, and the plugin imports praesidia.integrations internals.
     assert Version(f"{sdk.major}.{sdk.minor + 1}.0") not in req.specifier
 
-    version = re.search(r'^version = "(.*)"$', meta, re.M).group(1)
+    version = re.search(r'^version = "(.*)"$', meta, re.MULTILINE).group(1)
     assert f"## {version} " in (plugin / "CHANGELOG.md").read_text(encoding="utf-8")
 
 

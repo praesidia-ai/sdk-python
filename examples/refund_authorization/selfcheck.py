@@ -11,11 +11,11 @@ from importlib import metadata
 from pathlib import Path
 from types import SimpleNamespace
 
+import refund
+
 import praesidia
 from praesidia import InteractionDeniedError
 from praesidia.audit import AuditResource
-
-import refund
 
 ENV = {"PRAESIDIA_API_KEY": "selfcheck", "PRAESIDIA_ORG_ID": "org", "PRAESIDIA_AGENT_ID": "agent",
        "STRIPE_SECRET_KEY": "sk_test_selfcheck", "STRIPE_CHARGE_ID": "ch_selfcheck"}

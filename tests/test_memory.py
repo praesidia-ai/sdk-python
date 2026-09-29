@@ -137,6 +137,14 @@ def test_list_sends_query_params_and_unwraps_envelope():
 
 
 @respx.mock
+def test_list_filters_imported_memories():
+    # list() once raised NameError here (a create()-only check referenced access_source_id).
+    route = respx.get(MEMORIES).mock(return_value=httpx.Response(200, json={"data": []}))
+    assert _client().memory.list(source_type="IMPORT") == []
+    assert route.calls.last.request.url.params["sourceType"] == "IMPORT"
+
+
+@respx.mock
 def test_search_posts_search_memory_dto():
     route = respx.post(f"{MEMORIES}/search").mock(
         return_value=httpx.Response(200, json=[MEMORY])

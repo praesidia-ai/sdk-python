@@ -7,11 +7,12 @@ must never be retried -- that would risk a duplicate create/charge.
 
 from __future__ import annotations
 
+from datetime import UTC
+
 import httpx
 import pytest
 
 from praesidia._http import HttpClient
-from praesidia.exceptions import NotFoundError
 from praesidia._retry import (
     DEFAULT_RETRY_CONFIG,
     RetryConfig,
@@ -21,6 +22,7 @@ from praesidia._retry import (
     parse_retry_after_s,
     resolve_retry_config,
 )
+from praesidia.exceptions import NotFoundError
 
 # Small, fast policy so specs run instantly and deterministically.
 FAST_RETRY = RetryConfig(max_attempts=3, base_delay_s=0.001, max_delay_s=0.002, max_elapsed_s=5.0)
@@ -105,10 +107,10 @@ def test_parse_retry_after_s_delta_seconds():
 
 
 def test_parse_retry_after_s_http_date():
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     from email.utils import format_datetime
 
-    future = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=5))
+    future = format_datetime(datetime.now(UTC) + timedelta(seconds=5))
     delay = parse_retry_after_s(future)
     assert delay is not None
     assert 0 < delay <= 5

@@ -8,19 +8,21 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from contextlib import redirect_stdout
 import json
 import os
-from pathlib import Path
 import sys
 import tempfile
+from contextlib import redirect_stdout
+from pathlib import Path
 from typing import Annotated, TypedDict
 
 from praesidia import Praesidia
-from praesidia.integrations.protected_tool import (
-    ManagedProtectedTool, RuntimeBinding, RuntimeCall,
-)
 from praesidia.integrations import FileRuntimeAttemptStore
+from praesidia.integrations.protected_tool import (
+    ManagedProtectedTool,
+    RuntimeBinding,
+    RuntimeCall,
+)
 
 RUNTIMES = ("crewai", "openai-agents", "google-adk", "microsoft-agent-framework", "agno", "langgraph", "hermes")
 
@@ -79,6 +81,7 @@ async def invoke_framework(runtime, managed, body, thread_id, call_id, cursor, s
     if runtime == "openai-agents":
         from agents.tool import invoke_function_tool
         from agents.tool_context import ToolContext
+
         from praesidia.integrations.openai_agents import openai_tool
         host = {"praesidia_thread_id": thread_id, "praesidia_tools": cursor}
         raw = json.dumps(args, allow_nan=False)
@@ -88,6 +91,7 @@ async def invoke_framework(runtime, managed, body, thread_id, call_id, cursor, s
         from google.adk.agents.invocation_context import InvocationContext
         from google.adk.sessions import InMemorySessionService
         from google.adk.tools import ToolContext
+
         from praesidia.integrations.google_adk import google_adk_tool
         sessions = InMemorySessionService()
         session = await sessions.create_session(app_name="praesidia_acceptance", user_id="host-fixture",
@@ -97,6 +101,7 @@ async def invoke_framework(runtime, managed, body, thread_id, call_id, cursor, s
         return await google_adk_tool(managed).run_async(args=args, tool_context=context)
     if runtime == "microsoft-agent-framework":
         from agent_framework import AgentSession, FunctionInvocationContext
+
         from praesidia.integrations.microsoft_agent_framework import microsoft_tool
         session = AgentSession(session_id=thread_id)
         session.state["praesidia_tools"] = cursor
@@ -105,8 +110,9 @@ async def invoke_framework(runtime, managed, body, thread_id, call_id, cursor, s
                                    context=FunctionInvocationContext(function=tool, arguments=args, session=session))
         return json.loads(result[0].text)
     if runtime == "agno":
-        from agno.tools.function import FunctionCall
         from agno.run import RunContext
+        from agno.tools.function import FunctionCall
+
         from praesidia.integrations.agno import agno_tool
         tool = agno_tool(managed)
         # Same injection seam used by Agno's tool binding during an actual run.
@@ -126,6 +132,7 @@ async def invoke_framework(runtime, managed, body, thread_id, call_id, cursor, s
         from crewai_core.token_manager import TokenManager
         TokenManager._get_secure_storage_path = staticmethod(lambda: storage)
         from crewai.flow.flow import Flow
+
         from praesidia.integrations.crewai import crewai_tool
         flow = Flow()
         flow.state.update(id=thread_id, praesidia_tools=cursor)
@@ -134,9 +141,10 @@ async def invoke_framework(runtime, managed, body, thread_id, call_id, cursor, s
         return tool.run(**args)
     if runtime == "langgraph":
         from langchain_core.messages import AIMessage
-        from langgraph.graph import StateGraph, START, END
+        from langgraph.graph import END, START, StateGraph
         from langgraph.graph.message import add_messages
         from langgraph.prebuilt import ToolNode
+
         from praesidia.integrations.langgraph_tools import langgraph_tool
         # Build the annotations with the actual imported reducer, not its name.
         State = TypedDict("State", {"messages": Annotated[list, add_messages], "praesidia_tools": dict})

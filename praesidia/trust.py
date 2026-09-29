@@ -25,8 +25,9 @@ import hashlib
 import json
 import os
 import re
-from datetime import datetime, timezone
-from typing import Any, Callable, Mapping, Optional, Sequence, Union
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
+from typing import Any
 
 from ._crypto import (
     canonical_json,
@@ -52,7 +53,7 @@ _CANONICAL_INSTANT_RE = re.compile(
 _TRUST_PASSPORT_V2_TAG = b"praesidia:trust-passport:v2\n"
 
 
-def _signature_format(proof: dict[str, Any]) -> Optional[int]:
+def _signature_format(proof: dict[str, Any]) -> int | None:
     """``proof.signatureFormat``: absent = 1; 1 or 2 as a JSON integer; else
     ``None`` (``null``, ``"2"``, ``3``, and ``True``/``False``, which Python
     would otherwise compare equal to 1/0) — AV-0018 contract, fails closed."""
@@ -65,7 +66,7 @@ def _signature_format(proof: dict[str, Any]) -> Optional[int]:
 def verify_passport(
     passport: dict[str, Any],
     public_key_jwk: dict[str, Any],
-    expected_subject: Optional[str] = None,
+    expected_subject: str | None = None,
 ) -> dict[str, Any]:
     """
     OFFLINE-verify a passport's detached Ed25519/ES256 proof against a JWK.
@@ -110,7 +111,7 @@ def verify_passport(
 def verify_ai_system_passport(
     passport: dict[str, Any],
     public_key_jwk: dict[str, Any],
-    expected_subject: Optional[str] = None,
+    expected_subject: str | None = None,
 ) -> dict[str, Any]:
     """
     OFFLINE-verify an AI System passport (BE-0540) against a JWK.
@@ -136,13 +137,13 @@ def _verify_credential(
     passport: dict[str, Any],
     public_key_jwk: dict[str, Any],
     envelope_well_formed: Callable[[dict[str, Any]], bool],
-    expected_subject: Optional[str] = None,
+    expected_subject: str | None = None,
 ) -> dict[str, Any]:
     try:
         return _verify_passport_unchecked(
             passport, public_key_jwk, envelope_well_formed, expected_subject
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - fail closed
         return _result(False, False, False, "malformed-passport")
 
 
@@ -150,7 +151,7 @@ def _verify_passport_unchecked(
     passport: dict[str, Any],
     public_key_jwk: dict[str, Any],
     envelope_well_formed: Callable[[dict[str, Any]], bool],
-    expected_subject: Optional[str] = None,
+    expected_subject: str | None = None,
 ) -> dict[str, Any]:
     proof = passport.get("proof") if isinstance(passport, dict) else None
     if not isinstance(proof, dict) or not isinstance(
@@ -381,7 +382,7 @@ def _nullable_canonical_instant(value: Any) -> bool:
     return value is None or _parse_canonical_instant(value) is not None
 
 
-def _parse_canonical_instant(value: Any) -> Optional[datetime]:
+def _parse_canonical_instant(value: Any) -> datetime | None:
     if not isinstance(value, str) or not _CANONICAL_INSTANT_RE.fullmatch(value):
         return None
     try:
@@ -420,7 +421,7 @@ def _expiration_state(expiration_date: Any, issuance_date: str) -> str:
     issuance = _parse_canonical_instant(issuance_date)
     if expiration is None or issuance is None or expiration <= issuance:
         return "invalid"
-    return "expired" if expiration <= datetime.now(timezone.utc) else "valid"
+    return "expired" if expiration <= datetime.now(UTC) else "valid"
 
 
 class TrustResource:
@@ -536,7 +537,7 @@ class TrustResource:
         self,
         passport: dict[str, Any],
         public_key_jwk: dict[str, Any],
-        expected_subject: Optional[str] = None,
+        expected_subject: str | None = None,
     ) -> dict[str, Any]:
         """Offline-verify a passport (delegates to :func:`verify_passport`)."""
         return verify_passport(passport, public_key_jwk, expected_subject)
@@ -545,10 +546,8 @@ class TrustResource:
         self,
         agent_id: str,
         *,
-        trusted_keys: Optional[
-            Union[Sequence[dict[str, Any]], Mapping[str, dict[str, Any]]]
-        ] = None,
-        expected_fingerprint: Optional[str] = None,
+        trusted_keys: Sequence[dict[str, Any]] | Mapping[str, dict[str, Any]] | None = None,
+        expected_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         """
         Fetch the verification bundle AND verify it offline in one call. Returns
@@ -600,7 +599,7 @@ class TrustResource:
         self,
         passport: dict[str, Any],
         public_key_jwk: dict[str, Any],
-        expected_subject: Optional[str] = None,
+        expected_subject: str | None = None,
     ) -> dict[str, Any]:
         """Offline-verify an AI System passport (delegates to :func:`verify_ai_system_passport`)."""
         return verify_ai_system_passport(passport, public_key_jwk, expected_subject)
@@ -609,10 +608,8 @@ class TrustResource:
         self,
         ai_system_id: str,
         *,
-        trusted_keys: Optional[
-            Union[Sequence[dict[str, Any]], Mapping[str, dict[str, Any]]]
-        ] = None,
-        expected_fingerprint: Optional[str] = None,
+        trusted_keys: Sequence[dict[str, Any]] | Mapping[str, dict[str, Any]] | None = None,
+        expected_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         """
         :meth:`fetch_and_verify` for an AI System passport:
@@ -660,11 +657,11 @@ class PraesidiaTrust(TrustResource):
 
     def __init__(
         self,
-        base_url: Optional[str] = None,
+        base_url: str | None = None,
         *,
         timeout: float = 30.0,
-        retry: Union[RetryConfig, bool, None] = None,
-        allow_insecure_http: Optional[bool] = None,
+        retry: RetryConfig | bool | None = None,
+        allow_insecure_http: bool | None = None,
     ) -> None:
         if base_url is None:
             base_url = os.environ.get("PRAESIDIA_BASE_URL") or "https://api.praesidia.ai"
@@ -674,7 +671,7 @@ class PraesidiaTrust(TrustResource):
 # ── Trust anchors for fetch_and_verify (SEC-2026-09-12 MCPSDK-04) ────────────
 
 
-def jwk_thumbprint(jwk: dict[str, Any]) -> Optional[str]:
+def jwk_thumbprint(jwk: dict[str, Any]) -> str | None:
     """
     RFC 7638 JWK thumbprint (SHA-256) of an Ed25519 (OKP) or P-256 (EC) public
     key, base64url-encoded without padding. ``None`` for anything else. Use it
@@ -689,13 +686,13 @@ def jwk_thumbprint(jwk: dict[str, Any]) -> Optional[str]:
     )
 
 
-def jwk_thumbprint_hex(jwk: dict[str, Any]) -> Optional[str]:
+def jwk_thumbprint_hex(jwk: dict[str, Any]) -> str | None:
     """Same thumbprint as :func:`jwk_thumbprint`, lowercase hex."""
     digest = _thumbprint_digest(jwk)
     return digest.hex() if digest else None
 
 
-def _thumbprint_digest(jwk: Any) -> Optional[bytes]:
+def _thumbprint_digest(jwk: Any) -> bytes | None:
     if not isinstance(jwk, dict):
         return None
     kty, crv, x = jwk.get("kty"), jwk.get("crv"), jwk.get("x")
@@ -728,7 +725,7 @@ def _jwk_matches_fingerprint(jwk: Any, expected: str) -> bool:
     return candidate.rstrip("=") == b64 or candidate.lower() == digest.hex()
 
 
-def _normalize_trusted_keys(trusted_keys: Any) -> Optional[list[dict[str, Any]]]:
+def _normalize_trusted_keys(trusted_keys: Any) -> list[dict[str, Any]] | None:
     """Accept both anchor shapes (sequence or mapping) as a flat candidate list."""
     if trusted_keys is None:
         return None
@@ -745,7 +742,7 @@ def _verify_against_anchor(
     served_key_jwk: dict[str, Any],
     *,
     trusted_keys: Any = None,
-    expected_fingerprint: Optional[str] = None,
+    expected_fingerprint: str | None = None,
     verify: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] = verify_passport,
 ) -> dict[str, Any]:
     """
@@ -783,7 +780,7 @@ def _verify_against_anchor(
         return verify(passport, served_key_jwk)
 
     # Key anchor: the passport must verify under one of the caller's keys.
-    under_trusted_key: Optional[dict[str, Any]] = None
+    under_trusted_key: dict[str, Any] | None = None
     for anchor in anchors:
         result = verify(passport, anchor)
         if result["verified"]:

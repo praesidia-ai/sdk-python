@@ -1,7 +1,7 @@
 """LangGraph ToolNode managed tool; real tool IDs and state updates are injected."""
 from __future__ import annotations
 
-from typing import Any, Annotated
+from typing import Annotated, Any
 
 from .protected_tool import ManagedProtectedTool, RuntimeBinding, RuntimeCall
 

@@ -275,9 +275,8 @@ class TestConnectedMode:
 class TestTaskHandleContextManager:
     def test_exit_on_exception_calls_fail_exactly_once(self, capsys):
         guard = Guard()
-        with pytest.raises(ValueError):
-            with guard.begin_task(input="hello") as task:
-                raise ValueError("boom")
+        with pytest.raises(ValueError), guard.begin_task(input="hello"):
+            raise ValueError("boom")
         out = capsys.readouterr().out
         logged = json.loads(out.strip())
         assert logged["data"]["status"] == "failed"

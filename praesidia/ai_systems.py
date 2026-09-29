@@ -15,7 +15,9 @@ scope.
 
 from __future__ import annotations
 
-from typing import Any, Iterator
+import builtins
+from collections.abc import Iterator
+from typing import Any
 
 from ._http import HttpClient, path_segment
 from ._pagination import normalize_paged_envelope, paginate_all
@@ -443,7 +445,7 @@ class AiSystemsResource:
         q: str | None = None,
         page: int = 1,
         limit: int = 20,
-    ) -> list[dict[str, Any]]:
+    ) -> builtins.list[dict[str, Any]]:
         """
         Return a paginated list of AI Assets for the organisation.
 
@@ -705,7 +707,7 @@ class AiSystemsResource:
         include_archived: bool | None = None,
         page: int = 1,
         limit: int = 20,
-    ) -> list[dict[str, Any]]:
+    ) -> builtins.list[dict[str, Any]]:
         """
         Return a paginated list of asset relationships for the organisation.
 
@@ -784,8 +786,8 @@ class AiSystemsResource:
         *,
         direction: str = "downstream",
         max_depth: int | None = None,
-        asset_types: list[str] | None = None,
-        relationship_types: list[str] | None = None,
+        asset_types: builtins.list[str] | None = None,
+        relationship_types: builtins.list[str] | None = None,
         include_archived: bool | None = None,
     ) -> dict[str, Any]:
         """

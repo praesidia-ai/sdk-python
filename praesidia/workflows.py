@@ -6,8 +6,10 @@ Covers the ``/organizations/{org_id}/workflows`` management endpoints.
 
 from __future__ import annotations
 
+import builtins
 import math
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from ._http import HttpClient, path_segment
 from ._pagination import normalize_paged_envelope, paginate_all
@@ -151,7 +153,7 @@ class WorkflowsResource:
         workflow_id: str,
         page: int = 1,
         limit: int = 20,
-    ) -> list[dict[str, Any]]:
+    ) -> builtins.list[dict[str, Any]]:
         """
         List execution runs for a workflow.
 

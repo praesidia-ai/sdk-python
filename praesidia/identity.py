@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -34,7 +35,7 @@ class IdentityClient:
     def __enter__(self) -> IdentityClient:
         return self
 
-    def __exit__(self, *_args: Any) -> None:
+    def __exit__(self, *_args: object) -> None:
         self.close()
 
     def exchange(self, *, organization_id: str, subject_binding_id: str, subject_token: str, resource: str, scopes: list[str], actor_binding_id: str | None = None, actor_token: str | None = None, consent_id: str | None = None) -> dict[str, Any]:
@@ -69,7 +70,7 @@ class IdentityClient:
         return acquire
 
     @staticmethod
-    def _token(token: str) -> None:
+    def _token(token: object) -> None:
         if not isinstance(token, str) or not re.fullmatch(r"pfa_[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}", token):
             raise ValueError("Expected a federated access token")
 

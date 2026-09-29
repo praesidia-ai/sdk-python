@@ -7,10 +7,11 @@ their framework state and keep it outside model-controlled tool arguments.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import RLock
-from typing import Any, Callable, MutableMapping, Optional
+from typing import Any
 
 from .._jcs_canonical import jcs_canonicalize, jcs_commitment
 from ..protected_http import ProtectedHttpResource
@@ -36,7 +37,7 @@ class RuntimeCall:
     runtime: str
     thread_id: str
     call_id: str
-    task_id: Optional[str] = None
+    task_id: str | None = None
 
     def checkpoint(self, tool_name: str) -> dict[str, str]:
         if self.runtime not in RUNTIMES:
@@ -67,7 +68,7 @@ class RuntimeBinding:
 
     call: RuntimeCall
     state: MutableMapping[str, Any]
-    persist: Optional[Callable[[], None]] = None
+    persist: Callable[[], None] | None = None
 
 
 class ProtectedToolStateError(ValueError):
@@ -136,7 +137,7 @@ class ManagedProtectedTool:
             raise ValueError("Protected tool body must be a JSON object")
         # Snapshot before any caller/backend code can mutate the supplied values.
         body = json.loads(jcs_canonicalize(body))
-        request = {"targetId": self.target_id, "body": body,
+        request: dict[str, Any] = {"targetId": self.target_id, "body": body,
                    "checkpoint": binding.call.checkpoint(self.name)}
         installation_id = getattr(self.resource, "runtime_installation_id", None)
         if isinstance(installation_id, str):
@@ -172,7 +173,7 @@ class ManagedProtectedTool:
                 return self._result(current, entry["resumeAttempted"])
             try:
                 expires = datetime.fromisoformat(current["expiresAt"].replace("Z", "+00:00"))
-                if expires.tzinfo is None or expires <= datetime.now(timezone.utc):
+                if expires.tzinfo is None or expires <= datetime.now(UTC):
                     raise ValueError("Expired approval")
                 _identifier(current["approverId"], "approverId")
             except (KeyError, TypeError, AttributeError, ValueError) as exc:

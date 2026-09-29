@@ -42,29 +42,12 @@ from ._jcs_canonical import (
 )
 from ._retry import RetryConfig
 from .agents import tool_call_headers_from_task
+
 # SDK-0002 — AI System / asset / relationship graph parity with be's
 # AISYS-0002 and the TS SDK's ai_systems resource (SDK-0001).
 from .ai_systems import AiSystemsResource
 from .audit import AuditBundle
 from .client import Praesidia
-# SDK-0313 — tag gateway calls with an MCP server id (GW-0776).
-from .gateway import MCP_SERVER_ID_HEADER, gateway_headers
-from .guard import MAX_GUARD_CONTENT_LENGTH, Guard, TaskHandle
-from .identity import IdentityClient, IdentityError
-from .local_rules import run_local_rules
-# SDK-0301 — advisory in-runtime interaction hooks (parity with the TS SDK's SDK-0300).
-from .interaction_hooks import (
-    DEFAULT_FAIL_MODES,
-    INTERACTION_CONSTRAINED_BY,
-    INTERACTION_OUTCOME_STATUSES,
-    INTERACTION_TYPES,
-    INTERACTION_VERDICTS,
-    AsyncPraesidiaInteractionHooks,
-    InteractionDecision,
-    InteractionHookResult,
-    InteractionOutcomeReceipt,
-    PraesidiaInteractionHooks,
-)
 from .exceptions import (
     AuthError,
     ForbiddenError,
@@ -83,6 +66,26 @@ from .exceptions import (
     ServerError,
     UnsupportedProtectedActionTargetError,
 )
+
+# SDK-0313 — tag gateway calls with an MCP server id (GW-0776).
+from .gateway import MCP_SERVER_ID_HEADER, gateway_headers
+from .guard import MAX_GUARD_CONTENT_LENGTH, Guard, TaskHandle
+from .identity import IdentityClient, IdentityError
+
+# SDK-0301 — advisory in-runtime interaction hooks (parity with the TS SDK's SDK-0300).
+from .interaction_hooks import (
+    DEFAULT_FAIL_MODES,
+    INTERACTION_CONSTRAINED_BY,
+    INTERACTION_OUTCOME_STATUSES,
+    INTERACTION_TYPES,
+    INTERACTION_VERDICTS,
+    AsyncPraesidiaInteractionHooks,
+    InteractionDecision,
+    InteractionHookResult,
+    InteractionOutcomeReceipt,
+    PraesidiaInteractionHooks,
+)
+from .local_rules import run_local_rules
 from .telemetry import gen_ai_span
 from .trust import (
     PraesidiaTrust,
@@ -159,4 +162,8 @@ __all__ = [
     "InteractionDecisionUnavailableError",
 ]
 
-from .protected_http import ProtectedHttpResource, verify_http_receipt, verify_protected_http_result
+from .protected_http import (  # noqa: F401 - public attributes, outside __all__
+    ProtectedHttpResource,
+    verify_http_receipt,
+    verify_protected_http_result,
+)

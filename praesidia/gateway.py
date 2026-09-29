@@ -8,7 +8,6 @@ The gateway's client is the OpenAI or Anthropic SDK pointed at it. Pass
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 from .exceptions import InvalidMcpServerIdError
 
@@ -21,7 +20,7 @@ MCP_SERVER_ID_HEADER = "x-praesidia-mcp-server-id"
 _UUID_SHAPE = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
 
 
-def gateway_headers(*, mcp_server_id: Optional[str] = None) -> dict[str, str]:
+def gateway_headers(*, mcp_server_id: str | None = None) -> dict[str, str]:
     """Return the gateway request headers; ``{}`` when no MCP server id is given.
 
     Raises ``InvalidMcpServerIdError`` (a ``PraesidiaConfigError``) when the id

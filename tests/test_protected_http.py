@@ -1,12 +1,17 @@
 import copy
 import json
 from pathlib import Path
+
 import httpx
 import pytest
 import respx
+
 from praesidia import Praesidia
-from praesidia.protected_http import verify_protected_http_result, http_target_key_fingerprint
 from praesidia._jcs_canonical import jcs_commitment
+from praesidia.protected_http import (
+    http_target_key_fingerprint,
+    verify_protected_http_result,
+)
 
 FIXTURE = json.loads((Path(__file__).parents[1] / 'test-fixtures/http-receipt-v1.json').read_text())
 

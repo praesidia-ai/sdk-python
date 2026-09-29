@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
+
 import pytest
-from praesidia.telemetry import gen_ai_span, parse_traceparent, GENAI_SEMCONV_VERSION
+
+from praesidia.telemetry import GENAI_SEMCONV_VERSION, gen_ai_span, parse_traceparent
 
 FIXTURE = json.loads((Path(__file__).parents[1] / 'test-fixtures/genai-telemetry-v1.json').read_text())
 

@@ -17,8 +17,6 @@ Usage::
 
 from __future__ import annotations
 
-from typing import Union
-
 from ._http import HttpClient
 from ._retry import RetryConfig
 from .agents import AgentsResource
@@ -107,7 +105,7 @@ class Praesidia:
         org_id: str,
         base_url: str = _DEFAULT_BASE_URL,
         timeout: float = 30.0,
-        retry: Union[RetryConfig, bool, None] = None,
+        retry: RetryConfig | bool | None = None,
         runtime_installation_id: str | None = None,
         allow_insecure_http: bool | None = None,
     ) -> None:

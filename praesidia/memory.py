@@ -9,8 +9,9 @@ authorized org readers and surface provenance + guardrail metadata per hit.
 
 from __future__ import annotations
 
+import builtins
 import re
-from typing import Any, Optional
+from typing import Any
 
 from ._http import HttpClient, path_segment
 
@@ -65,15 +66,15 @@ class MemoryResource:
         self,
         content: str,
         *,
-        subject_id: Optional[str] = None,
-        memory_key: Optional[str] = None,
-        tags: Optional[list[str]] = None,
-        source_type: Optional[str] = None,
-        source_agent_id: Optional[str] = None,
-        source_reference: Optional[str] = None,
-        access_source_id: Optional[str] = None,
-        retention_regime: Optional[str] = None,
-        retention_days: Optional[int] = None,
+        subject_id: str | None = None,
+        memory_key: str | None = None,
+        tags: list[str] | None = None,
+        source_type: str | None = None,
+        source_agent_id: str | None = None,
+        source_reference: str | None = None,
+        access_source_id: str | None = None,
+        retention_regime: str | None = None,
+        retention_days: int | None = None,
     ) -> dict[str, Any]:
         """
         Write a memory (CreateMemoryDto). ``POST .../memories`` (MEMORY_CREATE).
@@ -158,9 +159,9 @@ class MemoryResource:
         *,
         page: int = 1,
         limit: int = 20,
-        memory_key: Optional[str] = None,
-        source_type: Optional[str] = None,
-        tag: Optional[str] = None,
+        memory_key: str | None = None,
+        source_type: str | None = None,
+        tag: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         List memories (org-scoped, paginated, decrypted). ``GET .../memories``
@@ -169,8 +170,6 @@ class MemoryResource:
         Returns:
             A list of memory dicts (unwrapped from the pagination envelope).
         """
-        if source_type == "IMPORT" and not access_source_id:
-            raise ValueError("Imported memory requires access_source_id")
         if source_type is not None and source_type not in self.SOURCE_TYPES:
             raise ValueError(
                 f"source_type must be one of {self.SOURCE_TYPES}; got {source_type!r}"
@@ -191,9 +190,9 @@ class MemoryResource:
         self,
         query: str,
         *,
-        memory_key: Optional[str] = None,
-        top_k: Optional[int] = None,
-    ) -> list[dict[str, Any]]:
+        memory_key: str | None = None,
+        top_k: int | None = None,
+    ) -> builtins.list[dict[str, Any]]:
         """
         Relevance search over memories (provenance surfaced per hit).
         ``POST .../memories/search`` (MEMORY_VIEW).
@@ -227,8 +226,8 @@ class MemoryResource:
         self,
         subject_id: str,
         reason: str,
-        expected_subject_hash: Optional[str] = None,
-        acknowledge_cross_org: Optional[bool] = None,
+        expected_subject_hash: str | None = None,
+        acknowledge_cross_org: bool | None = None,
     ) -> dict[str, Any]:
         """
         Request a two-person GDPR Art-17 erasure of a data subject's memories.

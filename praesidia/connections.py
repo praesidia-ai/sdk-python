@@ -6,7 +6,8 @@ Covers the ``/organizations/{org_id}/connections`` management endpoints.
 
 from __future__ import annotations
 
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from ._http import HttpClient, path_segment
 from ._pagination import normalize_paged_envelope, paginate_all

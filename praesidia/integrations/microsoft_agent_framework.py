@@ -14,7 +14,7 @@ def microsoft_tool(managed: ManagedProtectedTool):
     context. Capture that argument rather than accepting a model-provided ID.
     A native/local approval alone never authorizes backend execution.
     """
-    from agent_framework import FunctionTool, FunctionInvocationContext
+    from agent_framework import FunctionInvocationContext, FunctionTool
 
     async def invoke(body: dict[str, Any], ctx) -> dict[str, Any]:
         if ctx.session is None:

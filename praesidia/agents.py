@@ -7,8 +7,10 @@ Covers the ``/organizations/{org_id}/agents`` and
 
 from __future__ import annotations
 
+import builtins
 import re
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from ._http import (
     AGENT_ID_HEADER,
@@ -317,7 +319,7 @@ class AgentsResource:
         *,
         client_secret: str | None = None,
         access_token: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> builtins.list[dict[str, Any]]:
         """
         Q3-02 / Q4-02 — claim the pending tasks routed to a polling (server)
         agent.

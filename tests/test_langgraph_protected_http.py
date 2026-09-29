@@ -1,10 +1,13 @@
 """Actual StateGraph + SQLite saver reopened between invocations. Backend is a
 stateful test double; real target/approval cryptography is covered in BE acceptance."""
 import pytest
+
 pytest.importorskip('langgraph')
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
+
 from praesidia.integrations.langgraph import protected_http_graph
+
 
 class Platform:
     def __init__(self):

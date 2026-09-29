@@ -1,10 +1,14 @@
 """Restartable LangGraph approval bridge. pip install praesidia[langgraph]."""
 from __future__ import annotations
+
 from typing import Any, TypedDict
+
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
+
 from ..protected_http import ProtectedHttpResource
+
 
 class ProtectedHttpState(TypedDict, total=False):
     request: dict[str, Any]

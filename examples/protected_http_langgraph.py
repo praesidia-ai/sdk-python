@@ -8,17 +8,20 @@ The prepare phase performs no target effect; resume approves through Praesidia,
 executes once, verifies the target receipt, then records caller acknowledgment.
 """
 from __future__ import annotations
+
 import argparse
 import json
 import os
 from pathlib import Path
+
 import httpx
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
+from protected_http_replay_assertion import assert_replay_rejected
+
 from praesidia import Praesidia
 from praesidia.integrations.langgraph import protected_http_graph
 from praesidia.protected_http import verify_protected_http_result
-from protected_http_replay_assertion import assert_replay_rejected
 
 parser = argparse.ArgumentParser()
 parser.add_argument('phase', choices=['prepare', 'resume'])

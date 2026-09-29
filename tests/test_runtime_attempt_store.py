@@ -2,7 +2,6 @@
 import json
 import multiprocessing
 import os
-from pathlib import Path
 import stat
 from concurrent.futures import ProcessPoolExecutor
 
@@ -135,8 +134,9 @@ def test_platform_and_absolute_path_contract(tmp_path, monkeypatch):
         FileRuntimeAttemptStore("relative")
     store = FileRuntimeAttemptStore(tmp_path)
     # Scope the platform probe to this module; do not alter pytest's filesystem.
-    import praesidia.integrations.attempt_store as module
     from types import SimpleNamespace
+
+    import praesidia.integrations.attempt_store as module
     monkeypatch.setattr(module, "os", SimpleNamespace(name="nt"))
     with pytest.raises(ValueError, match="POSIX"):
         FileRuntimeAttemptStore(store.directory)

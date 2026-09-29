@@ -1,16 +1,20 @@
 """Client recovery invariants. The platform double is not backend auth evidence."""
 import json
-from uuid import UUID, uuid5, NAMESPACE_URL
 from concurrent.futures import ThreadPoolExecutor
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
 
-from praesidia.integrations.protected_tool import (
-    ManagedProtectedTool, RuntimeBinding, RuntimeCall, ProtectedToolStateError,
-    ProtectedToolOutcomeUnknown, decode_body,
-)
-from praesidia.integrations import FileRuntimeAttemptStore
 from praesidia._jcs_canonical import jcs_commitment
+from praesidia.integrations import FileRuntimeAttemptStore
+from praesidia.integrations.protected_tool import (
+    ManagedProtectedTool,
+    ProtectedToolOutcomeUnknown,
+    ProtectedToolStateError,
+    RuntimeBinding,
+    RuntimeCall,
+    decode_body,
+)
 
 
 class Platform:

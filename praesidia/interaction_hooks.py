@@ -19,9 +19,15 @@ import re
 import threading
 import time
 import uuid
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Awaitable, Callable, Generic, Mapping, Optional, Sequence, TypedDict, TypeVar, Union
+from typing import (
+    Any,
+    Generic,
+    TypedDict,
+    TypeVar,
+)
 
 import httpx
 
@@ -34,9 +40,15 @@ from ._http import (
     normalize_base_url,
     path_segment,
 )
-from ._retry import RetryConfig, compute_backoff_s, is_retryable_status, parse_retry_after_s, resolve_retry_config
-from .agents import _UUID_RE
 from ._jcs_canonical import JcsCanonicalizationError, jcs_commitment
+from ._retry import (
+    RetryConfig,
+    compute_backoff_s,
+    is_retryable_status,
+    parse_retry_after_s,
+    resolve_retry_config,
+)
+from .agents import _UUID_RE
 from .exceptions import (
     InteractionDecisionUnavailableError,
     InteractionDeniedError,
@@ -83,7 +95,7 @@ INTERACTION_CONSTRAINED_BY = ("org_policy", "delegation", "assurance")
 class _InteractionDecisionRequired(TypedDict):
     verdict: str
     reasonCode: str
-    approvalId: Optional[str]
+    approvalId: str | None
     policyFingerprint: str
     ttlSeconds: int
     enforcementMode: str
@@ -96,11 +108,11 @@ class InteractionDecision(_InteractionDecisionRequired, total=False):
     ``constrainedBy`` (BE-1609) is absent from older servers; ``None`` = nothing constrained it.
     """
 
-    constrainedBy: Optional[str]
+    constrainedBy: str | None
 
 
 class _InteractionOutcomeReceiptRequired(TypedDict):
-    approvalId: Optional[str]
+    approvalId: str | None
     decisionId: str
 
 
@@ -111,7 +123,7 @@ class InteractionOutcomeReceipt(_InteractionOutcomeReceiptRequired, total=False)
     ``decision_id`` path (BE-1808); ``reportedDecisionId`` is absent from older servers.
     """
 
-    reportedDecisionId: Optional[str]
+    reportedDecisionId: str | None
 
 
 class _OutcomeKeyError(PraesidiaConfigError, ValueError):
@@ -125,8 +137,8 @@ class InteractionHookResult:
     unavailable and the hook failed open; ``fail_open_error`` is then the reason.
     """
 
-    decision: Optional[InteractionDecision]
-    fail_open_error: Optional[BaseException] = None
+    decision: InteractionDecision | None
+    fail_open_error: BaseException | None = None
 
 
 _R = TypeVar("_R")
@@ -136,18 +148,18 @@ class _InteractionHooksBase(Generic[_R]):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        org_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        base_url: Optional[str] = None,
-        allow_insecure_http: Optional[bool] = None,
-        timeout: Optional[float] = None,
-        fail_mode: Optional[Mapping[str, str]] = None,
+        api_key: str | None = None,
+        org_id: str | None = None,
+        agent_id: str | None = None,
+        base_url: str | None = None,
+        allow_insecure_http: bool | None = None,
+        timeout: float | None = None,
+        fail_mode: Mapping[str, str] | None = None,
         approval_poll_interval: float = 2.0,
         approval_timeout: float = 600.0,
-        on_approval_required: Optional[Callable[[InteractionDecision], None]] = None,
-        task_id: Optional[str] = None,
-        retry: Union[RetryConfig, bool, None] = None,
+        on_approval_required: Callable[[InteractionDecision], None] | None = None,
+        task_id: str | None = None,
+        retry: RetryConfig | bool | None = None,
     ) -> None:
         api_key = api_key or os.environ.get("PRAESIDIA_API_KEY")
         org_id = org_id or os.environ.get("PRAESIDIA_ORG_ID")
@@ -172,7 +184,7 @@ class _InteractionHooksBase(Generic[_R]):
         self._path = f"/organizations/{org}/interaction-decisions"
         #: Keyed by sha256(JCS({interactionType, action})); valid only under ``_fingerprint``.
         self._cache: dict[str, tuple[InteractionDecision, float]] = {}
-        self._fingerprint: Optional[str] = None
+        self._fingerprint: str | None = None
         self._lock = threading.Lock()
         try:
             retry_config = resolve_retry_config(retry)
@@ -189,18 +201,18 @@ class _InteractionHooksBase(Generic[_R]):
             timeout=_validate_timeout(_DEFAULT_TIMEOUT if timeout is None else timeout),
         )
 
-    def _open(self, retry: Optional[RetryConfig], **client_args: Any) -> Any:
+    def _open(self, retry: RetryConfig | None, **client_args: Any) -> Any:
         raise NotImplementedError
 
     def _guard(self, interaction_type: str, action: Mapping[str, Any], fail_mode: str) -> _R:
         raise NotImplementedError
 
-    def before_tool_call(self, tool_name: str, arguments: Optional[Mapping[str, Any]] = None) -> _R:
+    def before_tool_call(self, tool_name: str, arguments: Mapping[str, Any] | None = None) -> _R:
         """Tool call chosen by the model: ``model_to_tool.<tool_name>``. Default fail-open."""
         return self._guard("model_to_tool", _action(tool_name, arguments), self._fail_modes["tool_call"])
 
     def before_exec(
-        self, command: str, args: Optional[Sequence[str]] = None, cwd: Optional[str] = None, runtime: str = "shell"
+        self, command: str, args: Sequence[str] | None = None, cwd: str | None = None, runtime: str = "shell"
     ) -> _R:
         """Shell command (``agent_to_shell.exec``) or code run (``runtime="code"``: ``agent_to_code_execution.exec``). Default fail-closed."""
         if runtime not in ("shell", "code"):
@@ -215,7 +227,7 @@ class _InteractionHooksBase(Generic[_R]):
         return self._guard("agent_to_filesystem", _action(mode, {"path": path}), self._fail_modes[cls])
 
     def before_browser_action(
-        self, action: str, url: Optional[str] = None, arguments: Optional[Mapping[str, Any]] = None
+        self, action: str, url: str | None = None, arguments: Mapping[str, Any] | None = None
     ) -> _R:
         """Browser action: ``agent_to_browser.<action>``. Default fail-open."""
         return self._guard("agent_to_browser", _action(action, {**(arguments or {}), "url": url}), self._fail_modes["browser"])
@@ -226,7 +238,7 @@ class _InteractionHooksBase(Generic[_R]):
             raise PraesidiaConfigError("fail_mode must be 'open' or 'closed'")
         return self._guard(interaction_type, action, fail_mode)
 
-    def _send(self, interaction_type: str, act: dict[str, Any], approval_id: Optional[str], key: Optional[str] = None) -> Any:
+    def _send(self, interaction_type: str, act: dict[str, Any], approval_id: str | None, key: str | None = None) -> Any:
         # One Idempotency-Key per call (BE-1759): retries replay it; a poll adds approvalId, so it is a new call. Key order = be DTO = TS SDK.
         return self._http.post(self._path, {
             "interactionType": interaction_type,
@@ -238,14 +250,14 @@ class _InteractionHooksBase(Generic[_R]):
 
     def report_outcome(
         self,
-        approval_id: Optional[str] = None,
-        status: Optional[str] = None,
+        approval_id: str | None = None,
+        status: str | None = None,
         *,
-        decision_id: Optional[str] = None,
+        decision_id: str | None = None,
         result: Any = None,
-        target_system: Optional[str] = None,
-        target_transaction_id: Optional[str] = None,
-        idempotency_key: Optional[str] = None,
+        target_system: str | None = None,
+        target_transaction_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> Any:
         """
         Record the result of an approved interaction, once (BE-1582). ``approval_id`` is
@@ -275,7 +287,7 @@ class _InteractionHooksBase(Generic[_R]):
         # Key order = be DTO = TS SDK; a retry under the same key replays the recorded outcome (BE-1759).
         return self._http.post(f"{self._path}/outcome", {**body, **{k: v for k, v in optional.items() if v is not None}}, _receipt, key)
 
-    def _cached(self, key: str) -> Optional[InteractionDecision]:
+    def _cached(self, key: str) -> InteractionDecision | None:
         with self._lock:
             hit = self._cache.get(key)
         return hit[0] if hit is not None and hit[1] > time.monotonic() else None
@@ -315,16 +327,16 @@ class _InteractionHooksBase(Generic[_R]):
 class PraesidiaInteractionHooks(_InteractionHooksBase[InteractionHookResult]):
     """Blocking hooks over one pooled ``httpx.Client`` (thread-safe). ``close()`` it, or use ``with``."""
 
-    def _open(self, retry: Optional[RetryConfig], **client_args: Any) -> _SyncPost:
+    def _open(self, retry: RetryConfig | None, **client_args: Any) -> _SyncPost:
         return _SyncPost(httpx.Client(**client_args), retry)
 
     def decide(
-        self, interaction_type: str, action: Mapping[str, Any], approval_id: Optional[str] = None, idempotency_key: Optional[str] = None
+        self, interaction_type: str, action: Mapping[str, Any], approval_id: str | None = None, idempotency_key: str | None = None
     ) -> InteractionDecision:
         """One raw decision request: no cache, no approval wait, no fail mode. ``idempotency_key``: see README."""
         return self._send(interaction_type, _check(interaction_type, action)[1], approval_id, idempotency_key)
 
-    def guarded(self, tool: Callable[..., Any], tool_name: Optional[str] = None) -> Callable[..., Any]:
+    def guarded(self, tool: Callable[..., Any], tool_name: str | None = None) -> Callable[..., Any]:
         """Wrap a keyword-argument tool so every call runs ``before_tool_call`` first (name: ``tool.__name__``)."""
         name = _tool_name(tool, tool_name)
 
@@ -369,23 +381,23 @@ class PraesidiaInteractionHooks(_InteractionHooksBase[InteractionHookResult]):
     def __enter__(self) -> PraesidiaInteractionHooks:
         return self
 
-    def __exit__(self, *exc_info: Any) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         self.close()
 
 
 class AsyncPraesidiaInteractionHooks(_InteractionHooksBase[Awaitable[InteractionHookResult]]):
     """The same hooks over one ``httpx.AsyncClient``; every hook is awaited. ``await aclose()``, or ``async with``."""
 
-    def _open(self, retry: Optional[RetryConfig], **client_args: Any) -> _AsyncPost:
+    def _open(self, retry: RetryConfig | None, **client_args: Any) -> _AsyncPost:
         return _AsyncPost(httpx.AsyncClient(**client_args), retry)
 
     async def decide(
-        self, interaction_type: str, action: Mapping[str, Any], approval_id: Optional[str] = None, idempotency_key: Optional[str] = None
+        self, interaction_type: str, action: Mapping[str, Any], approval_id: str | None = None, idempotency_key: str | None = None
     ) -> InteractionDecision:
         """One raw decision request: no cache, no approval wait, no fail mode. ``idempotency_key``: see README."""
         return await self._send(interaction_type, _check(interaction_type, action)[1], approval_id, idempotency_key)
 
-    def guarded(self, tool: Callable[..., Any], tool_name: Optional[str] = None) -> Callable[..., Awaitable[Any]]:
+    def guarded(self, tool: Callable[..., Any], tool_name: str | None = None) -> Callable[..., Awaitable[Any]]:
         """Wrap a keyword-argument tool (sync or async) so every call awaits ``before_tool_call`` first."""
         name = _tool_name(tool, tool_name)
 
@@ -430,12 +442,12 @@ class AsyncPraesidiaInteractionHooks(_InteractionHooksBase[Awaitable[Interaction
     async def __aenter__(self) -> AsyncPraesidiaInteractionHooks:
         return self
 
-    async def __aexit__(self, *exc_info: Any) -> None:
+    async def __aexit__(self, *exc_info: object) -> None:
         await self.aclose()
 
 
 class _SyncPost:
-    def __init__(self, client: httpx.Client, retry: Optional[RetryConfig]) -> None:
+    def __init__(self, client: httpx.Client, retry: RetryConfig | None) -> None:
         self.client = client
         self.retry = retry
 
@@ -458,7 +470,7 @@ class _SyncPost:
 
 
 class _AsyncPost:
-    def __init__(self, client: httpx.AsyncClient, retry: Optional[RetryConfig]) -> None:
+    def __init__(self, client: httpx.AsyncClient, retry: RetryConfig | None) -> None:
         self.client = client
         self.retry = retry
 
@@ -480,7 +492,7 @@ class _AsyncPost:
             attempt += 1
 
 
-def _idempotency_key(key: Optional[str]) -> str:
+def _idempotency_key(key: str | None) -> str:
     """A caller key, checked like be's (at most 255 chars) plus a printable-ASCII header value; else a fresh UUID v4."""
     if key is None:
         return str(uuid.uuid4())
@@ -493,7 +505,7 @@ def _idempotency_key(key: Optional[str]) -> str:
     return key
 
 
-def _retry_delay(cfg: Optional[RetryConfig], attempt: int, start: float, r: Optional[httpx.Response]) -> Optional[float]:
+def _retry_delay(cfg: RetryConfig | None, attempt: int, start: float, r: httpx.Response | None) -> float | None:
     """
     Seconds to wait before re-sending the same key, or ``None`` to stop. Retried: a transport error
     (``r`` is ``None``) or 429/5xx, never a 409 or any other 4xx (TS SDK-2503). Budget and backoff as
@@ -556,7 +568,7 @@ def _decision(r: httpx.Response, raw: bytearray) -> InteractionDecision:
     return d  # type: ignore[return-value]
 
 
-def _action(name: str, arguments: Optional[Mapping[str, Any]]) -> dict[str, Any]:
+def _action(name: str, arguments: Mapping[str, Any] | None) -> dict[str, Any]:
     """Drop ``None`` argument values (the TS SDK drops ``undefined``); omit ``arguments`` when nothing is left."""
     if arguments is not None and not isinstance(arguments, Mapping):
         raise PraesidiaConfigError("action arguments must be a JSON object")
@@ -581,7 +593,7 @@ def _check(interaction_type: str, action: Mapping[str, Any]) -> tuple[str, dict[
         raise PraesidiaConfigError(f"action arguments must be JSON values: {exc}") from exc
 
 
-def _tool_name(tool: Callable[..., Any], tool_name: Optional[str]) -> str:
+def _tool_name(tool: Callable[..., Any], tool_name: str | None) -> str:
     name = tool_name if tool_name is not None else getattr(tool, "__name__", None)
     _check("model_to_tool", {"name": name})
     return name  # type: ignore[return-value]

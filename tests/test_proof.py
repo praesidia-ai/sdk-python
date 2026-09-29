@@ -1,8 +1,7 @@
-import httpx
 import pytest
 import respx
 
-from praesidia import Praesidia, ForbiddenError, ResponseTooLargeError
+from praesidia import ForbiddenError, Praesidia, ResponseTooLargeError
 
 BASE = "https://api.test/organizations/org-1"
 

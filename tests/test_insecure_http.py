@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from praesidia import Praesidia, PraesidiaConfigError, Guard, PraesidiaInteractionHooks, PraesidiaTrust
+from praesidia import (
+    Guard,
+    Praesidia,
+    PraesidiaConfigError,
+    PraesidiaInteractionHooks,
+    PraesidiaTrust,
+)
 from praesidia._http import normalize_base_url
 
 INSECURE = "http://api.example.com"

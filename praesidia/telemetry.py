@@ -25,7 +25,8 @@ from __future__ import annotations
 import os
 import re
 import time
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from . import __version__
 from ._http import HttpClient
@@ -61,8 +62,8 @@ _MAX_ATTRIBUTE_VALUE_LENGTH = 512
 
 
 def _validated_text(
-    value: Optional[str], name: str, max_length: int, *, required: bool = False
-) -> Optional[str]:
+    value: str | None, name: str, max_length: int, *, required: bool = False
+) -> str | None:
     if value is None and not required:
         return None
     if (
@@ -79,7 +80,7 @@ def _validated_text(
     return value
 
 
-def _validated_non_negative_int(value: Optional[int], name: str) -> Optional[int]:
+def _validated_non_negative_int(value: int | None, name: str) -> int | None:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -99,28 +100,28 @@ def _int_attr(key: str, value: int) -> dict[str, Any]:
 def gen_ai_span(
     agent_name: str,
     *,
-    agent_id: Optional[str] = None,
-    system: Optional[str] = None,
-    request_model: Optional[str] = None,
-    response_model: Optional[str] = None,
-    operation_name: Optional[str] = None,
-    input_tokens: Optional[int] = None,
-    output_tokens: Optional[int] = None,
-    name: Optional[str] = None,
+    agent_id: str | None = None,
+    system: str | None = None,
+    request_model: str | None = None,
+    response_model: str | None = None,
+    operation_name: str | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    name: str | None = None,
     duration_ms: int = 0,
-    extra_attributes: Optional[list[dict[str, Any]]] = None,
-    traceparent: Optional[str] = None,
-    task_id: Optional[str] = None,
-    action_id: Optional[str] = None,
+    extra_attributes: list[dict[str, Any]] | None = None,
+    traceparent: str | None = None,
+    task_id: str | None = None,
+    action_id: str | None = None,
     capture_content: bool = False,
-    redact_content: Optional[Callable[[str], str]] = None,
+    redact_content: Callable[[str], str] | None = None,
 ) -> dict[str, Any]:
     """
     Synthesize ONE OTLP GenAI-convention span from simple inputs. Attribute keys
     mirror the backend GenAI parser exactly so the emitting agent is materialised
     as an OBSERVED agent.
     """
-    agent_name = _validated_text(
+    agent_name = _validated_text(  # type: ignore[assignment]  # required=True never returns None
         agent_name,
         "agent_name",
         _MAX_AGENT_IDENTITY_LENGTH,
@@ -140,7 +141,7 @@ def gen_ai_span(
     name = _validated_text(name, "name", _MAX_AGENT_IDENTITY_LENGTH)
     input_tokens = _validated_non_negative_int(input_tokens, "input_tokens")
     output_tokens = _validated_non_negative_int(output_tokens, "output_tokens")
-    duration_ms = _validated_non_negative_int(duration_ms, "duration_ms")
+    duration_ms = _validated_non_negative_int(duration_ms, "duration_ms")  # type: ignore[assignment]  # int in, int out
     if extra_attributes is not None and (
         not isinstance(extra_attributes, list)
         or any(not isinstance(attribute, dict) for attribute in extra_attributes)
@@ -204,7 +205,7 @@ class TelemetryResource:
         )
     """
 
-    def __init__(self, http: HttpClient, *, service_name: Optional[str] = None) -> None:
+    def __init__(self, http: HttpClient, *, service_name: str | None = None) -> None:
         self._http = http
         self._service_name = _validated_text(
             service_name, "service_name", _MAX_AGENT_IDENTITY_LENGTH
@@ -278,7 +279,7 @@ class TelemetryResource:
         return self.emit_gen_ai_spans([gen_ai_span(agent_name, **kwargs)])
 
 
-def parse_traceparent(value: Any) -> Optional[dict[str, Any]]:
+def parse_traceparent(value: Any) -> dict[str, Any] | None:
     """W3C Trace Context: ignore invalid context, retain valid parentage."""
     if not isinstance(value, str) or len(value) > 512:
         return None
@@ -293,11 +294,11 @@ def parse_traceparent(value: Any) -> Optional[dict[str, Any]]:
     return {"traceId": trace_id, "parentSpanId": parent_id, "flags": int(flags, 16) & 1}
 
 
-_CONTENT_KEY = re.compile(r"(?:^gen_ai\.(?:input\.messages|output\.messages|system_instructions|prompt|completion|retrieval\.(?:documents|query\.text))$|(?:^|[._-])(?:content|body|prompt|completion|messages)(?:$|[._-]))", re.I)
-_SECRET_KEY = re.compile(r"(?:authorization|api[._-]?key|password|secret|cookie|access[._-]?token|refresh[._-]?token)", re.I)
+_CONTENT_KEY = re.compile(r"(?:^gen_ai\.(?:input\.messages|output\.messages|system_instructions|prompt|completion|retrieval\.(?:documents|query\.text))$|(?:^|[._-])(?:content|body|prompt|completion|messages)(?:$|[._-]))", re.IGNORECASE)
+_SECRET_KEY = re.compile(r"(?:authorization|api[._-]?key|password|secret|cookie|access[._-]?token|refresh[._-]?token)", re.IGNORECASE)
 
 
-def _safe_extra_attributes(attributes: list[dict[str, Any]], reserved: set[str], capture: bool, redact: Optional[Callable[[str], str]]) -> list[dict[str, Any]]:
+def _safe_extra_attributes(attributes: list[dict[str, Any]], reserved: set[str], capture: bool, redact: Callable[[str], str] | None) -> list[dict[str, Any]]:
     if not isinstance(capture, bool):
         raise ValueError("capture_content must be a boolean")
     if capture and not callable(redact):

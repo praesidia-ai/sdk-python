@@ -22,7 +22,8 @@ returning only the first page.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterator
+from collections.abc import Callable, Iterator
+from typing import Any
 
 
 def normalize_paged_envelope(

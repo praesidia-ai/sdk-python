@@ -27,16 +27,23 @@ from __future__ import annotations
 import functools
 import json
 import logging
-import os
 import math
+import os
 import re
 import time
-from datetime import datetime, timezone
-from typing import Any, Callable, Literal, Optional, TypeVar, Union
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any, Literal, TypeVar
 
 from ._http import CHAIN_ID_HEADER, HttpClient
 from ._retry import RetryConfig
-from .exceptions import GuardContentTooLargeError, GuardrailBlockedError, PraesidiaConfigError, PraesidiaError, _is_outage
+from .exceptions import (
+    GuardContentTooLargeError,
+    GuardrailBlockedError,
+    PraesidiaConfigError,
+    PraesidiaError,
+    _is_outage,
+)
 from .local_rules import run_local_rules
 
 _LOGGER = logging.getLogger("praesidia.guard")
@@ -70,7 +77,7 @@ def _is_uuid(value: str) -> bool:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _stringify(value: Any) -> str:
@@ -158,7 +165,7 @@ class TaskHandle:
             self._finalized = True
             try:
                 self._result = self._record(status, output, usage, context)
-            except BaseException as exc:  # noqa: BLE001 -- memoized and re-raised, never swallowed
+            except BaseException as exc:
                 self._error = exc
                 raise
             return self._result
@@ -166,10 +173,10 @@ class TaskHandle:
             raise self._error
         return self._result
 
-    def __enter__(self) -> "TaskHandle":
+    def __enter__(self) -> TaskHandle:
         return self
 
-    def __exit__(self, exc_type: Any, exc: BaseException | None, tb: Any) -> bool:
+    def __exit__(self, exc_type: Any, exc: BaseException | None, tb: Any) -> Literal[False]:
         if exc is not None:
             self.fail(exc)
         return False  # never suppress the exception
@@ -214,13 +221,13 @@ class Guard:
         connection_id: str | None = None,
         base_url: str | None = None,
         timeout: float | None = None,
-        retry: Union[RetryConfig, bool, None] = None,
+        retry: RetryConfig | bool | None = None,
         strict: bool = False,
         fail_open: bool = False,
-        failure_mode: Optional[FailureMode] = None,
-        max_degraded_ms: Optional[float] = None,
-        on_degraded: Optional[Callable[[dict[str, Any]], None]] = None,
-        allow_insecure_http: Optional[bool] = None,
+        failure_mode: FailureMode | None = None,
+        max_degraded_ms: float | None = None,
+        on_degraded: Callable[[dict[str, Any]], None] | None = None,
+        allow_insecure_http: bool | None = None,
     ) -> None:
         self._api_key = api_key or os.environ.get("PRAESIDIA_API_KEY")
         self._org_id = org_id or os.environ.get("PRAESIDIA_ORG_ID")
@@ -455,17 +462,17 @@ class Guard:
     def begin_task(
         self,
         *,
-        input: str | None = None,  # noqa: A002 -- matches the DTO/JS field name
+        input: str | None = None,
         agent_id: str | None = None,
         task_type: str = "run",
         context: dict[str, Any] | None = None,
         connection_id: str | None = None,
-        type: str | None = None,  # noqa: A002 -- AgentTaskType, matches the DTO/JS field name
+        type: str | None = None,
         chain_id: str | None = None,
     ) -> TaskHandle:
         """Open an explicit task-lifecycle handle. See :class:`TaskHandle`."""
         started_at = _now_iso()
-        base = {
+        base: dict[str, Any] = {
             "agentId": agent_id or self._agent_id,
             "input": input,
             "taskType": task_type,
@@ -501,12 +508,12 @@ class Guard:
         self,
         fn: Callable[[], Any],
         *,
-        input: str,  # noqa: A002
+        input: str,
         agent_id: str | None = None,
         task_type: str = "run",
         context: dict[str, Any] | None = None,
         connection_id: str | None = None,
-        type: str | None = None,  # noqa: A002
+        type: str | None = None,
         chain_id: str | None = None,
     ) -> dict[str, Any]:
         """
@@ -584,7 +591,7 @@ class Guard:
         agent_id: str | None = None,
         context: dict[str, Any] | None = None,
         connection_id: str | None = None,
-        type: str | None = None,  # noqa: A002
+        type: str | None = None,
         chain_id: str | None = None,
     ) -> Any:
         """

@@ -7,10 +7,11 @@ Covers the ``/organizations/{org_id}/audit-logs`` endpoints.
 from __future__ import annotations
 
 import re
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
-from ._http import HttpClient, path_segment
 from ._evidence import evidence_date_range
+from ._http import HttpClient, path_segment
 
 # be validates package / AI System ids with ParseUUIDPipe / @IsUUID (any version).
 _UUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
@@ -216,8 +217,7 @@ class AuditResource:
             if not events:
                 break
 
-            for event in events:
-                yield event
+            yield from events
 
             page += 1
 

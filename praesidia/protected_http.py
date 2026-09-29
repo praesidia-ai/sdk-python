@@ -1,13 +1,15 @@
 """Durable exact-request HTTP execution and independent target receipt verification."""
 from __future__ import annotations
+
 import base64
 import hashlib
 import os
 import re
 from datetime import datetime
 from typing import Any
-from ._http import HttpClient, path_segment
+
 from ._crypto import ed25519_verify
+from ._http import HttpClient, path_segment
 from ._jcs_canonical import jcs_canonicalize, jcs_commitment
 
 _ED25519_SPKI = bytes.fromhex("302a300506032b6570032100")

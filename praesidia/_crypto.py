@@ -2,7 +2,7 @@
 H3-02f — hand-written offline verification primitives for the trust-passport
 verify client. NOT part of the typed API surface.
 
-Pure-Python, ZERO dependencies (stdlib ``hashlib`` only). Python 3.9's stdlib
+Pure-Python, ZERO dependencies (stdlib ``hashlib`` only). Python's stdlib
 has neither Ed25519 nor ECDSA verification primitives, and the SDK's only
 runtime dependency is ``httpx`` — so rather than pull in ``cryptography`` we
 vendor compact verification-only implementations for the two algorithms
@@ -29,7 +29,7 @@ import hashlib
 import json
 import math
 import re
-from typing import Any, Optional
+from typing import Any
 
 # ── edwards25519 curve constants (RFC 8032 §5.1) ───────────────────────────
 _P = 2 ** 255 - 19
@@ -112,7 +112,7 @@ def _encode_point(p: tuple) -> bytes:
     return val.to_bytes(32, "little")
 
 
-def _decode_point(s: bytes) -> Optional[tuple]:
+def _decode_point(s: bytes) -> tuple | None:
     if len(s) != 32:
         return None
     y = int.from_bytes(s, "little") & ((1 << 255) - 1)
@@ -162,11 +162,11 @@ def ed25519_verify(message: bytes, signature: bytes, public_key: bytes) -> bool:
         left = _scalarmult(_B, s)
         right = _edwards_add(r, _scalarmult(a, h))
         return _encode_point(left) == _encode_point(right)
-    except Exception:
+    except Exception:  # noqa: BLE001 - fail closed
         return False
 
 
-def ed25519_public_key_from_jwk(jwk: Any) -> Optional[bytes]:
+def ed25519_public_key_from_jwk(jwk: Any) -> bytes | None:
     """
     Decode an OKP/Ed25519 JWK into the raw 32-byte public key.
 
@@ -185,14 +185,14 @@ def ed25519_public_key_from_jwk(jwk: Any) -> Optional[bytes]:
         return None
     try:
         raw = _b64url_decode(x)
-    except Exception:
+    except Exception:  # noqa: BLE001 - fail closed
         return None
     if len(raw) != 32:
         return None
     return raw
 
 
-def p256_public_key_from_jwk(jwk: Any) -> Optional[tuple[int, int]]:
+def p256_public_key_from_jwk(jwk: Any) -> tuple[int, int] | None:
     """
     Validate an EC/P-256 public JWK and return its affine ``(x, y)`` point.
 
@@ -259,7 +259,7 @@ def es256_verify(
             _p256_scalarmult(public_key, (r * w) % _P256_N),
         )
         return point is not None and point[0] % _P256_N == r
-    except Exception:
+    except Exception:  # noqa: BLE001 - fail closed
         return False
 
 
@@ -272,7 +272,7 @@ def _is_verification_jwk(jwk: dict[str, Any], algorithm: str) -> bool:
     return key_ops is None or key_ops == ["verify"]
 
 
-def _decode_p256_der_signature(signature: bytes) -> Optional[tuple[int, int]]:
+def _decode_p256_der_signature(signature: bytes) -> tuple[int, int] | None:
     if (
         not isinstance(signature, bytes)
         or not 8 <= len(signature) <= 72
@@ -295,7 +295,7 @@ def _decode_p256_der_signature(signature: bytes) -> Optional[tuple[int, int]]:
     return (r, s)
 
 
-def _read_der_integer(data: bytes, offset: int) -> Optional[tuple[int, int]]:
+def _read_der_integer(data: bytes, offset: int) -> tuple[int, int] | None:
     if offset + 2 > len(data) or data[offset] != 0x02:
         return None
     length = data[offset + 1]
@@ -329,9 +329,9 @@ def _p256_is_on_curve(point: tuple[int, int]) -> bool:
 
 
 def _p256_add(
-    left: Optional[tuple[int, int]],
-    right: Optional[tuple[int, int]],
-) -> Optional[tuple[int, int]]:
+    left: tuple[int, int] | None,
+    right: tuple[int, int] | None,
+) -> tuple[int, int] | None:
     if left is None:
         return right
     if right is None:
@@ -351,9 +351,9 @@ def _p256_add(
 
 def _p256_scalarmult(
     point: tuple[int, int], scalar: int
-) -> Optional[tuple[int, int]]:
-    result: Optional[tuple[int, int]] = None
-    addend: Optional[tuple[int, int]] = point
+) -> tuple[int, int] | None:
+    result: tuple[int, int] | None = None
+    addend: tuple[int, int] | None = point
     while scalar > 0:
         if scalar & 1:
             result = _p256_add(result, addend)

@@ -3,7 +3,7 @@ import importlib.util
 import io
 import sys
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -175,13 +175,13 @@ def test_refund_example_has_no_mock_backend():
 
 
 # SDK-0342: coverage of the refund by the package, --wait-rooted, the verify command, a 403 on step 1.
-NOW = datetime(2026, 9, 25, 10, 17, tzinfo=timezone.utc).timestamp()  # frozen clock: refunded_at
+NOW = datetime(2026, 9, 25, 10, 17, tzinfo=UTC).timestamp()  # frozen clock: refunded_at
 HOUR_END = "2026-09-25T11:00:00.000Z"  # the refund's hour end, as refund.py computes it
 PAST, FUTURE = "2026-01-01T00:00:00.000Z", "2999-01-01T00:00:00.000Z"
 
 
 def iso(ts):
-    return datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.fromtimestamp(ts, UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def package(to, clamp):

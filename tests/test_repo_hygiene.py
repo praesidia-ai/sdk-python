@@ -1,5 +1,6 @@
 """The repo must not track symlinks, and a symlinked .venv must stay ignored (SDK-0356)."""
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -13,8 +14,9 @@ def _git(*args: str) -> subprocess.CompletedProcess:
 
 
 pytestmark = pytest.mark.skipif(
-    subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--git-dir"], capture_output=True).returncode != 0,
-    reason="not a git checkout (e.g. an sdist)",
+    shutil.which("git") is None
+    or subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--git-dir"], capture_output=True).returncode != 0,
+    reason="no git, or not a git checkout (e.g. an sdist or the image build)",
 )
 
 

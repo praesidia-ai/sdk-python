@@ -16,9 +16,8 @@ import math
 import random
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import Optional, Union
 
 
 @dataclass(frozen=True)
@@ -44,8 +43,8 @@ DEFAULT_RETRY_CONFIG = RetryConfig()
 
 
 def resolve_retry_config(
-    value: Union[RetryConfig, bool, None],
-) -> Optional[RetryConfig]:
+    value: RetryConfig | bool | None,
+) -> RetryConfig | None:
     """
     Validate a caller-supplied retry config. ``False`` disables retries
     entirely (returns ``None``); ``None`` resolves to the default policy.
@@ -91,7 +90,7 @@ def is_retryable_status(status_code: int) -> bool:
     return status_code == 429 or 500 <= status_code <= 599
 
 
-def parse_retry_after_s(header_value: Optional[str]) -> Optional[float]:
+def parse_retry_after_s(header_value: str | None) -> float | None:
     """
     Parse a ``Retry-After`` header (delta-seconds or an HTTP-date) into a
     delay in seconds. Returns ``None`` when absent or unparseable.
@@ -111,8 +110,8 @@ def parse_retry_after_s(header_value: Optional[str]) -> Optional[float]:
     if dt is None:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    delta = (dt - datetime.now(timezone.utc)).total_seconds()
+        dt = dt.replace(tzinfo=UTC)
+    delta = (dt - datetime.now(UTC)).total_seconds()
     return max(0.0, delta)
 
 

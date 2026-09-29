@@ -12,8 +12,9 @@ import json
 import os
 import re
 import time
+from collections.abc import Callable
 from threading import RLock
-from typing import Any, Callable, Optional, Union
+from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
@@ -102,7 +103,7 @@ def _is_loopback_host(host: str) -> bool:
 _LOOPBACK_V4 = ipaddress.IPv4Network("127.0.0.0/8")
 
 
-def normalize_base_url(base_url: str, allow_insecure_http: Optional[bool] = None) -> str:
+def normalize_base_url(base_url: str, allow_insecure_http: bool | None = None) -> str:
     """Return a safe absolute HTTP(S) API base URL without a trailing slash."""
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("base_url must be a non-empty absolute HTTP(S) URL")
@@ -115,7 +116,7 @@ def normalize_base_url(base_url: str, allow_insecure_http: Optional[bool] = None
         raise ValueError("base_url must not contain backslashes")
     parsed = urlsplit(base_url)
     try:
-        parsed.port
+        parsed.port  # noqa: B018 - property access validates the port
     except ValueError as exc:
         raise ValueError("base_url contains an invalid port") from exc
     if (
@@ -210,28 +211,30 @@ class HttpClient:
     everywhere the TS SDK does.
     """
 
+    _headers: dict[str, str]
+
     def __init__(
         self,
         api_key: str,
         org_id: str,
         base_url: str,
         timeout: float = _DEFAULT_TIMEOUT,
-        retry: Union[RetryConfig, bool, None] = None,
-        allow_insecure_http: Optional[bool] = None,
+        retry: RetryConfig | bool | None = None,
+        allow_insecure_http: bool | None = None,
     ) -> None:
         self.org_id = path_segment(org_id, "org_id")
         self._init_transport(base_url, timeout, allow_insecure_http)
         self._headers = {"Authorization": f"Bearer {_validate_api_key(api_key)}", **self._headers}
         #: FINDING-4 -- resolved retry policy, or None when retries are disabled.
-        self._retry: Optional[RetryConfig] = resolve_retry_config(retry)
+        self._retry: RetryConfig | None = resolve_retry_config(retry)
 
     @classmethod
     def public(
         cls,
         base_url: str,
         timeout: float = _DEFAULT_TIMEOUT,
-        retry: Union[RetryConfig, bool, None] = None,
-        allow_insecure_http: Optional[bool] = None,
+        retry: RetryConfig | bool | None = None,
+        allow_insecure_http: bool | None = None,
     ) -> HttpClient:
         """
         SDK-0311 -- a client for the PUBLIC (trust-passport) routes only. It has
@@ -243,11 +246,11 @@ class HttpClient:
         client._retry = resolve_retry_config(retry)
         return client
 
-    def _init_transport(self, base_url: str, timeout: float, allow_insecure_http: Optional[bool] = None) -> None:
+    def _init_transport(self, base_url: str, timeout: float, allow_insecure_http: bool | None = None) -> None:
         self._base = normalize_base_url(base_url, allow_insecure_http)
         self._timeout = _validate_timeout(timeout)
         self._headers_lock = RLock()
-        self._headers: dict[str, str] = {
+        self._headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
         }

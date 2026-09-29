@@ -1,13 +1,13 @@
 """Durable dispatch claims, independent of a framework's post-tool checkpoints."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import re
 import stat
-from typing import Protocol, Union
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Protocol
 from uuid import UUID
 
 
@@ -52,7 +52,7 @@ class FileRuntimeAttemptStore:
     Shared multi-host runtimes need their own durable atomic claim implementation.
     """
 
-    def __init__(self, directory: Union[str, Path]) -> None:
+    def __init__(self, directory: str | Path) -> None:
         self.directory = Path(directory)
         if not self.directory.is_absolute():
             raise ValueError("Attempt state requires an absolute host-owned directory")

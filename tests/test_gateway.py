@@ -60,8 +60,7 @@ def test_client_id_on_the_wire_and_per_call_id_wins():
 @respx.mock
 def test_non_uuid_is_rejected_before_sending(bad):
     route = respx.post(URL).mock(return_value=httpx.Response(200, json={}))
-    with pytest.raises(InvalidMcpServerIdError) as exc:
-        with httpx.Client() as client:
-            client.post(URL, json={}, headers=gateway_headers(mcp_server_id=bad))
+    with pytest.raises(InvalidMcpServerIdError) as exc, httpx.Client() as client:
+        client.post(URL, json={}, headers=gateway_headers(mcp_server_id=bad))
     assert isinstance(exc.value, PraesidiaConfigError)
     assert not route.called

@@ -1,6 +1,7 @@
 """Protected-action evidence reads. Retrieval never establishes verification."""
 from __future__ import annotations
 
+import builtins
 from typing import Any
 
 from ._evidence import evidence_date_range
@@ -47,11 +48,11 @@ class ProofResource:
         """Read a projection. Operational success does not imply valid evidence."""
         return self._http.get(f"{self._base}/{path_segment(action_id, 'action_id')}")
 
-    def events(self, action_id: str) -> list[dict[str, Any]]:
+    def events(self, action_id: str) -> builtins.list[dict[str, Any]]:
         """Return signed events unchanged, including decimal actionSeq and null payloads."""
         return self._http.get(f"{self._base}/{path_segment(action_id, 'action_id')}/events")
 
-    def capture_scope(self) -> list[dict[str, Any]]:
+    def capture_scope(self) -> builtins.list[dict[str, Any]]:
         """Read the declared denominator, including partial and unsupported edges."""
         return self._http.get(f"{self._base}/capture-scope")
 

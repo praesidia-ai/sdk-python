@@ -5,17 +5,15 @@ classes are used. Only an owned profile and the local API contract fixture exist
 """
 import json
 import os
-from pathlib import Path
 
 import pytest
-
-from test_framework_tools import endpoint
+from test_framework_tools import endpoint  # noqa: F401 - pytest fixture
 
 pytestmark = pytest.mark.framework
 
 
 @pytest.fixture
-def hermes(endpoint, tmp_path, monkeypatch):
+def hermes(endpoint, tmp_path, monkeypatch):  # noqa: F811 - imported fixture
     source = os.getenv("PRAESIDIA_HERMES_SOURCE")
     if not source:
         if os.getenv("PRAESIDIA_REQUIRE_HERMES") == "1":
@@ -38,7 +36,7 @@ def hermes(endpoint, tmp_path, monkeypatch):
         target_id: local-record
         strict_tools: true
 """)
-    from hermes_cli.plugins import get_plugin_manager, discover_entrypoint_manifests
+    from hermes_cli.plugins import discover_entrypoint_manifests, get_plugin_manager
     manifest = next(m for m in discover_entrypoint_manifests() if m.name == "praesidia")
     assert manifest.source == "entrypoint" and manifest.path == "praesidia_hermes"
     manager = get_plugin_manager()
@@ -80,10 +78,10 @@ def test_actual_hermes_dispatch_and_durable_plugin_state(hermes):
 
 def test_actual_hermes_strict_hooks_block_unrelated_and_bad_native_context(hermes):
     _, backend, _ = hermes
-    from hermes_cli.plugins import _dispatch_pre_tool_call_hooks
     from hermes_cli.middleware import run_tool_execution_middleware
-    from tools.registry import registry
+    from hermes_cli.plugins import _dispatch_pre_tool_call_hooks
     from praesidia_hermes import TOOL_NAME
+    from tools.registry import registry
     calls = []
     block, _ = _dispatch_pre_tool_call_hooks("shell_exec", {}, session_id="s", tool_call_id="c")
     assert "only the Praesidia" in block

@@ -41,4 +41,4 @@ def test_network_failure_does_not_prove_replay_rejection():
 
 def test_success_does_not_prove_replay_rejection():
     with pytest.raises(RuntimeError, match="unexpectedly accepted"):
-        module.assert_replay_rejected(lambda: {}, PATH)
+        module.assert_replay_rejected(dict, PATH)

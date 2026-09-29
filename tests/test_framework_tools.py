@@ -2,19 +2,23 @@
 it does not replace the separately runnable real-backend approval acceptance.
 """
 import asyncio
-from importlib.util import find_spec
 import json
 import os
-from pathlib import Path
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.util import find_spec
+from pathlib import Path
 
 import pytest
 
 from praesidia import Praesidia
-from praesidia.integrations import FileRuntimeAttemptStore
 from praesidia._jcs_canonical import jcs_commitment
-from praesidia.integrations.protected_tool import ManagedProtectedTool, RuntimeBinding, RuntimeCall
+from praesidia.integrations import FileRuntimeAttemptStore
+from praesidia.integrations.protected_tool import (
+    ManagedProtectedTool,
+    RuntimeBinding,
+    RuntimeCall,
+)
 
 pytestmark = pytest.mark.framework
 
@@ -100,8 +104,9 @@ def endpoint(tmp_path):
 def test_openai_native_tool_and_approval_wakeup(endpoint):
     require("agents")
     from agents import RunContextWrapper
-    from agents.tool_context import ToolContext
     from agents.tool import invoke_function_tool
+    from agents.tool_context import ToolContext
+
     from praesidia.integrations.openai_agents import openai_tool
     managed, backend = endpoint
     host = {"praesidia_thread_id": "openai-session", "praesidia_tools": {}}
@@ -128,11 +133,16 @@ def test_openai_native_tool_and_approval_wakeup(endpoint):
 @pytest.mark.parametrize("backend_approved", [False, True])
 def test_openai_runner_serialized_native_approval_is_only_a_wakeup(endpoint, backend_approved):
     require("agents")
-    from agents import Agent, Runner, RunConfig, RunState
-    from agents.models.interface import Model
+    from agents import Agent, RunConfig, Runner, RunState
     from agents.items import ModelResponse
+    from agents.models.interface import Model
     from agents.usage import Usage
-    from openai.types.responses import ResponseFunctionToolCall, ResponseOutputMessage, ResponseOutputText
+    from openai.types.responses import (
+        ResponseFunctionToolCall,
+        ResponseOutputMessage,
+        ResponseOutputText,
+    )
+
     from praesidia.integrations.openai_agents import openai_tool
     managed, backend = endpoint
 
@@ -169,9 +179,10 @@ def test_openai_runner_serialized_native_approval_is_only_a_wakeup(endpoint, bac
 
 def test_google_actual_tool_context_and_state_delta(endpoint):
     require("google.adk")
-    from google.adk.tools import ToolContext
     from google.adk.agents.invocation_context import InvocationContext
     from google.adk.sessions import InMemorySessionService
+    from google.adk.tools import ToolContext
+
     from praesidia.integrations.google_adk import google_adk_tool
     managed, backend = endpoint
     async def run():
@@ -196,6 +207,7 @@ def test_google_actual_tool_context_and_state_delta(endpoint):
 def test_microsoft_actual_invoke_preserves_native_call_and_session(endpoint):
     require("agent_framework")
     from agent_framework import AgentSession, FunctionInvocationContext
+
     from praesidia.integrations.microsoft_agent_framework import microsoft_tool
     managed, backend = endpoint
     async def run():
@@ -221,8 +233,9 @@ def test_microsoft_actual_invoke_preserves_native_call_and_session(endpoint):
 
 def test_agno_actual_functioncall_injects_identity_and_stores_state(endpoint):
     require("agno")
-    from agno.tools.function import FunctionCall
     from agno.run import RunContext
+    from agno.tools.function import FunctionCall
+
     from praesidia.integrations.agno import agno_tool
     managed, backend = endpoint
     context = RunContext(run_id="real-run", session_id="agno-session", session_state={})
@@ -251,6 +264,7 @@ def test_crewai_real_tool_with_persisted_flow_cursor(endpoint, tmp_path, monkeyp
     from crewai_core.token_manager import TokenManager
     monkeypatch.setattr(TokenManager, "_get_secure_storage_path", staticmethod(lambda: tmp_path))
     from crewai.flow.flow import Flow
+
     from praesidia.integrations.crewai import crewai_tool
     managed, backend = endpoint
     flow = Flow()
@@ -270,10 +284,12 @@ def test_crewai_real_tool_with_persisted_flow_cursor(endpoint, tmp_path, monkeyp
 def test_langgraph_actual_toolnode_injects_call_id_and_commits_cursor(endpoint):
     require("langgraph")
     from typing import Annotated, TypedDict
+
     from langchain_core.messages import AIMessage
-    from langgraph.graph import StateGraph, START, END
+    from langgraph.graph import END, START, StateGraph
     from langgraph.graph.message import add_messages
     from langgraph.prebuilt import ToolNode
+
     from praesidia.integrations.langgraph_tools import langgraph_tool
     managed, backend = endpoint
     class State(TypedDict):

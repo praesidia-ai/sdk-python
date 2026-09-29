@@ -95,6 +95,7 @@ def _format_number(v: float) -> str:
     # reformatting surprises, giving exactly `s` (as `digits`) and the power
     # of ten it is scaled by.
     _sign, digits, exponent = Decimal(repr(abs(v))).as_tuple()
+    assert isinstance(exponent, int)  # finite input: never 'n'/'N'/'F'
     digit_str = "".join(str(d) for d in digits)
     k = len(digit_str)
     # ECMA-262: value == s * 10**(n-k)  <=>  n == k + exponent (since
@@ -146,7 +147,7 @@ def _canonicalize(v: JsonValue) -> str:
         # a non-string key). Sort by the utf-16-be byte encoding of each key
         # to reproduce JS's UTF-16-code-unit sort order exactly (see module
         # docstring).
-        for k in v.keys():
+        for k in v:
             if not isinstance(k, str):
                 raise JcsCanonicalizationError(f"object key {k!r} is not a string")
         keys = sorted(v.keys(), key=lambda k: k.encode("utf-16-be"))

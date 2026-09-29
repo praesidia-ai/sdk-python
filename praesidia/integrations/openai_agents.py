@@ -3,9 +3,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-from .protected_tool import ManagedProtectedTool, RuntimeBinding, RuntimeCall, decode_body
+from .protected_tool import (
+    ManagedProtectedTool,
+    RuntimeBinding,
+    RuntimeCall,
+    decode_body,
+)
 
 
 def openai_tool(managed: ManagedProtectedTool, *,
@@ -25,7 +31,8 @@ def openai_tool(managed: ManagedProtectedTool, *,
             host = context.context
             if not isinstance(host, dict) or not isinstance(host.get("praesidia_tools"), dict):
                 raise ValueError("OpenAI requires persisted host context with praesidia_tools")
-            result = RuntimeBinding(RuntimeCall("openai-agents", host.get("praesidia_thread_id"), call_id), host["praesidia_tools"])
+            thread_id = host.get("praesidia_thread_id")  # validated by RuntimeCall.checkpoint()
+            result = RuntimeBinding(RuntimeCall("openai-agents", thread_id, call_id), host["praesidia_tools"])  # type: ignore[arg-type]
         if result.call.runtime != "openai-agents" or result.call.call_id != call_id:
             raise ValueError("OpenAI binding must match the native tool call")
         return result
