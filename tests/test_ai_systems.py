@@ -19,9 +19,12 @@ from praesidia.exceptions import PraesidiaConfigError
 # monorepo's committed, gate-verified spec; be's frozen openapi.json export is a stale
 # snapshot nothing regenerates -- see SDK-0303). Skips with a reason (never
 # fails) when neither exists, so this package still tests from a bare
-# sdk-python clone with no ui sibling.
+# sdk-python clone with no ui sibling. SDK-2700 -- REQUIRE_SWAGGER=1 (contract-drift.yml only)
+# turns the skip into a failure and takes BE_SWAGGER_PATH literally, so that job can never go
+# green without reading its fresh be export.
+_REQUIRE_SWAGGER = os.environ.get("REQUIRE_SWAGGER") == "1"
 _env_override = os.environ.get("BE_SWAGGER_PATH")
-if _env_override and Path(_env_override).resolve().is_file():
+if _env_override and (_REQUIRE_SWAGGER or Path(_env_override).resolve().is_file()):
     _SWAGGER_PATH = Path(_env_override).resolve()
 else:
     _SWAGGER_PATH = (Path(__file__).resolve().parents[2] / "ui" / "swagger.json")
@@ -469,7 +472,7 @@ def test_traverse_rejects_invalid_relationship_type():
 
 
 @pytest.mark.skipif(
-    not _SWAGGER_AVAILABLE,
+    not _SWAGGER_AVAILABLE and not _REQUIRE_SWAGGER,
     reason=(
         f"no swagger.json at {_SWAGGER_PATH} (BE_SWAGGER_PATH override or "
         "ui/swagger.json sibling checkout) -- see SDK-0303"
@@ -482,6 +485,7 @@ def test_asset_and_relationship_types_match_openapi():
     compares its `AiAsset.assetType` / `AssetRelationship.relationshipType`
     enums against `AiSystemsResource.ASSET_TYPES` / `RELATIONSHIP_TYPES`.
     """
+    assert _SWAGGER_AVAILABLE, f"REQUIRE_SWAGGER=1 but no swagger.json at {_SWAGGER_PATH}"
     spec = json.loads(_SWAGGER_PATH.read_text())
     schemas = spec["components"]["schemas"]
     openapi_asset_types = set(schemas["AiAsset"]["properties"]["assetType"]["enum"])

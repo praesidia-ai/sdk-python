@@ -136,3 +136,13 @@ jobs:
         env:
           AUD_0063_REQUIRE_SWAGGER: 'true'
         run: pytest tests/test_analytics_coverage.py -v
+
+      # SDK-2700 — AI asset enum parity (ASSET_TYPES, RELATIONSHIP_TYPES) against
+      # this job's fresh export. Run by path, never `-k`; REQUIRE_SWAGGER=1 makes a
+      # missing spec a failure instead of a skip.
+      - name: SDK-2700 — AI asset enum parity vs be-core
+        working-directory: sdk-python
+        env:
+          REQUIRE_SWAGGER: '1'
+          BE_SWAGGER_PATH: ../swagger.generated.json
+        run: pytest tests/test_ai_systems.py -v

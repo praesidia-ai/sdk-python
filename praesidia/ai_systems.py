@@ -326,15 +326,16 @@ class AiSystemsResource:
         be requires the request's approver rank (ORGANIZATION_OWNER) and a
         decider other than the requester.
         """
-        return self._decide_lifecycle_transition(request_id, "approve", reason)
+        # SDK-2700 -- literal /approve and /reject paths so audit-api-contract.mjs can resolve them.
+        return self._http.post(
+            f"{self._systems_base}/lifecycle-requests/{path_segment(request_id, 'request_id')}/approve",
+            json={} if reason is None else {"reason": reason},
+        )
 
     def reject_lifecycle_transition(self, request_id: str, *, reason: str | None = None) -> dict[str, Any]:
         """Reject a pending lifecycle request. POST .../ai-systems/lifecycle-requests/:requestId/reject."""
-        return self._decide_lifecycle_transition(request_id, "reject", reason)
-
-    def _decide_lifecycle_transition(self, request_id: str, decision: str, reason: str | None) -> dict[str, Any]:
         return self._http.post(
-            f"{self._systems_base}/lifecycle-requests/{path_segment(request_id, 'request_id')}/{decision}",
+            f"{self._systems_base}/lifecycle-requests/{path_segment(request_id, 'request_id')}/reject",
             json={} if reason is None else {"reason": reason},
         )
 
