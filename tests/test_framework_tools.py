@@ -391,3 +391,39 @@ def test_native_process_restart_with_lost_cursor_does_not_resubmit(runtime, modu
     restored = run(); assert restored.returncode == 0, restored.stderr
     assert json.loads(restored.stdout)["disposition"] == "inspection_required"
     assert backend["resumeRequests"] == 1 and backend["dispatches"] == 0
+
+
+def test_google_missing_function_call_id_fails_closed_before_state_or_backend(endpoint):
+    require("google.adk")
+    from google.adk.agents.invocation_context import InvocationContext
+    from google.adk.sessions import InMemorySessionService
+    from google.adk.tools import ToolContext
+
+    from praesidia.integrations.google_adk import google_adk_tool
+    managed, backend = endpoint
+    async def run():
+        service = InMemorySessionService()
+        session = await service.create_session(app_name="test", user_id="u", session_id="adk-session")
+        context = ToolContext(InvocationContext(session_service=service, invocation_id="actual-run", session=session))
+        with pytest.raises(ValueError, match="ADK native function_call_id is required"):
+            await google_adk_tool(managed).run_async(args={"body": {"amount": 5}}, tool_context=context)
+        assert "praesidia_tools" not in context.actions.state_delta
+    asyncio.run(run())
+    assert backend["requests"] == []
+
+
+def test_agno_missing_call_id_fails_closed_before_state_or_backend(endpoint):
+    require("agno")
+    from agno.run import RunContext
+    from agno.tools.function import FunctionCall
+
+    from praesidia.integrations.agno import agno_tool
+    managed, backend = endpoint
+    context = RunContext(run_id="real-run", session_id="agno-session", session_state={})
+    tool = agno_tool(managed)
+    tool._run_context = context
+    result = FunctionCall(function=tool, arguments={"body": {"amount": 5}}).execute()
+    assert result.status == "failure"
+    assert "Agno native FunctionCall.call_id is required" in str(result.error)
+    assert context.session_state == {}
+    assert backend["requests"] == []

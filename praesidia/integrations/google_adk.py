@@ -19,6 +19,8 @@ def google_adk_tool(managed: ManagedProtectedTool):
     async def invoke(body: dict[str, Any], tool_context) -> dict[str, Any]:
         if not isinstance(tool_context, ToolContext):
             raise ValueError("ADK ToolContext is required")
+        if not tool_context.function_call_id:
+            raise ValueError("ADK native function_call_id is required")
         state = tool_context.state
         # Replace the top-level value to record ADK's session state delta.
         cursor = dict(state.get("praesidia_tools", {}))

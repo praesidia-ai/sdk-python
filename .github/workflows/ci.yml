@@ -106,6 +106,8 @@ jobs:
           pip install uv==0.12.20
           uv sync --frozen --extra dev --extra frameworks --group crewai
           uv pip install --no-deps -e ./plugins/hermes
+      - name: Type-check against the locked native frameworks
+        run: .venv/bin/mypy praesidia
       - name: Actual native tools, durable approval and process restarts
         run: |
           .venv/bin/coverage run -m pytest tests/ -q

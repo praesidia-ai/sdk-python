@@ -22,6 +22,8 @@ def agno_tool(managed: ManagedProtectedTool):
             raise ValueError("Agno native run and function-call contexts are required")
         if not isinstance(run_context.session_state, dict):
             raise ValueError("Agno requires persisted session state")
+        if not fc.call_id:
+            raise ValueError("Agno native FunctionCall.call_id is required")
         state = run_context.session_state.setdefault("praesidia_tools", {})
         return managed.invoke(body, RuntimeBinding(RuntimeCall("agno", run_context.session_id, fc.call_id), state))
 
