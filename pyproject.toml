@@ -33,12 +33,12 @@ classifiers = [
 
 [project.optional-dependencies]
 langgraph = ["langgraph>=1.0,<2", "langgraph-checkpoint-sqlite>=3,<4"]
-openai-agents = ["openai-agents==0.20.0"]
+openai-agents = ["openai-agents==0.22.3"]
 google-adk = ["google-adk==2.10.0"]
 microsoft-agent-framework = ["agent-framework-core==1.19.0"]
 agno = ["agno==3.0.11"]
 frameworks = [
-    "openai-agents==0.20.0",
+    "openai-agents==0.22.3",
     "google-adk==2.10.0",
     "agent-framework-core==1.19.0",
     "agno==3.0.11",
