@@ -1,0 +1,20 @@
+{
+  "agent": {
+    "id": "5066706e-e4c6-43f6-9574-e63cc30103ab",
+    "name": "Support Bot",
+    "organizationId": "275bffdf-d56e-4fda-9662-cf36ffb77d46",
+    "ownerId": "37110ab3-c791-4734-b025-4825f03087a0",
+    "type": "AUTONOMOUS",
+    "status": "ACTIVE",
+    "visibility": "PRIVATE",
+    "accessControl": "AUTO_APPROVE",
+    "role": "SERVER",
+    "clientId": "ag_0123456789abcdef0123456789abcdef",
+    "dnsVerified": false,
+    "isFreeAgent": false,
+    "requireDPA": false
+  },
+  "clientSecret": null,
+  "credentialMode": "jit",
+  "webhookSigningSecret": "fixture-webhook-signing-secret-not-a-real-secret"
+}

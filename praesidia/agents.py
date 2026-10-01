@@ -10,7 +10,7 @@ from __future__ import annotations
 import builtins
 import re
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from ._http import (
     AGENT_ID_HEADER,
@@ -33,6 +33,23 @@ _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
+
+
+class AgentCreateResult(TypedDict):
+    """Response of :meth:`AgentsResource.create` — be ``AgentCreateResponseDto`` (SDK-2797).
+
+    The created agent is nested under ``agent`` (``result["agent"]["id"]``); the
+    three sibling keys are returned on create only.
+    """
+
+    #: The created agent (be ``AgentListItemDto``).
+    agent: dict[str, Any]
+    #: Always ``None`` now: be issues no static client secret (credentials are JIT).
+    clientSecret: str | None
+    #: Always ``"jit"`` now; ``"static"`` stays in be's response schema for legacy agents.
+    credentialMode: Literal["jit", "static"]
+    #: Per-agent webhook signing secret, returned ONCE. Persist it; never log it.
+    webhookSigningSecret: str
 
 
 def tool_call_headers_from_task(task: dict[str, Any]) -> dict[str, str]:
@@ -127,29 +144,27 @@ class AgentsResource:
         """
         return self._http.get(f"{self._base}/{path_segment(agent_id, 'agent_id')}")
 
-    def create(self, data: dict[str, Any]) -> dict[str, Any]:
+    def create(self, data: dict[str, Any]) -> AgentCreateResult:
         """
         Create a new agent.
 
         Args:
-            data: Agent creation payload (name, type, model, etc.).
+            data: Agent creation payload (``name``, ``type``, ...). ``type`` is
+                one of ``AUTONOMOUS`` (default), ``SUPERVISED``, ``SERVICE``,
+                ``ORCHESTRATOR``.
 
         Returns:
-            Created agent dict. Q4-05: the response carries
-            ``credentialMode`` (``"jit"`` or ``"static"``) and
-            ``clientSecret`` (``str`` or ``None``).
-
-            - ``credentialMode == "jit"`` (the default for ephemeral/JIT-first
-              orgs) → ``clientSecret`` is ``None``. Do NOT expect or persist a
-              static ``X-A2A-Client-Secret``; the agent authenticates with
-              ephemeral JIT capability tokens (Q4-02) minted per task instead.
-            - ``credentialMode == "static"`` (legacy opt-in) → ``clientSecret``
-              is the plaintext secret, shown ONCE. Persist it immediately.
-
-            A ``clientId`` (public, non-secret) is ALWAYS returned regardless of
-            mode. Never log ``clientSecret``.
+            be's create envelope, not the bare agent (SDK-2797):
+            ``{"agent", "clientSecret", "credentialMode", "webhookSigningSecret"}``.
+            The agent is ``result["agent"]`` (``result["agent"]["id"]``).
+            ``credentialMode`` is ``"jit"`` and ``clientSecret`` is ``None`` —
+            be mints no static secret; the agent authenticates with ephemeral
+            JIT capability tokens (Q4-02) minted per task. ``webhookSigningSecret``
+            is returned ONCE — persist it immediately and never log it.
+            ``agent["clientId"]`` (public, non-secret) is always set.
         """
-        return self._http.post(self._base, json=data)
+        result: AgentCreateResult = self._http.post(self._base, json=data)
+        return result
 
     def update(self, agent_id: str, data: dict[str, Any]) -> dict[str, Any]:
         """

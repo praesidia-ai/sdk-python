@@ -5,6 +5,15 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 
 ## Unreleased
 
+### Changed
+- **SDK-2797 (breaking, types only; TS twin in `@praesidia/sdk`):** `agents.create()` is annotated
+  `-> AgentCreateResult` (new `TypedDict`, exported from `praesidia`) — be's
+  `{agent, clientSecret, credentialMode, webhookSigningSecret}` envelope — instead of
+  `dict[str, Any]`. The runtime value is unchanged: be always sent this envelope, so
+  `created["id"]` always raised `KeyError`. Read the id from `created["agent"]["id"]`; type
+  checkers now flag `created["id"]`. The docstring and README no longer describe a flat agent
+  or a `"static"` credential mode (be no longer issues one).
+
 ### Added
 - **SDK-2504 (needs be BE-1759; TS twin SDK-2503):** interaction hooks send an `Idempotency-Key`
   (UUID v4 per call; a caller key via `decide(..., idempotency_key=)` /

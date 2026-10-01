@@ -742,9 +742,19 @@ for row in client.agents.poll_pending_tasks(
     )
 ```
 
-`create()` returns `credentialMode` (`"jit"` | `"static"`) and `clientSecret`
-(`str | None`). For JIT-first orgs `clientSecret` is `None` — do **not** persist
-a static `X-A2A-Client-Secret`; use the JIT capability-token flow above.
+`agents.create()` returns be's create envelope (`AgentCreateResult`), not the
+bare agent — the agent is under `"agent"`:
+
+```python
+# type: "AUTONOMOUS" (default) | "SUPERVISED" | "SERVICE" | "ORCHESTRATOR"
+created = client.agents.create({"name": "Support Bot", "type": "AUTONOMOUS"})
+agent_id = created["agent"]["id"]
+# created["credentialMode"] == "jit" and created["clientSecret"] is None: be issues
+# no static secret, so use the JIT capability-token flow above.
+# created["webhookSigningSecret"] is shown ONCE — persist it now, never log it.
+client.agents.update(agent_id, {"name": "Renamed Bot"})
+client.agents.delete(agent_id)
+```
 
 ## Gateway — tag calls with an MCP server id (SDK-0313)
 

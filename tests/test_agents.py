@@ -4,12 +4,15 @@ AUDIT-SDK-02 task-submit contract."""
 from __future__ import annotations
 
 import json
+import typing
+from pathlib import Path
 
 import httpx
 import pytest
 import respx
 
 from praesidia import Praesidia
+from praesidia.agents import AgentsResource
 
 BASE_URL = "https://test.local"
 ORG_ID = "org-1"
@@ -19,6 +22,13 @@ PARENT_TASK_ID = "22222222-2222-4222-8222-222222222222"
 GET_AGENT = f"{BASE_URL}/organizations/{ORG_ID}/agents/{AGENT_ID}"
 AGENTS_URL = f"{BASE_URL}/organizations/{ORG_ID}/agents"
 TASKS_URL = f"{BASE_URL}/organizations/{ORG_ID}/tasks"
+# SDK-2797 — be returns AgentCreateResponseDto {agent, clientSecret, credentialMode,
+# webhookSigningSecret} (be/src/agents/dto/agent-response.dto.ts:27), not the agent.
+# Byte-identical to sdk/test-fixtures/agent-create-response-v1.json; the key set is
+# the one QA-0012 observed live (findings/QA-0012/j1-ts.log:4).
+CREATE_FIXTURE = json.loads(
+    (Path(__file__).parents[1] / "test-fixtures/agent-create-response-v1.json").read_text()
+)
 
 
 def _client() -> Praesidia:
@@ -34,7 +44,7 @@ def test_agent_crud_routes_and_pagination_envelopes():
         return_value=httpx.Response(200, json={"id": AGENT_ID})
     )
     create_route = respx.post(AGENTS_URL).mock(
-        return_value=httpx.Response(201, json={"id": AGENT_ID})
+        return_value=httpx.Response(201, json=CREATE_FIXTURE)
     )
     update_route = respx.patch(GET_AGENT).mock(
         return_value=httpx.Response(200, json={"id": AGENT_ID, "name": "renamed"})
@@ -49,12 +59,30 @@ def test_agent_crud_routes_and_pagination_envelopes():
     }
     assert client.agents.get(AGENT_ID)["id"] == AGENT_ID
     assert get_route.called
-    assert client.agents.create({"name": "bot"})["id"] == AGENT_ID
+    assert client.agents.create({"name": "bot"})["agent"]["id"] == CREATE_FIXTURE["agent"]["id"]
     assert json.loads(create_route.calls.last.request.content) == {"name": "bot"}
     assert client.agents.update(AGENT_ID, {"name": "renamed"})["name"] == "renamed"
     assert json.loads(update_route.calls.last.request.content) == {"name": "renamed"}
     assert client.agents.delete(AGENT_ID) is None
     assert delete_route.called
+
+
+@respx.mock
+def test_agent_create_returns_be_create_envelope():
+    from praesidia import AgentCreateResult
+
+    respx.post(AGENTS_URL).mock(return_value=httpx.Response(201, json=CREATE_FIXTURE))
+
+    created = _client().agents.create({"name": "Support Bot", "type": "AUTONOMOUS"})
+
+    assert created["agent"]["id"] == CREATE_FIXTURE["agent"]["id"]
+    assert "id" not in created
+    assert created["credentialMode"] == "jit"
+    assert created["clientSecret"] is None
+    assert created["webhookSigningSecret"] == CREATE_FIXTURE["webhookSigningSecret"]
+    # The declared return type names exactly the keys be sends.
+    assert typing.get_type_hints(AgentsResource.create)["return"] is AgentCreateResult
+    assert AgentCreateResult.__required_keys__ == frozenset(CREATE_FIXTURE)
 
 
 @respx.mock

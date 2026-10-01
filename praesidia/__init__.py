@@ -41,7 +41,7 @@ from ._jcs_canonical import (
     jcs_commitment,
 )
 from ._retry import RetryConfig
-from .agents import tool_call_headers_from_task
+from .agents import AgentCreateResult, tool_call_headers_from_task
 
 # SDK-0002 — AI System / asset / relationship graph parity with be's
 # AISYS-0002 and the TS SDK's ai_systems resource (SDK-0001).
@@ -110,6 +110,7 @@ __all__ = [
     "ServerError",
     "IdempotencyKeyReusedError",
     "tool_call_headers_from_task",
+    "AgentCreateResult",
     # SDK-0313 — gateway MCP server id header
     "gateway_headers",
     "MCP_SERVER_ID_HEADER",
