@@ -61,6 +61,19 @@ _BY = (4 * _inv(5)) % _P
 _BX = _x_recover(_BY)
 _B = (_BX % _P, _BY % _P, 1, (_BX * _BY) % _P)  # extended coords (X, Y, Z, T)
 _IDENTITY_ENCODING = bytes([1]) + bytes(31)
+# SDK-2801 / BE-2858 — y-coordinates of the eight small-order (8-torsion)
+# points: identity (1), order 2 (p-1), order 4 (0) and the two order-8 values.
+# With either sign bit these cover every small-order encoding — libsodium's
+# ed25519_ref10.c blocklist.
+_ED25519_SMALL_ORDER_Y = frozenset(
+    {
+        0,
+        1,
+        _P - 1,
+        0x05FC536D880238B13933C6D305ACDFD5F098EFF289F4C345B027B2C28F95E826,
+        0x7A03AC9277FDC74EC6CC392CFA53202A0F67100D760B3CBA4FD84D3D706A17C7,
+    }
+)
 _BASE64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 # ── NIST P-256 / ES256 constants (FIPS 186-4) ──────────────────────────────
@@ -147,6 +160,32 @@ def ed25519_verify(message: bytes, signature: bytes, public_key: bytes) -> bool:
     try:
         if len(signature) != 64 or len(public_key) != 32:
             return False
+        if _is_rejected_ed25519_point(public_key) or _is_rejected_ed25519_point(
+            signature[:32]
+        ):
+            return False
+        return _ed25519_verify_unguarded(message, signature, public_key)
+    except Exception:  # noqa: BLE001 - fail closed
+        return False
+
+
+def _is_rejected_ed25519_point(encoding: bytes) -> bool:
+    """
+    True when a 32-byte point encoding (public key or signature R) must be
+    rejected: non-canonical y (y >= p, RFC 8032 §5.1.3) or a small-order point.
+    Checked before the curve maths so the verdict never depends on it.
+    """
+    if len(encoding) != 32:
+        return True
+    y = int.from_bytes(encoding[:31] + bytes([encoding[31] & 0x7F]), "little")
+    return y >= _P or y in _ED25519_SMALL_ORDER_Y
+
+
+def _ed25519_verify_unguarded(
+    message: bytes, signature: bytes, public_key: bytes
+) -> bool:
+    """RFC 8032 verification equation; callers go through :func:`ed25519_verify`."""
+    try:
         a = _decode_point(public_key)
         if a is None:
             return False

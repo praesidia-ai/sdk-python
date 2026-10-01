@@ -538,6 +538,9 @@ verify its detached Ed25519 or KMS-backed P-256/ES256 proof **locally**, without
 an online verification call. Offline verification is pure-Python and
 **dependency-free** (compact Ed25519 + ECDSA-P256 verification and canonical
 JSON in `praesidia._crypto`), so it needs no `cryptography` install.
+`ed25519_verify` rejects small-order and non-canonical public keys and signature
+`R` values before the curve maths (RFC 8032 §5.1.3, libsodium's blocklist), the
+same guard as the TypeScript SDK's `verifyEd25519`.
 
 Signature formats (ADR-0004): `proof.signatureFormat` absent or `1` means the signature is
 over the canonical JSON of the passport without `proof`; `2` means it is over
