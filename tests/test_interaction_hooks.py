@@ -405,6 +405,35 @@ def test_a_cached_verdict_during_an_outage_is_not_degraded(api, mode):
     assert api.call_count == 1 and seen == []
 
 
+SECRET = "pk_live_s3cr3t"
+
+
+# D25/L7: the episode warning is a sanitised summary (class, status, first line of the message
+# without the API key or a bearer token), never the raw error; on_degraded carries no credential.
+@both
+@pytest.mark.parametrize(
+    "outcome,status",
+    [
+        (httpx.ConnectError(f"proxy refused: Authorization: Bearer {SECRET}"), None),
+        (httpx.ConnectError(f"proxy refused\nAuthorization: Bearer {SECRET}"), None),
+        (httpx.ConnectError(f"bad upstream key {SECRET}"), None),
+        (httpx.Response(503, text=f"gateway echoed Authorization: Bearer {SECRET}"), 503),
+    ],
+    ids=["header in message", "header on a later line", "bare key", "503 body"],
+)
+def test_the_episode_warning_is_a_sanitised_summary(api, mode, caplog, outcome, status):
+    api.mock(side_effect=outcome) if isinstance(outcome, Exception) else api.mock(return_value=outcome)
+    seen = []
+    h = hooks(mode, api_key=SECRET, retry=False, fail_mode={"tool_call": "open"}, on_degraded=seen.append)
+    with caplog.at_level(logging.WARNING, logger="praesidia.interaction_hooks"):
+        assert run(h.before_tool_call("search.web")).degraded is True
+    (record,) = warnings_logged(caplog)
+    line = record.getMessage()
+    assert SECRET not in line and "Bearer" not in line
+    assert ("ServerError 503" if status else "ConnectError") in line
+    assert set(seen[0]) == {"operation", "since", "mode"} and SECRET not in repr(seen)
+
+
 @both
 def test_on_degraded_must_be_callable(mode):
     with pytest.raises(PraesidiaConfigError):

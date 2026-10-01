@@ -1031,7 +1031,9 @@ and `mode` (`"fail_open"` or `"fail_closed"`, for the hook that hit it). The epi
 next decision the API returns, so the next outage calls it again. `on_degraded` is a plain
 (non-async) callable for both hook classes; wire it to alerting. An exception it raises is
 swallowed and never changes the hook's outcome. A 429 or other 4xx is not an outage and never
-opens an episode. Sync hooks share one episode across threads.
+opens an episode. Sync hooks share one episode across threads. The warning is a sanitised summary
+(error class, HTTP status, first message line with the API key and any bearer/basic token
+redacted), never the raw error; `info` carries no credential.
 
 ```python
 hooks = PraesidiaInteractionHooks(

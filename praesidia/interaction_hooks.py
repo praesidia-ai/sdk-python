@@ -93,6 +93,14 @@ _MAX_CACHE_ENTRIES = 1000
 _MAX_DECISION_BYTES = 64 * 1024
 _NO_DECISION = (httpx.RequestError, PraesidiaError)
 _LOGGER = logging.getLogger("praesidia.interaction_hooks")
+_TOKEN = re.compile(r"(?i)\b(?:bearer|basic)\s+\S+")
+
+
+def _summary(err: BaseException, api_key: str) -> str:
+    """D25/L7: error class, HTTP status, first message line without the API key or a bearer/basic token."""
+    status = getattr(err, "status_code", None)
+    text = _TOKEN.sub("[redacted]", str(err).replace(api_key, "[redacted]")).split("\n", 1)[0][:200]
+    return f"{type(err).__name__}{'' if status is None else f' {status}'}: {text}"
 
 
 #: be ``InteractionConstrainedBy`` (BE-1609): the layer that denied or required approval.
@@ -193,6 +201,7 @@ class _InteractionHooksBase(Generic[_R]):
         agent_id = agent_id or os.environ.get("PRAESIDIA_AGENT_ID")
         if not (api_key and org_id and agent_id):
             raise PraesidiaConfigError("Interaction hooks require api_key, org_id and agent_id")
+        self._api_key = api_key  # only to redact it from the outage warning (D25/L7)
         self._fail_modes = dict(DEFAULT_FAIL_MODES)
         for cls, mode in (fail_mode or {}).items():
             if cls not in DEFAULT_FAIL_MODES or mode not in ("open", "closed"):
@@ -367,7 +376,7 @@ class _InteractionHooksBase(Generic[_R]):
             "[praesidia] interaction decision API unavailable (%s): %s; until a decision succeeds, "
             "fail-closed hooks raise and fail-open hooks return degraded results",
             operation,
-            err,
+            _summary(err, self._api_key),  # never the raw error: it can carry headers or the key (D25/L7)
         )
         if self._on_degraded is not None:
             try:

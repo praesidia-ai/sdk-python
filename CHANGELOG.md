@@ -79,6 +79,10 @@ change below. It is the first version intended for the PyPI registry.
   fail-open or fail-closed hook, again after the next decision the API returns; an exception it
   raises is swallowed. One `praesidia.interaction_hooks` warning per episode. A non-callable
   `on_degraded` raises `PraesidiaConfigError`. Additive.
+- **SDK-2951 (D25/L7):** the once-per-episode `praesidia.interaction_hooks` warning is a sanitised
+  summary: error class, HTTP status, and the first message line with the API key and any
+  bearer/basic token redacted. It never prints the raw error, which can carry headers or a
+  server body echoing the key. The `on_degraded` payload carries no credential.
 - **SDK-2800 (needs be BE-2836; TS twin in `@praesidia/sdk`):** new `InteractionTaskNotLiveError`
   (subclass of `ForbiddenError`, 403, `task_id`): `decide()` and every hook, sync and async, raise
   it when be answers `taskId is not a live task this agent executes` for the hooks' `task_id`
