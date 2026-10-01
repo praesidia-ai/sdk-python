@@ -836,3 +836,77 @@ def test_interaction_decision_record_details_types_the_be_2836_keys():
         "delegationBypass": typing.Literal["owner"],
     }
     assert InteractionDecisionRecordDetails.__required_keys__ == frozenset()
+
+
+# ── SDK-2798 / be BE-1672 — the task's capability token rides X-Praesidia-Capability-Token ──
+# Parity with sdk src/interaction-hooks.spec.ts "capability token (SDK-2798, BE-1672)": same cases.
+# be reads it on POST interaction-decisions only (controller decide(); the outcome route ignores it).
+
+TOKEN = "eyJhbGciOiJFZERTQSJ9.eyJ0YXNrIjoiYTEifQ.c2ln"
+
+
+def token_of(route, i=0):
+    return route.calls[i].request.headers.get("x-praesidia-capability-token")
+
+
+def forbidden(message):
+    """be's 403 bodies (capability-token.service.ts boundTask(); interaction-decisions.service.ts decide())."""
+    return {"statusCode": 403, "path": f"/organizations/{FIXTURE['orgId']}/interaction-decisions", "method": "POST", "message": message}
+
+
+@both
+def test_the_task_token_rides_every_decision_request_as_the_header_never_the_body(api, mode):
+    api.side_effect = seq(PENDING, CONSUMED)
+    task = {"id": TASK, "chainId": None, "capabilityToken": TOKEN, "serverAgentId": AGENT}
+    run(hooks(mode, task_id=task["id"], capability_token=task["capabilityToken"]).before_tool_call("search.web"))
+    assert api.call_count == 2 and token_of(api, 0) == TOKEN and token_of(api, 1) == TOKEN
+    assert TOKEN.encode() not in api.calls[0].request.content
+    assert sent(api, 0) == {"interactionType": "model_to_tool", "agentId": AGENT, "action": {"name": "search.web"}, "taskId": TASK}
+
+
+@both
+def test_decide_takes_a_per_call_token_over_the_configured_one_neither_no_header(api, mode):
+    api.respond(200, json=ALLOW)
+    act = {"name": "search.web"}
+    run(hooks(mode, capability_token=TOKEN).decide("model_to_tool", act, capability_token="fresh.token.sig"))
+    run(hooks(mode, capability_token=TOKEN).decide("model_to_tool", act))
+    run(hooks(mode).decide("model_to_tool", act))
+    assert [token_of(api, i) for i in range(3)] == ["fresh.token.sig", TOKEN, None]
+
+
+@both
+def test_report_outcome_never_sends_the_token(outcome_api, mode):
+    _, outcome = outcome_api
+    outcome.mock(return_value=httpx.Response(200, json=RECEIPT))
+    run(hooks(mode, capability_token=TOKEN).report_outcome(RECEIPT["approvalId"], "succeeded"))
+    assert token_of(outcome) is None
+
+
+@both
+@pytest.mark.parametrize("message", [
+    "Capability token is not valid for an executing task",
+    "Capability token is bound to another agent or task",
+])
+def test_a_be_token_403_is_raised_by_a_fail_open_hook_once_not_an_outage(api, mode, message):
+    api.side_effect = [httpx.Response(403, json=forbidden(message)), httpx.Response(200, json=ALLOW)]
+    with pytest.raises(ForbiddenError) as err:
+        run(hooks(mode, task_id=TASK, capability_token=TOKEN).before_tool_call("search.web"))
+    assert not isinstance(err.value, InteractionTaskNotLiveError)
+    assert err.value.status_code == 403 and api.call_count == 1
+
+
+@both
+@pytest.mark.parametrize("bad", ["", "a b", "tok\r\nX-Evil: 1", "tökén", 42])
+def test_a_bad_token_raises_before_any_request(api, mode, bad):
+    api.respond(200, json=ALLOW)
+    with pytest.raises(PraesidiaConfigError):
+        hooks(mode, capability_token=bad)
+    with pytest.raises(PraesidiaConfigError):
+        run(hooks(mode).decide("model_to_tool", {"name": "search.web"}, capability_token=bad))
+    assert api.call_count == 0
+
+
+def test_the_token_is_kept_off_the_public_instance():
+    h = hooks("sync", capability_token=TOKEN)
+    assert TOKEN not in repr(h)
+    assert all(v != TOKEN for k, v in vars(h).items() if not k.startswith("_"))

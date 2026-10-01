@@ -952,6 +952,23 @@ except InteractionTaskNotLiveError:
     hooks = PraesidiaInteractionHooks()  # without task_id, or with the current task's id
 ```
 
+**Capability token (SDK-2798, BE-1672).** Pass the task's JIT capability token to bind every
+decision to that task explicitly: `capability_token=` in the constructor, e.g.
+`PraesidiaInteractionHooks(task_id=task["id"], capability_token=task.get("capabilityToken"))`
+from the polled task, or per call with `decide(type, action, capability_token=...)`, which
+replaces the configured one for that call. The SDK sends it as the `X-Praesidia-Capability-Token`
+header on every decision request (approval polls included), never in the body, and never on
+`report_outcome`; it is not a public attribute of the hooks. The server then holds the agent to
+that task's envelope whether or not you pass `task_id`. A token the server rejects is a 403
+`ForbiddenError`, which is never retried and which a fail-open hook raises: `Capability token is
+not valid for an executing task` (expired, revoked, or the task is no longer in progress) or
+`Capability token is bound to another agent or task` (the token's agent is not `agent_id`, or
+`task_id` names another task). Tokens last at most 5 minutes. For a longer task, pass a fresh
+token to `decide()`, build new hooks with one, or omit the token: without one the server still
+holds the agent to its live delegated tasks (above). An empty token, a non-string, or one with
+characters other than visible ASCII raises `PraesidiaConfigError` before any request. Needs be
+with BE-1672. Same behaviour in the TS SDK (`capabilityToken`).
+
 **Reporting the outcome.** When an `allow` came from a consumed approval
 (`decision["reasonCode"] == "approval_consumed"`), report what happened once:
 
@@ -1008,7 +1025,7 @@ verdicts are valid only under the `policyFingerprint` that produced them: a resp
 fingerprint evicts them all. A policy change therefore takes effect within `ttlSeconds`.
 
 In `observe` governance mode be answers `allow` and records the would-be decision; in `off` it
-answers `allow`. `decide(type, action, approval_id=None)` is the raw call (no cache, no wait, no
+answers `allow`. `decide(type, action, approval_id=None, idempotency_key=None, *, capability_token=None)` is the raw call (no cache, no wait, no
 fail mode). Action names must be dot-separated `[A-Za-z0-9_-]` segments (be's rule); anything
 else raises `PraesidiaConfigError` before a request is sent. The four typed hooks and `guarded`
 omit an argument whose value is `None` (and `arguments` when none is left);

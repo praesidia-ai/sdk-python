@@ -64,6 +64,12 @@ change below. It is the first version intended for the PyPI registry.
   actions without an authorization decision during an outage. Matches the TypeScript SDK.
 
 ### Added
+- **SDK-2798 (needs be BE-1672; TS twin in `@praesidia/sdk`):** interaction hooks take an optional
+  `capability_token=` (constructor) and `decide(..., capability_token=...)` (per call, replaces the
+  configured one), sent as `X-Praesidia-Capability-Token` on every decision request (approval polls
+  included), never in the body, never on `report_outcome`. A rejected token is a 403
+  `ForbiddenError`, not an outage. An empty, non-string or non-visible-ASCII token raises
+  `PraesidiaConfigError` before any request. Additive (minor).
 - **SDK-2800 (needs be BE-2836; TS twin in `@praesidia/sdk`):** new `InteractionTaskNotLiveError`
   (subclass of `ForbiddenError`, 403, `task_id`): `decide()` and every hook, sync and async, raise
   it when be answers `taskId is not a live task this agent executes` for the hooks' `task_id`

@@ -34,6 +34,7 @@ import httpx
 
 from ._http import (
     _DEFAULT_TIMEOUT,
+    CAPABILITY_TOKEN_HEADER,
     HttpClient,
     _validate_api_key,
     _validate_idempotency_key,
@@ -179,6 +180,7 @@ class _InteractionHooksBase(Generic[_R]):
         on_approval_required: Callable[[InteractionDecision], None] | None = None,
         task_id: str | None = None,
         retry: RetryConfig | bool | None = None,
+        capability_token: str | None = None,
     ) -> None:
         api_key = api_key or os.environ.get("PRAESIDIA_API_KEY")
         org_id = org_id or os.environ.get("PRAESIDIA_ORG_ID")
@@ -197,6 +199,8 @@ class _InteractionHooksBase(Generic[_R]):
             raise PraesidiaConfigError("task_id must be an RFC-4122 UUID")
         #: BE-1609 — the agent task these hooks run under; its delegation envelope narrows every verdict.
         self.task_id = task_id
+        # SDK-2798 / be BE-1672 — the task's JIT capability token; opaque, never logged or exposed.
+        self._capability_token = _capability_token(capability_token)
         self.organization_id = org_id
         self.agent_id = agent_id
         org = path_segment(org_id, "org_id")
@@ -257,15 +261,19 @@ class _InteractionHooksBase(Generic[_R]):
             raise PraesidiaConfigError("fail_mode must be 'open' or 'closed'")
         return self._guard(interaction_type, action, fail_mode)
 
-    def _send(self, interaction_type: str, act: dict[str, Any], approval_id: str | None, key: str | None = None) -> Any:
+    def _send(
+        self, interaction_type: str, act: dict[str, Any], approval_id: str | None, key: str | None = None, token: str | None = None
+    ) -> Any:
         # One Idempotency-Key per call (BE-1759): retries replay it; a poll adds approvalId, so it is a new call. Key order = be DTO = TS SDK.
+        token = _capability_token(token) or self._capability_token
+        headers = {} if token is None else {CAPABILITY_TOKEN_HEADER: token}
         return self._http.post(self._path, {
             "interactionType": interaction_type,
             "agentId": self.agent_id,
             "action": act,
             **({} if approval_id is None else {"approvalId": approval_id}),
             **({} if self.task_id is None else {"taskId": self.task_id}),
-        }, functools.partial(_decision, task_id=self.task_id), _idempotency_key(key))
+        }, functools.partial(_decision, task_id=self.task_id), _idempotency_key(key), headers)
 
     def report_outcome(
         self,
@@ -354,10 +362,17 @@ class PraesidiaInteractionHooks(_InteractionHooksBase[InteractionHookResult]):
         return _SyncPost(httpx.Client(**client_args), retry)
 
     def decide(
-        self, interaction_type: str, action: Mapping[str, Any], approval_id: str | None = None, idempotency_key: str | None = None
+        self,
+        interaction_type: str,
+        action: Mapping[str, Any],
+        approval_id: str | None = None,
+        idempotency_key: str | None = None,
+        *,
+        capability_token: str | None = None,
     ) -> InteractionDecision:
-        """One raw decision request: no cache, no approval wait, no fail mode. ``idempotency_key``: see README."""
-        return self._send(interaction_type, _check(interaction_type, action)[1], approval_id, idempotency_key)
+        """One raw decision request: no cache, no approval wait, no fail mode. ``idempotency_key``: see README.
+        ``capability_token`` (SDK-2798) replaces the configured one for this call."""
+        return self._send(interaction_type, _check(interaction_type, action)[1], approval_id, idempotency_key, capability_token)
 
     def guarded(self, tool: Callable[..., Any], tool_name: str | None = None) -> Callable[..., Any]:
         """Wrap a keyword-argument tool so every call runs ``before_tool_call`` first (name: ``tool.__name__``)."""
@@ -415,10 +430,17 @@ class AsyncPraesidiaInteractionHooks(_InteractionHooksBase[Awaitable[Interaction
         return _AsyncPost(httpx.AsyncClient(**client_args), retry)
 
     async def decide(
-        self, interaction_type: str, action: Mapping[str, Any], approval_id: str | None = None, idempotency_key: str | None = None
+        self,
+        interaction_type: str,
+        action: Mapping[str, Any],
+        approval_id: str | None = None,
+        idempotency_key: str | None = None,
+        *,
+        capability_token: str | None = None,
     ) -> InteractionDecision:
-        """One raw decision request: no cache, no approval wait, no fail mode. ``idempotency_key``: see README."""
-        return await self._send(interaction_type, _check(interaction_type, action)[1], approval_id, idempotency_key)
+        """One raw decision request: no cache, no approval wait, no fail mode. ``idempotency_key``: see README.
+        ``capability_token`` (SDK-2798) replaces the configured one for this call."""
+        return await self._send(interaction_type, _check(interaction_type, action)[1], approval_id, idempotency_key, capability_token)
 
     def guarded(self, tool: Callable[..., Any], tool_name: str | None = None) -> Callable[..., Awaitable[Any]]:
         """Wrap a keyword-argument tool (sync or async) so every call awaits ``before_tool_call`` first."""
@@ -474,8 +496,8 @@ class _SyncPost:
         self.client = client
         self.retry = retry
 
-    def post(self, path: str, json: dict[str, Any], parse: Callable[..., Any], key: str) -> Any:
-        content, headers, start, attempt = _dumps(json), {"Idempotency-Key": key}, time.monotonic(), 1
+    def post(self, path: str, json: dict[str, Any], parse: Callable[..., Any], key: str, extra: Mapping[str, str] | None = None) -> Any:
+        content, headers, start, attempt = _dumps(json), {**(extra or {}), "Idempotency-Key": key}, time.monotonic(), 1
         while True:
             raw = bytearray()
             try:
@@ -497,8 +519,8 @@ class _AsyncPost:
         self.client = client
         self.retry = retry
 
-    async def post(self, path: str, json: dict[str, Any], parse: Callable[..., Any], key: str) -> Any:
-        content, headers, start, attempt = _dumps(json), {"Idempotency-Key": key}, time.monotonic(), 1
+    async def post(self, path: str, json: dict[str, Any], parse: Callable[..., Any], key: str, extra: Mapping[str, str] | None = None) -> Any:
+        content, headers, start, attempt = _dumps(json), {**(extra or {}), "Idempotency-Key": key}, time.monotonic(), 1
         while True:
             raw = bytearray()
             try:
@@ -513,6 +535,16 @@ class _AsyncPost:
                     return parse(r, raw)
             await asyncio.sleep(delay)
             attempt += 1
+
+
+#: Visible ASCII only: a JWT always is, and nothing else can be a single header value.
+_HEADER_TOKEN_RE = re.compile(r"[\x21-\x7e]+")
+
+
+def _capability_token(token: str | None) -> str | None:
+    if token is not None and not (isinstance(token, str) and _HEADER_TOKEN_RE.fullmatch(token)):
+        raise PraesidiaConfigError("capability_token must be a non-empty string of visible ASCII")
+    return token
 
 
 def _idempotency_key(key: str | None) -> str:
