@@ -4,7 +4,7 @@ Python management SDK for the [Praesidia](https://praesidia.ai) AI agent platfor
 
 Covers agents, agent-tasks, workflows, connections, audit log, analytics, EU AI
 Act compliance reports, agent memory, OTLP GenAI telemetry emit, offline
-trust-passport verification and advisory in-runtime interaction hooks via the
+trust-passport verification and cooperative, in-process interaction hooks via the
 Praesidia REST API.
 
 ## Installation
@@ -874,14 +874,18 @@ endpoint yet, so `permit=` is forward-compatible plumbing, not something you can
 Python has no `beginTask`/`TaskHandle`-style lifecycle object (unlike the TS SDK) — `protect_action`
 is net-new on `AgentsResource`, matching the TS SDK's states, headers and error taxonomy exactly.
 
-## Interaction hooks — advisory in-runtime guard (SDK-0301)
+## Interaction hooks — cooperative, in-process guard (SDK-0301)
 
 Shell commands, code runs, file access, browser actions and tool calls run on **your** compute.
-Praesidia does not operate or intercept that runtime. `PraesidiaInteractionHooks` is an
-**advisory in-runtime guard**: before the action, your code asks Praesidia for a decision
-and the SDK enforces that decision in your process. An agent that does not load the SDK, or
-skips a hook, is not governed by it. For enforcement Praesidia sits in the path of, route the
-action through a governed MCP server (`client.agents.protect_action`) instead.
+Praesidia does not operate or intercept that runtime. `PraesidiaInteractionHooks` is a
+**cooperative, in-process guard**: before the action, your code asks Praesidia for a decision
+and the SDK enforces that decision in your process. The agent's own code can bypass it: an agent
+that does not load the SDK, skips a hook, or catches its exception is not governed by it. The
+**enforced** paths, where Praesidia sits in the path of the action, are the gateway proxy for
+model calls ([Gateway](#gateway--tag-calls-with-an-mcp-server-id-sdk-0313)), governed MCP
+dispatch, and `client.agents.protect_action`
+([Protect a dispatch](#protect-a-dispatch--protect_action-pa01-dx-002)). Route an action that must
+never run without a decision through one of those.
 
 ```python
 import os
@@ -1002,7 +1006,8 @@ response. `timeout` (seconds, default 30) is httpx's: it bounds the connect, the
 the wait for a pooled connection and each read of the response separately, not the whole
 request, so a hook can wait longer than `timeout` before its fail mode applies. A fail-closed
 hook then raises `InteractionDecisionUnavailableError` (the outage is its
-`__cause__`); a fail-open hook returns `InteractionHookResult(decision=None, fail_open_error=err)`.
+`__cause__`); a fail-open hook returns
+`InteractionHookResult(decision=None, fail_open_error=err, degraded=True)`.
 Any other 4xx (bad key, unknown agent, feature not enabled, and 429) always raises the typed
 `PraesidiaError` (`AuthError`, `ForbiddenError`, `RateLimitError`, ...), on every hook (SDK-0353,
 parity with TS SDK-0352): an end user can cause a 429 from a shared egress IP, so it must never
@@ -1015,6 +1020,28 @@ To retain the previous outage behavior, explicitly configure
 proceed without an authorization decision on an outage. An
 outage while waiting for an approval never turns into an allow: the hook keeps waiting, then
 times out; a 429 or other 4xx while waiting raises.
+
+**Degraded signal (SDK-2951).** A fail-open result is never silent: it carries `degraded=True`
+(with `decision=None` and `fail_open_error`). Every other result, including a verdict served
+from the cache during an outage, has `degraded=False`. The first outage of an episode, on a
+fail-open or a fail-closed hook, logs one `praesidia.interaction_hooks` warning and calls the
+constructor's `on_degraded(info)` once, with the same payload as `Guard`'s `on_degraded`:
+`operation` (`"<interaction_type>.<action name>"`), `since` (episode start, epoch milliseconds)
+and `mode` (`"fail_open"` or `"fail_closed"`, for the hook that hit it). The episode ends at the
+next decision the API returns, so the next outage calls it again. `on_degraded` is a plain
+(non-async) callable for both hook classes; wire it to alerting. An exception it raises is
+swallowed and never changes the hook's outcome. A 429 or other 4xx is not an outage and never
+opens an episode. Sync hooks share one episode across threads.
+
+```python
+hooks = PraesidiaInteractionHooks(
+    fail_mode={"tool_call": "open"},  # opt back in; the default is "closed"
+    on_degraded=lambda info: pager.alert(f"Praesidia decisions unavailable since {info['since']}"),
+)
+result = hooks.before_tool_call("search.web", {"q": "x"})
+if result.degraded:
+    ...  # ran without a decision: record it, or narrow what the tool may do
+```
 
 **Cache.** A verdict is reused for its `ttlSeconds` for the identical request, in memory, per
 hooks instance (at most 1000 entries). be sends 30, or 0 (never reused) when the answer came
@@ -1140,7 +1167,7 @@ interaction hooks' `task_id` is not a live task this agent executes (BE-2836).
 
 `InteractionDeniedError` (`interaction_type`, `action_name`, `reason_code`, `decision`) and
 `InteractionDecisionUnavailableError` (`__cause__` = the outage) are raised only by the interaction
-hooks — see [Interaction hooks](#interaction-hooks--advisory-in-runtime-guard-sdk-0301).
+hooks — see [Interaction hooks](#interaction-hooks--cooperative-in-process-guard-sdk-0301).
 
 ## Not covered by this SDK
 

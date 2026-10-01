@@ -70,6 +70,15 @@ change below. It is the first version intended for the PyPI registry.
   included), never in the body, never on `report_outcome`. A rejected token is a 403
   `ForbiddenError`, not an outage. An empty, non-string or non-visible-ASCII token raises
   `PraesidiaConfigError` before any request. Additive (minor).
+- **SDK-2951 (TS twin SDK-2950 in `@praesidia/sdk`; ADR-0014):** a fail-open interaction hook
+  result is visibly degraded. `InteractionHookResult` gains `degraded: bool = False` (last field,
+  so positional construction is unchanged); it is `True` on every fail-open result and never on a
+  verdict served from the cache. New constructor argument `on_degraded(info)` on both hook
+  classes, the `Guard` SDK-0335 pattern and payload (`operation`, `since` in epoch ms, `mode`
+  `"fail_open"` / `"fail_closed"`): called once per outage episode, on the first outage of a
+  fail-open or fail-closed hook, again after the next decision the API returns; an exception it
+  raises is swallowed. One `praesidia.interaction_hooks` warning per episode. A non-callable
+  `on_degraded` raises `PraesidiaConfigError`. Additive.
 - **SDK-2800 (needs be BE-2836; TS twin in `@praesidia/sdk`):** new `InteractionTaskNotLiveError`
   (subclass of `ForbiddenError`, 403, `task_id`): `decide()` and every hook, sync and async, raise
   it when be answers `taskId is not a live task this agent executes` for the hooks' `task_id`
@@ -82,6 +91,17 @@ change below. It is the first version intended for the PyPI registry.
   outside the organization is no longer "ignored"; it is this 403.
 
 ### Changed
+- **Breaking (SDK-2951; TS twin SDK-2950; ADR-0014, audit F04):** `before_tool_call` and
+  `before_browser_action` now fail **closed** on a decision-API outage (network error, timeout,
+  408 / 5xx, malformed response): they raise `InteractionDecisionUnavailableError` instead of
+  returning `decision=None`. `DEFAULT_FAIL_MODES` is now `tool_call` / `browser` /
+  `exec` / `fs_write`: `"closed"`, `fs_read`: `"open"`. A tool call or browser action leaves the
+  process and usually cannot be undone, the same reason exec and fs writes already failed closed.
+  Migration: `fail_mode={"tool_call": "open", "browser": "open"}` restores the old behaviour (and
+  results are then `degraded=True`). 429 and other 4xx still raise on every hook. README: the
+  hooks are described as cooperative, in-process (the enforced paths are the gateway, governed
+  MCP dispatch and `agents.protect_action`); the "lower-impact" wording is gone. Minor bump under
+  the 0.x policy, already pending in this section.
 - **SDK-2797 (breaking, types only; TS twin in `@praesidia/sdk`):** `agents.create()` is annotated
   `-> AgentCreateResult` (new `TypedDict`, exported from `praesidia`) — be's
   `{agent, clientSecret, credentialMode, webhookSigningSecret}` envelope — instead of

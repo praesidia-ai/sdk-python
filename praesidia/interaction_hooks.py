@@ -1,10 +1,11 @@
 """
-SDK-0301 — interaction hooks: an ADVISORY IN-RUNTIME GUARD (parity with the TS SDK's SDK-0300).
+SDK-0301 — interaction hooks: a COOPERATIVE, IN-PROCESS guard (parity with the TS SDK's SDK-0300).
 
 Before your agent runs a shell command, touches a file, drives a browser or calls a tool, a hook
 asks Praesidia (``POST /organizations/{orgId}/interaction-decisions``, be BE-1486) and honours the
 verdict in your process. Praesidia does not run or intercept that runtime: an agent that does not
-load the SDK, or skips a hook, is not governed by it.
+load the SDK, or skips a hook, is not governed by it. The enforced paths are the gateway proxy,
+governed MCP dispatch and ``agents.protect_action``.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import asyncio
 import functools
 import inspect
 import json
+import logging
 import math
 import os
 import re
@@ -90,6 +92,7 @@ _ACTION_NAME = re.compile(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*")
 _MAX_CACHE_ENTRIES = 1000
 _MAX_DECISION_BYTES = 64 * 1024
 _NO_DECISION = (httpx.RequestError, PraesidiaError)
+_LOGGER = logging.getLogger("praesidia.interaction_hooks")
 
 
 #: be ``InteractionConstrainedBy`` (BE-1609): the layer that denied or required approval.
@@ -154,11 +157,13 @@ class _OutcomeKeyError(PraesidiaConfigError, ValueError):
 class InteractionHookResult:
     """
     What an allowing hook returns. ``decision`` is ``None`` only when the decision API was
-    unavailable and the hook failed open; ``fail_open_error`` is then the reason.
+    unavailable and the hook failed open; ``fail_open_error`` is then the reason and ``degraded``
+    is ``True`` (SDK-2951). A verdict served from the cache is never degraded.
     """
 
     decision: InteractionDecision | None
     fail_open_error: BaseException | None = None
+    degraded: bool = False
 
 
 _R = TypeVar("_R")
@@ -181,6 +186,7 @@ class _InteractionHooksBase(Generic[_R]):
         task_id: str | None = None,
         retry: RetryConfig | bool | None = None,
         capability_token: str | None = None,
+        on_degraded: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         api_key = api_key or os.environ.get("PRAESIDIA_API_KEY")
         org_id = org_id or os.environ.get("PRAESIDIA_ORG_ID")
@@ -195,6 +201,12 @@ class _InteractionHooksBase(Generic[_R]):
         self._poll = _positive(approval_poll_interval, "approval_poll_interval")
         self._approval_timeout = _positive(approval_timeout, "approval_timeout")
         self._on_approval_required = on_approval_required
+        if on_degraded is not None and not callable(on_degraded):
+            raise PraesidiaConfigError("on_degraded must be callable")
+        #: SDK-2951 — the Guard's SDK-0335 pattern: called once per outage episode (until a decision succeeds).
+        self._on_degraded = on_degraded
+        #: epoch ms of the current outage episode's first failure; ``None`` = no episode open
+        self._degraded_since: int | None = None
         if task_id is not None and not (isinstance(task_id, str) and _UUID_RE.match(task_id)):
             raise PraesidiaConfigError("task_id must be an RFC-4122 UUID")
         #: BE-1609 — the agent task these hooks run under; its delegation envelope narrows every verdict.
@@ -326,6 +338,7 @@ class _InteractionHooksBase(Generic[_R]):
     def _record(self, key: str, decision: InteractionDecision) -> InteractionDecision:
         """Cache a fresh decision; a new policy fingerprint evicts every cached verdict (BE-0328 pattern)."""
         with self._lock:
+            self._degraded_since = None  # a fresh decision ends the outage episode
             if decision["policyFingerprint"] != self._fingerprint:
                 self._cache.clear()
                 self._fingerprint = decision["policyFingerprint"]
@@ -338,9 +351,29 @@ class _InteractionHooksBase(Generic[_R]):
     def _no_decision(self, err: BaseException, interaction_type: str, act: dict[str, Any], fail_mode: str) -> InteractionHookResult:
         if not _is_outage(err):
             raise err
+        self._degrade(err, f"{interaction_type}.{act['name']}", fail_mode)
         if fail_mode == "closed":
             raise InteractionDecisionUnavailableError(interaction_type, act["name"], err) from err
-        return InteractionHookResult(None, err)
+        return InteractionHookResult(None, err, degraded=True)
+
+    def _degrade(self, err: BaseException, operation: str, fail_mode: str) -> None:
+        """The first outage of an episode (open or closed hook) logs one warning and calls ``on_degraded`` once."""
+        now = int(time.time() * 1000)
+        with self._lock:
+            if self._degraded_since is not None:
+                return
+            self._degraded_since = now
+        _LOGGER.warning(
+            "[praesidia] interaction decision API unavailable (%s): %s; until a decision succeeds, "
+            "fail-closed hooks raise and fail-open hooks return degraded results",
+            operation,
+            err,
+        )
+        if self._on_degraded is not None:
+            try:
+                self._on_degraded({"operation": operation, "since": now, "mode": f"fail_{fail_mode}"})
+            except Exception:  # noqa: BLE001 -- an alerting hook must never change the outcome
+                pass
 
     def _approval_deadline(self, pending: InteractionDecision) -> float:
         if self._on_approval_required is not None:

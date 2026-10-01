@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import inspect
 import json
+import logging
 import re
 import time
 import typing
@@ -193,6 +194,7 @@ def test_decision_api_outage_applies_the_documented_fail_mode(api, mode, name, f
     else:
         result = run(call(hooks(mode)))
         assert result.decision is None and isinstance(result.fail_open_error, httpx.ConnectError)
+        assert result.degraded is True
 
 
 @both
@@ -264,18 +266,21 @@ def test_a_caller_error_raises_even_on_a_fail_open_hook(api, mode, status, error
 # (shared egress IP), so it must never open a fail-open hook; a 503 still degrades.
 @both
 @pytest.mark.parametrize("fail", ["open", "closed"])
-def test_a_429_raises_on_a_fail_open_and_a_fail_closed_hook(api, mode, fail):
-    api.respond(429, text="slow")
-    with pytest.raises(RateLimitError) as err:
-        run(hooks(mode, fail_mode={"tool_call": fail}).before_tool_call("search.web", {}))
-    assert err.value.status_code == 429
+@pytest.mark.parametrize("status,error", [(429, RateLimitError), (401, AuthError)])
+def test_a_429_or_401_raises_on_a_fail_open_and_a_fail_closed_hook(api, mode, fail, status, error):
+    api.respond(status, text="no")
+    seen = []
+    with pytest.raises(error) as err:
+        run(hooks(mode, fail_mode={"tool_call": fail}, on_degraded=seen.append).before_tool_call("search.web", {}))
+    assert err.value.status_code == status
+    assert seen == []  # a caller error is not an outage episode
 
 
 @both
 def test_a_503_degrades_a_fail_open_hook(api, mode):
     api.respond(503, text="down")
     result = run(hooks(mode, fail_mode={"tool_call": "open"}).before_tool_call("search.web", {}))
-    assert result.decision is None and result.fail_open_error.status_code == 503
+    assert result.decision is None and result.fail_open_error.status_code == 503 and result.degraded is True
 
 
 @both
@@ -290,7 +295,21 @@ def test_fail_mode_override_flips_a_class(api, mode):
     api.mock(side_effect=httpx.ConnectError("down"))
     assert run(hooks(mode, fail_mode={"exec": "open"}).before_exec("ls")).decision is None
     with pytest.raises(InteractionDecisionUnavailableError):
-        run(hooks(mode, fail_mode={"browser": "closed"}).before_browser_action("click"))
+        run(hooks(mode, fail_mode={"fs_read": "closed"}).before_fs_access("/a", "read"))
+
+
+# The README migration line for SDK-2951: opting back in to the pre-SDK-2951 defaults.
+@both
+@pytest.mark.parametrize(
+    "cls,call",
+    [("tool_call", lambda h: h.before_tool_call("search.web")), ("browser", lambda h: h.before_browser_action("click"))],
+    ids=["tool_call", "browser"],
+)
+def test_an_override_back_to_open_returns_a_degraded_result(api, mode, cls, call):
+    api.mock(side_effect=httpx.ConnectError("down"))
+    result = run(call(hooks(mode, fail_mode={cls: "open"})))
+    assert (result.decision, result.degraded) == (None, True)
+    assert isinstance(result.fail_open_error, httpx.ConnectError)
 
 
 @both
@@ -298,7 +317,8 @@ def test_before_interaction_defaults_to_fail_closed(api, mode):
     api.mock(side_effect=httpx.ConnectError("down"))
     with pytest.raises(InteractionDecisionUnavailableError):
         run(hooks(mode).before_interaction("agent_to_email", {"name": "send"}))
-    assert run(hooks(mode).before_interaction("agent_to_email", {"name": "send"}, fail_mode="open")).decision is None
+    result = run(hooks(mode).before_interaction("agent_to_email", {"name": "send"}, fail_mode="open"))
+    assert (result.decision, result.degraded) == (None, True)
 
 
 @both
@@ -314,6 +334,81 @@ def test_a_caller_error_while_waiting_for_approval_raises(api, mode):
     api.mock(side_effect=seq(PENDING, 403))
     with pytest.raises(ForbiddenError):
         run(hooks(mode).before_browser_action("click"))
+
+
+# ── degraded signal (SDK-2951, the Guard's SDK-0335 pattern) ─────────────────
+
+DOWN = httpx.ConnectError("down")
+FRESH_ALLOW = {**ALLOW, "ttlSeconds": 0}  # never cached: every call reaches the API
+
+
+def warnings_logged(caplog):
+    return [r for r in caplog.records if r.name == "praesidia.interaction_hooks" and r.levelno == logging.WARNING]
+
+
+def test_hook_result_positional_construction_is_unchanged():
+    assert InteractionHookResult(None, DOWN) == InteractionHookResult(None, DOWN, False)
+    assert InteractionHookResult(ALLOW).degraded is False
+
+
+@both
+def test_on_degraded_fires_once_per_outage_episode_and_again_after_a_success(api, mode, caplog):
+    api.mock(side_effect=seq(DOWN, DOWN, FRESH_ALLOW, DOWN))
+    seen = []
+    h = hooks(mode, retry=False, fail_mode={"tool_call": "open"}, on_degraded=seen.append)
+    with caplog.at_level(logging.WARNING, logger="praesidia.interaction_hooks"):
+        assert run(h.before_tool_call("search.web")).degraded is True
+        assert run(h.before_tool_call("search.web")).degraded is True
+        assert len(seen) == 1 and len(warnings_logged(caplog)) == 1
+        assert run(h.before_tool_call("search.web")) == InteractionHookResult(FRESH_ALLOW)  # ends the episode
+        assert run(h.before_tool_call("search.web")).degraded is True
+    assert len(seen) == 2 and len(warnings_logged(caplog)) == 2
+    assert {k: seen[0][k] for k in ("operation", "mode")} == {"operation": "model_to_tool.search.web", "mode": "fail_open"}
+    assert isinstance(seen[0]["since"], int) and abs(seen[0]["since"] - time.time() * 1000) < 60_000
+
+
+@both
+def test_a_fail_closed_outage_opens_the_episode_too(api, mode):
+    api.mock(side_effect=DOWN)
+    seen = []
+    h = hooks(mode, retry=False, fail_mode={"tool_call": "open"}, on_degraded=seen.append)
+    with pytest.raises(InteractionDecisionUnavailableError):
+        run(h.before_exec("ls"))
+    assert run(h.before_tool_call("search.web")).degraded is True  # same episode: no second call
+    assert [(i["operation"], i["mode"]) for i in seen] == [("agent_to_shell.exec", "fail_closed")]
+
+
+@both
+@pytest.mark.parametrize("fail", ["open", "closed"])
+def test_a_throwing_on_degraded_does_not_change_the_hook_outcome(api, mode, fail):
+    api.mock(side_effect=DOWN)
+
+    def page(info):
+        raise RuntimeError("the pager is down too")
+
+    h = hooks(mode, fail_mode={"tool_call": fail}, on_degraded=page)
+    if fail == "closed":
+        with pytest.raises(InteractionDecisionUnavailableError):
+            run(h.before_tool_call("search.web"))
+    else:
+        assert run(h.before_tool_call("search.web")).degraded is True
+
+
+@both
+def test_a_cached_verdict_during_an_outage_is_not_degraded(api, mode):
+    api.mock(side_effect=seq(ALLOW, DOWN))  # ALLOW carries ttlSeconds 30
+    seen = []
+    h = hooks(mode, fail_mode={"tool_call": "open"}, on_degraded=seen.append)
+    run(h.before_tool_call("search.web"))
+    result = run(h.before_tool_call("search.web"))
+    assert result == InteractionHookResult(ALLOW) and result.degraded is False
+    assert api.call_count == 1 and seen == []
+
+
+@both
+def test_on_degraded_must_be_callable(mode):
+    with pytest.raises(PraesidiaConfigError):
+        hooks(mode, on_degraded="pagerduty")
 
 
 # ── approval outcomes (fixture) ──────────────────────────────────────────────
