@@ -287,7 +287,7 @@ def test_a_503_degrades_a_fail_open_hook(api, mode):
 def test_a_429_while_waiting_for_approval_raises(api, mode):
     api.mock(side_effect=seq(PENDING, 429))
     with pytest.raises(RateLimitError):
-        run(hooks(mode, approval_timeout=0.05).before_browser_action("click"))
+        run(hooks(mode, approval_timeout=0.05, fail_mode={"browser": "open"}).before_browser_action("click"))
 
 
 @both
@@ -333,7 +333,7 @@ def test_an_outage_while_waiting_for_approval_never_allows_even_fail_open(api, m
 def test_a_caller_error_while_waiting_for_approval_raises(api, mode):
     api.mock(side_effect=seq(PENDING, 403))
     with pytest.raises(ForbiddenError):
-        run(hooks(mode).before_browser_action("click"))
+        run(hooks(mode, fail_mode={"browser": "open"}).before_browser_action("click"))
 
 
 # ── degraded signal (SDK-2951, the Guard's SDK-0335 pattern) ─────────────────
