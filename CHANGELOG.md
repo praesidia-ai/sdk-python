@@ -5,6 +5,18 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 
 ## Unreleased
 
+### Added
+- **SDK-2800 (needs be BE-2836; TS twin in `@praesidia/sdk`):** new `InteractionTaskNotLiveError`
+  (subclass of `ForbiddenError`, 403, `task_id`): `decide()` and every hook, sync and async, raise
+  it when be answers `taskId is not a live task this agent executes` for the hooks' `task_id`
+  (completed, unknown, another agent's or another organization's task). Stop using that
+  `task_id`. Before this it was a plain `ForbiddenError`; `except ForbiddenError` still catches
+  it. Never retried; a fail-open hook raises it. New `TypedDict`
+  `InteractionDecisionRecordDetails`: the `delegationReason` (`"delegation_implicit_live_task"`),
+  `constrainingTaskId` and `delegationBypass` (`"owner"`) keys be BE-2836 writes on an
+  `interaction.decision` Decision Record's `details`. Additive only (minor). README: a task
+  outside the organization is no longer "ignored"; it is this 403.
+
 ### Changed
 - **SDK-2797 (breaking, types only; TS twin in `@praesidia/sdk`):** `agents.create()` is annotated
   `-> AgentCreateResult` (new `TypedDict`, exported from `praesidia`) — be's

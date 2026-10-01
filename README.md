@@ -896,12 +896,30 @@ The TS SDK has no `guarded` equivalent: call `beforeToolCall` before the tool th
 
 **Running under a task.** Pass `task_id=` (the agent task UUID) to the constructor and every
 decision request carries it as `taskId` (BE-1609): the task's delegation envelope then narrows
-the verdict. A task outside the organization is ignored. The decision may carry `constrainedBy`
+the verdict. The decision may carry `constrainedBy`
 (`None` or one of `INTERACTION_CONSTRAINED_BY`: `org_policy`, `delegation`, `assurance`), the
 layer that denied or required approval; it is absent from servers older than BE-1609. When the
 server cannot read the delegation chain or the assurance policy it denies, with `reasonCode`
 `delegation_chain_unavailable` or `assurance_evaluation_error`. Verdicts are cached per hooks
 instance, so use one instance per task.
+
+**Stale task (BE-2836).** Without a capability token, the server holds the agent to every live
+delegated task it executes, whether or not you pass `task_id`. A `task_id` that is not a live task
+this agent executes (completed, unknown, another agent's or another organization's) gets a 403,
+raised as `InteractionTaskNotLiveError` (a `ForbiddenError`, with `task_id`). Every decision under
+that `task_id` fails the same way, so stop using it: build new hooks with the current task's id,
+or without `task_id`. It is never retried and a fail-open hook raises it. The Decision Record
+(`audit.list()` row `details`) carries the keys typed as `InteractionDecisionRecordDetails`:
+`delegationReason: "delegation_implicit_live_task"` and `constrainingTaskId` when the live tasks
+decided, `delegationBypass: "owner"` when an owner-level human decided without a token.
+
+```python
+try:
+    hooks.before_tool_call("search.web")
+except InteractionTaskNotLiveError:
+    hooks.close()
+    hooks = PraesidiaInteractionHooks()  # without task_id, or with the current task's id
+```
 
 **Reporting the outcome.** When an `allow` came from a consumed approval
 (`decision["reasonCode"] == "approval_consumed"`), report what happened once:
@@ -1051,6 +1069,9 @@ only by `client.agents.protect_action` — see [above](#protect-a-dispatch--prot
 
 `IdempotencyKeyReusedError` (409 `IDEMPOTENCY_KEY_REUSED`, a subclass of `PraesidiaError`) is
 never retried: the `Idempotency-Key` was already used with a different body.
+
+`InteractionTaskNotLiveError` (403, a subclass of `ForbiddenError`, `task_id`) means the
+interaction hooks' `task_id` is not a live task this agent executes (BE-2836).
 
 `InteractionDeniedError` (`interaction_type`, `action_name`, `reason_code`, `decision`) and
 `InteractionDecisionUnavailableError` (`__cause__` = the outage) are raised only by the interaction

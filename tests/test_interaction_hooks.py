@@ -12,6 +12,7 @@ import inspect
 import json
 import re
 import time
+import typing
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,9 +29,11 @@ from praesidia import (
     AuthError,
     ForbiddenError,
     IdempotencyKeyReusedError,
+    InteractionDecisionRecordDetails,
     InteractionDecisionUnavailableError,
     InteractionDeniedError,
     InteractionHookResult,
+    InteractionTaskNotLiveError,
     PraesidiaConfigError,
     PraesidiaError,
     PraesidiaInteractionHooks,
@@ -740,3 +743,53 @@ def test_retry_false_sends_once(api, mode):
 def test_an_invalid_retry_config_is_a_config_error():
     with pytest.raises(PraesidiaConfigError):
         hooks("sync", retry=RetryConfig(max_attempts=0))
+
+
+# ── SDK-2800 / be BE-2836 — a taskId that is not a live task is a typed 403 ──
+
+# be 5bdee08a's exact 403 body: interaction-decisions.service.ts's ForbiddenException run through
+# be's global AllExceptionsFilter (no ``code``, no ``error``); only timestamp/requestId vary.
+NOT_LIVE = {
+    "statusCode": 403,
+    "timestamp": "2026-10-01T12:30:10.811Z",
+    "path": f"/organizations/{FIXTURE['orgId']}/interaction-decisions",
+    "method": "POST",
+    "requestId": "00000000-0000-4000-8000-0000000000ff",
+    "message": "taskId is not a live task this agent executes",
+}
+
+
+@both
+def test_a_stale_task_id_403_is_interaction_task_not_live_error_once(api, mode):
+    api.side_effect = [httpx.Response(403, json=NOT_LIVE), httpx.Response(200, json=ALLOW)]
+    req = CASES["allow_by_policy"]["request"]
+    with pytest.raises(InteractionTaskNotLiveError) as err:
+        run(hooks(mode, task_id=TASK).decide(req["interactionType"], req["action"]))
+    assert isinstance(err.value, ForbiddenError)
+    assert err.value.status_code == 403 and err.value.task_id == TASK and not err.value.retryable
+    assert err.value.request_id == NOT_LIVE["requestId"] and api.call_count == 1
+
+
+@both
+def test_a_fail_open_hook_raises_it_never_fail_opens(api, mode):
+    api.respond(403, json=NOT_LIVE)
+    with pytest.raises(InteractionTaskNotLiveError):
+        run(hooks(mode, task_id=TASK).before_tool_call("search.web"))
+
+
+@both
+def test_any_other_403_stays_the_plain_forbidden_error(api, mode):
+    api.respond(403, json={**NOT_LIVE, "message": "Caller may not act as this agent"})
+    with pytest.raises(ForbiddenError) as err:
+        run(hooks(mode, task_id=TASK).before_tool_call("search.web"))
+    assert not isinstance(err.value, InteractionTaskNotLiveError)
+
+
+def test_interaction_decision_record_details_types_the_be_2836_keys():
+    hints = typing.get_type_hints(InteractionDecisionRecordDetails)
+    assert hints == {
+        "delegationReason": typing.Literal["delegation_implicit_live_task"],
+        "constrainingTaskId": str | None,
+        "delegationBypass": typing.Literal["owner"],
+    }
+    assert InteractionDecisionRecordDetails.__required_keys__ == frozenset()

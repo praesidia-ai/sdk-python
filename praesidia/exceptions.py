@@ -69,6 +69,21 @@ class ForbiddenError(PraesidiaError):
         super().__init__(message, status_code=403, **envelope_kwargs)
 
 
+class InteractionTaskNotLiveError(ForbiddenError):
+    """
+    SDK-2800 -- HTTP 403 from ``POST interaction-decisions`` (be BE-2836): the hooks' ``task_id`` is
+    not a live task this agent executes (completed, unknown, another agent's or another org's
+    task). Every decision under that ``task_id`` fails the same way, so stop using it: build new
+    hooks with the current task's id, or without ``task_id``. Never retried, and a fail-open hook
+    raises it instead of allowing. be sends no ``code``; the SDK matches be's message. Mirrors the
+    TS SDK's ``InteractionTaskNotLiveError``.
+    """
+
+    def __init__(self, task_id: str, message: str, **envelope_kwargs: Any) -> None:
+        super().__init__(message, **envelope_kwargs)
+        self.task_id = task_id
+
+
 class NotFoundError(PraesidiaError):
     """Raised when the API returns HTTP 404."""
 

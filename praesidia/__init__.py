@@ -56,6 +56,7 @@ from .exceptions import (
     IdempotencyKeyReusedError,
     InteractionDecisionUnavailableError,
     InteractionDeniedError,
+    InteractionTaskNotLiveError,
     InvalidMcpServerIdError,
     NotFoundError,
     PraesidiaConfigError,
@@ -81,6 +82,7 @@ from .interaction_hooks import (
     INTERACTION_VERDICTS,
     AsyncPraesidiaInteractionHooks,
     InteractionDecision,
+    InteractionDecisionRecordDetails,
     InteractionHookResult,
     InteractionOutcomeReceipt,
     PraesidiaInteractionHooks,
@@ -153,6 +155,7 @@ __all__ = [
     "AsyncPraesidiaInteractionHooks",
     "InteractionHookResult",
     "InteractionDecision",
+    "InteractionDecisionRecordDetails",
     "InteractionOutcomeReceipt",
     "INTERACTION_OUTCOME_STATUSES",
     "INTERACTION_TYPES",
@@ -161,6 +164,7 @@ __all__ = [
     "DEFAULT_FAIL_MODES",
     "InteractionDeniedError",
     "InteractionDecisionUnavailableError",
+    "InteractionTaskNotLiveError",
 ]
 
 from .protected_http import (  # noqa: F401 - public attributes, outside __all__

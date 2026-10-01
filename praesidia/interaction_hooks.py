@@ -25,6 +25,7 @@ from types import MappingProxyType
 from typing import (
     Any,
     Generic,
+    Literal,
     TypedDict,
     TypeVar,
 )
@@ -50,8 +51,10 @@ from ._retry import (
 )
 from .agents import _UUID_RE
 from .exceptions import (
+    ForbiddenError,
     InteractionDecisionUnavailableError,
     InteractionDeniedError,
+    InteractionTaskNotLiveError,
     PraesidiaConfigError,
     PraesidiaError,
     ResponseTooLargeError,
@@ -109,6 +112,22 @@ class InteractionDecision(_InteractionDecisionRequired, total=False):
     """
 
     constrainedBy: str | None
+
+
+class InteractionDecisionRecordDetails(TypedDict, total=False):
+    """SDK-2800 -- delegation keys be BE-2836 adds to the ``details`` of an ``interaction.decision``
+    Decision Record (an ``audit.list()`` row). Absent from older servers and from decisions they do
+    not apply to; every other ``details`` key stays untyped here.
+
+    ``delegationReason``: the caller sent no capability token and was held to the live delegated
+    tasks it executes. ``constrainingTaskId``: with it, the live task whose envelope decided
+    (``None`` = none narrowed the verdict). ``delegationBypass``: an owner-level human decided
+    without a token, so no task envelope applied.
+    """
+
+    delegationReason: Literal["delegation_implicit_live_task"]
+    constrainingTaskId: str | None
+    delegationBypass: Literal["owner"]
 
 
 class _InteractionOutcomeReceiptRequired(TypedDict):
@@ -246,7 +265,7 @@ class _InteractionHooksBase(Generic[_R]):
             "action": act,
             **({} if approval_id is None else {"approvalId": approval_id}),
             **({} if self.task_id is None else {"taskId": self.task_id}),
-        }, _decision, _idempotency_key(key))
+        }, functools.partial(_decision, task_id=self.task_id), _idempotency_key(key))
 
     def report_outcome(
         self,
@@ -551,9 +570,21 @@ def _receipt(r: httpx.Response, raw: bytearray) -> InteractionOutcomeReceipt:
     return d  # type: ignore[return-value]
 
 
-def _decision(r: httpx.Response, raw: bytearray) -> InteractionDecision:
+#: be BE-2836's 403 message (no ``code`` is sent) for a token-less ``taskId`` that is not a live task.
+_TASK_NOT_LIVE = "taskId is not a live task this agent executes"
+
+
+def _decision(r: httpx.Response, raw: bytearray, task_id: str | None = None) -> InteractionDecision:
     """Typed SDK error for a non-2xx; a malformed 2xx raises ``PraesidiaError`` with its 2xx status (an outage)."""
-    d = _json(r, raw)
+    try:
+        d = _json(r, raw)
+    except ForbiddenError as err:
+        if task_id is None or not isinstance(err.body, dict) or err.body.get("message") != _TASK_NOT_LIVE:
+            raise
+        raise InteractionTaskNotLiveError(
+            task_id, err.message, code=err.code, request_id=err.request_id, details=err.details,
+            retry_after=err.retry_after, retryable=err.retryable, body=err.body,
+        ) from err
     ttl = d.get("ttlSeconds") if isinstance(d, dict) else None
     if not (
         isinstance(d, dict)
