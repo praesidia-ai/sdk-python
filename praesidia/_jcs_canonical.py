@@ -127,6 +127,16 @@ def _canonicalize(v: JsonValue) -> str:
         # Must precede the `int` check — `bool` is an `int` subclass.
         return "true" if v else "false"
     if isinstance(v, int):
+        # Exactly representable finite IEEE-754 integers share ECMAScript's
+        # shortest number encoding with floats, including the 1e21 threshold.
+        # Preserve existing decimal encoding outside that supported domain;
+        # converting such an integer unconditionally would silently round it.
+        try:
+            as_double = float(v)
+        except OverflowError:
+            return json.dumps(v)
+        if math.isfinite(as_double) and int(as_double) == v:
+            return _format_number(as_double)
         return json.dumps(v)
     if isinstance(v, float):
         if not math.isfinite(v):

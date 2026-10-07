@@ -87,6 +87,38 @@ def test_float_matches_ecmascript_number_encoding(value: float, expected: str) -
 
 
 @pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (10**20, "100000000000000000000"),
+        (10**21, "1e+21"),
+        (10**22, "1e+22"),
+        (-(10**21), "-1e+21"),
+        (2**60, "1152921504606847000"),
+        (2**100, "1.2676506002282294e+30"),
+    ],
+)
+def test_exact_double_integer_matches_ecmascript_encoding(
+    value: int, expected: str,
+) -> None:
+    assert int(float(value)) == value
+    assert jcs_canonicalize(value) == expected.encode()
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (9007199254740993, "9007199254740993"),
+        (10**21 + 1, "1000000000000000000001"),
+        (10**400, "1" + "0" * 400),
+    ],
+)
+def test_integer_outside_exact_double_domain_keeps_existing_decimal_encoding(
+    value: int, expected: str,
+) -> None:
+    assert jcs_canonicalize(value) == expected.encode()
+
+
+@pytest.mark.parametrize(
     "key", [pytest.param(chr(0xD800), id="high"), pytest.param(chr(0xDFFF), id="low")]
 )
 def test_unpaired_surrogate_dict_key_is_refused_with_canonicalization_error(
