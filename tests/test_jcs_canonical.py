@@ -67,6 +67,35 @@ def test_positive_zero_float_also_formats_as_bare_zero() -> None:
     assert jcs_canonicalize({"n": 0.0}).decode("utf-8") == '{"n":0}'
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (1.0, "1"),
+        (-1.0, "-1"),
+        (123.0, "123"),
+        (1.25, "1.25"),
+        (100.01, "100.01"),
+        (1.0000000000000002, "1.0000000000000002"),
+        (1e-7, "1e-7"),
+        (1e-6, "0.000001"),
+        (1e20, "100000000000000000000"),
+        (1e21, "1e+21"),
+    ],
+)
+def test_float_matches_ecmascript_number_encoding(value: float, expected: str) -> None:
+    assert jcs_canonicalize({"n": value}) == ('{"n":' + expected + "}").encode()
+
+
+@pytest.mark.parametrize(
+    "key", [pytest.param(chr(0xD800), id="high"), pytest.param(chr(0xDFFF), id="low")]
+)
+def test_unpaired_surrogate_dict_key_is_refused_with_canonicalization_error(
+    key: str,
+) -> None:
+    with pytest.raises(JcsCanonicalizationError):
+        jcs_canonicalize({key: "value"})
+
+
 def test_top_level_none_is_null_not_a_refusal() -> None:
     # None/null IS a valid JSON value — only Python's absence of a key (no
     # analogue to JS `undefined`) is out of scope here (Python has no

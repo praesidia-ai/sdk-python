@@ -96,6 +96,11 @@ def _format_number(v: float) -> str:
     # of ten it is scaled by.
     _sign, digits, exponent = Decimal(repr(abs(v))).as_tuple()
     assert isinstance(exponent, int)  # finite input: never 'n'/'N'/'F'
+    # Python repr keeps a .0 for integral floats. Remove insignificant final
+    # zero digits before applying ECMAScript's placement rules (1.0 -> 1).
+    while len(digits) > 1 and digits[-1] == 0:
+        digits = digits[:-1]
+        exponent += 1
     digit_str = "".join(str(d) for d in digits)
     k = len(digit_str)
     # ECMA-262: value == s * 10**(n-k)  <=>  n == k + exponent (since
@@ -150,6 +155,10 @@ def _canonicalize(v: JsonValue) -> str:
         for k in v:
             if not isinstance(k, str):
                 raise JcsCanonicalizationError(f"object key {k!r} is not a string")
+            if _has_unpaired_surrogate(k):
+                raise JcsCanonicalizationError(
+                    "object key contains an unpaired UTF-16 surrogate"
+                )
         keys = sorted(v.keys(), key=lambda k: k.encode("utf-16-be"))
         parts = [
             json.dumps(k, ensure_ascii=False) + ":" + _canonicalize(v[k]) for k in keys
