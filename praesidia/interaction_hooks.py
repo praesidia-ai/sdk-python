@@ -227,7 +227,7 @@ class _InteractionHooksBase(Generic[_R]):
         raise NotImplementedError
 
     def before_tool_call(self, tool_name: str, arguments: Mapping[str, Any] | None = None) -> _R:
-        """Tool call chosen by the model: ``model_to_tool.<tool_name>``. Default fail-open."""
+        """Tool call chosen by the model: ``model_to_tool.<tool_name>``. Default fail-closed."""
         return self._guard("model_to_tool", _action(tool_name, arguments), self._fail_modes["tool_call"])
 
     def before_exec(
@@ -241,14 +241,14 @@ class _InteractionHooksBase(Generic[_R]):
         return self._guard(kind, _action("exec", arguments), self._fail_modes["exec"])
 
     def before_fs_access(self, path: str, mode: str) -> _R:
-        """Filesystem access: ``agent_to_filesystem.<mode>``. Fail-open for read/list, fail-closed otherwise."""
+        """Filesystem access: ``agent_to_filesystem.<mode>``. Default fail-closed for every mode (``fs_read`` / ``fs_write``)."""
         cls = "fs_read" if mode in ("read", "list") else "fs_write"
         return self._guard("agent_to_filesystem", _action(mode, {"path": path}), self._fail_modes[cls])
 
     def before_browser_action(
         self, action: str, url: str | None = None, arguments: Mapping[str, Any] | None = None
     ) -> _R:
-        """Browser action: ``agent_to_browser.<action>``. Default fail-open."""
+        """Browser action: ``agent_to_browser.<action>``. Default fail-closed."""
         return self._guard("agent_to_browser", _action(action, {**(arguments or {}), "url": url}), self._fail_modes["browser"])
 
     def before_interaction(self, interaction_type: str, action: Mapping[str, Any], *, fail_mode: str = "closed") -> _R:

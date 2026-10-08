@@ -5,6 +5,11 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 
 ## Unreleased
 
+## 0.5.0 — 2026-10-08 (first PyPI release)
+
+No earlier version reached PyPI (0.2.x to 0.4.x existed only in source), so 0.5.0 carries every
+change below. It is the first version intended for the PyPI registry.
+
 ### App API alignment
 
 - Agent lists accept all app filters; connection lists accept agent/server/status/
@@ -88,11 +93,6 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
   httpx's `LocalProtocolError` read as a transport outage and `Guard` degraded to local rules in
   `local_rules`/`fail_open`. Config errors are never retried. Non-UUID ASCII chain ids stay legal.
   Unlike the TS SDK, obs-text (0x80-0xff) is refused: httpx encodes `str` header values as ASCII.
-
-## 0.5.0 — release candidate, not yet published (no `v0.5.0` tag; not on PyPI)
-
-No earlier version reached PyPI (0.2.x to 0.4.x existed only in source), so 0.5.0 carries every
-change below. It is the first version intended for the PyPI registry.
 
 ### INTEG-0110: release packaging
 
