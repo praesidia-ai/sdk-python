@@ -3,9 +3,9 @@
 All notable changes to `praesidia-hermes`. Versions follow SemVer; while on `0.x`, a breaking change
 bumps the minor version. This package is versioned separately from `praesidia` (the SDK).
 
-## 0.1.1 — 2026-09-26 (first PyPI release)
+## 0.1.1 — 2026-10-08 (first PyPI release)
 
-No version reached PyPI before this one: 0.1.1 existed only in source until now, so this entry
+No earlier version reached PyPI: 0.1.1 existed only in source until now, so this entry
 covers everything the package does.
 
 - Registers the `praesidia` entry point in the `hermes_agent.plugins` group: the managed
