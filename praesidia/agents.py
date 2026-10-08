@@ -10,7 +10,7 @@ from __future__ import annotations
 import builtins
 import re
 from collections.abc import Iterator
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, TypedDict, Unpack
 
 from ._http import (
     AGENT_ID_HEADER,
@@ -21,7 +21,7 @@ from ._http import (
     HttpClient,
     path_segment,
 )
-from ._pagination import normalize_paged_envelope, paginate_all
+from ._pagination import list_query, normalize_paged_envelope, paginate_all
 from .exceptions import (
     ProtectedActionDeniedError,
     UnsupportedProtectedActionTargetError,
@@ -82,6 +82,39 @@ def tool_call_headers_from_task(task: dict[str, Any]) -> dict[str, str]:
     return headers
 
 
+class AgentListFilters(TypedDict, total=False):
+    """Optional filters shared by agent list, list_page and list_all."""
+
+    name: str | None
+    search: str | None
+    role: Literal["CLIENT", "SERVER"] | None
+    status: Literal["ACTIVE", "INACTIVE", "SUSPENDED", "QUARANTINED", "REVOKED"] | None
+    type: str | None
+    visibility: Literal["PRIVATE", "TEAM", "ORGANIZATION", "PUBLIC"] | None
+    tier: Literal["MANAGED", "OBSERVED"] | None
+    scope: Literal["own", "organization"] | None
+    capability: str | None
+    capability_exact: str | None
+    skill_tag: str | None
+    input_mode: str | None
+    output_mode: str | None
+
+
+_FILTER_NAMES = {
+    "name": "name", "search": "search", "role": "role", "status": "status",
+    "type": "type", "visibility": "visibility", "tier": "tier", "scope": "scope",
+    "capability": "capability", "capability_exact": "capabilityExact",
+    "skill_tag": "skillTag", "input_mode": "inputMode", "output_mode": "outputMode",
+}
+_FILTER_ENUMS = {
+    "role": ("CLIENT", "SERVER"),
+    "status": ("ACTIVE", "INACTIVE", "SUSPENDED", "QUARANTINED", "REVOKED"),
+    "visibility": ("PRIVATE", "TEAM", "ORGANIZATION", "PUBLIC"),
+    "tier": ("MANAGED", "OBSERVED"),
+    "scope": ("own", "organization"),
+}
+
+
 class AgentsResource:
     """
     Manage AI agents within an organisation.
@@ -97,7 +130,7 @@ class AgentsResource:
     # CRUD
     # ------------------------------------------------------------------
 
-    def list(self, page: int = 1, limit: int = 20) -> list[dict[str, Any]]:
+    def list(self, page: int = 1, limit: int = 20, **filters: Unpack[AgentListFilters]) -> list[dict[str, Any]]:
         """
         Return a paginated list of agents for the organisation.
 
@@ -114,20 +147,21 @@ class AgentsResource:
         Returns:
             A list of agent dicts as returned by the API.
         """
-        return self.list_page(page=page, limit=limit)["data"]
+        return self.list_page(page=page, limit=limit, **filters)["data"]
 
-    def list_page(self, page: int = 1, limit: int = 20) -> dict[str, Any]:
+    def list_page(self, page: int = 1, limit: int = 20, **filters: Unpack[AgentListFilters]) -> dict[str, Any]:
         """Like :meth:`list`, but returns be's full pagination envelope (SCAN2-011)."""
-        result = self._http.get(self._base, params={"page": page, "limit": limit})
+        params = list_query(page, limit, filters, _FILTER_NAMES, _FILTER_ENUMS)
+        result = self._http.get(self._base, params=params)
         return normalize_paged_envelope(result, "agents")
 
-    def list_all(self, *, limit: int = 20) -> Iterator[dict[str, Any]]:
+    def list_all(self, *, limit: int = 20, **filters: Unpack[AgentListFilters]) -> Iterator[dict[str, Any]]:
         """
         Auto-paginate through every agent, across every page (SCAN2-011) --
         "give me all of them" is correct by default rather than correct only
         if the caller remembers to page.
         """
-        yield from paginate_all(lambda page: self.list_page(page=page, limit=limit))
+        yield from paginate_all(lambda page: self.list_page(page=page, limit=limit, **filters))
 
     def get(self, agent_id: str) -> dict[str, Any]:
         """

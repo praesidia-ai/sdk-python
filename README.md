@@ -116,10 +116,27 @@ bound in memory.
 
 ## Resources
 
+Agent `list`, `list_page` and `list_all` accept `name`, `search`, `role`, `status`,
+`type`, `visibility`, `tier`, `scope`, `capability`, `capability_exact`, `skill_tag`,
+`input_mode` and `output_mode`. Connection lists accept `client_agent_id`,
+`server_agent_id`, `mcp_server_id`, `status` and `search`; workflow lists accept
+`status`. Filters are retained across every page of `list_all`.
+
+```python
+for agent in client.agents.list_all(tier="OBSERVED", status="ACTIVE", skill_tag="maps"):
+    print(agent["id"])
+connections = client.connections.list(status="ERROR", search="payments")
+workflows = client.workflows.list(status="ACTIVE")
+```
+
+`analytics.agent_performance(days=7)` and `analytics.top_agents(days=7)` accept
+the same rolling window as the app (1–365 days). Omitting `days` preserves the
+server's default window.
+
 | Resource | Class | Key methods |
 |----------|-------|-------------|
 | `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `protect_action`, `refresh_credential` |
-| `client.ai_systems` | `AiSystemsResource` | `list`/`get`/`create`/`update`/`archive`/`restore`/`delete`/`update_owners`/`transition_lifecycle`/`request_lifecycle_transition`/`approve_lifecycle_transition`/`reject_lifecycle_transition`/`retire`/`reapprove`/`summary`, `list_assets`/`create_asset`/`get_asset`/`update_asset`/`archive_asset`/`restore_asset`/`adopt_asset`, `attach_asset`/`detach_asset`/`change_asset_role`, `create_relationship`/`get_relationship`/`update_relationship`/`archive_relationship`/`restore_relationship`/`list_relationships`/`traverse`, `put_{system,asset,relationship}_by_external_id`/`delete_{system,asset,relationship}_by_external_id` (each `list*` also has a `*_page`/`*_all` sibling) |
+| `client.ai_systems` | `AiSystemsResource` | `list`/`get`/`create`/`update`/`archive`/`restore`/`delete`/`update_owners`/`transition_lifecycle`/`request_lifecycle_transition`/`list_lifecycle_requests`/`approve_lifecycle_transition`/`reject_lifecycle_transition`/`retire`/`reapprove`/`summary`, `list_assets`/`create_asset`/`get_asset`/`update_asset`/`archive_asset`/`restore_asset`/`adopt_asset`, `attach_asset`/`detach_asset`/`change_asset_role`, `create_relationship`/`get_relationship`/`update_relationship`/`archive_relationship`/`restore_relationship`/`list_relationships`/`traverse`, `put_{system,asset,relationship}_by_external_id`/`delete_{system,asset,relationship}_by_external_id` (inventory lists also have a `*_page`/`*_all` sibling) |
 | `client.workflows` | `WorkflowsResource` | `list`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `get_run` |
 | `client.audit` | `AuditResource` | `list`, `stream`, `export`, `export_bundle`, `get_decision_receipt`, `get_receipt`, `request_package`, `get_package`, `download_package` |
 | `client.proof` | `ProofResource` | `list`, `get`, `events`, `capture_scope`, `coverage_summary` |
@@ -159,6 +176,7 @@ client.ai_systems.create_relationship({
 | `update_owners(ai_system_id, data)` | `dict` | `PATCH .../ai-systems/:id/owners` |
 | `transition_lifecycle(ai_system_id, lifecycle_status)` | `dict` | `PATCH .../ai-systems/:id/lifecycle` (ungated targets only) |
 | `request_lifecycle_transition(ai_system_id, to_status, *, reason=None)` | `dict` | `POST .../ai-systems/:id/lifecycle-requests` |
+| `list_lifecycle_requests(*, status=None, ai_system_id=None, page=1, limit=20)` | `list[dict]` | `GET .../ai-systems/lifecycle-requests` (default PENDING queue) |
 | `approve_lifecycle_transition(request_id, *, reason=None)` | `dict` | `POST .../ai-systems/lifecycle-requests/:requestId/approve` |
 | `reject_lifecycle_transition(request_id, *, reason=None)` | `dict` | `POST .../ai-systems/lifecycle-requests/:requestId/reject` |
 | `retire(ai_system_id, *, retention_policy, reason, retention_until=None)` | `dict` | `POST .../ai-systems/:id/retire` (202) |
@@ -213,11 +231,16 @@ client.ai_systems.approve_lifecycle_transition(ret["requestId"])  # applies reti
 `request_lifecycle_transition` raises `ValueError` for `"retired"` (use `retire`). `reapprove`
 clears the re-approval flag a material change left on a `production` system.
 
-Every `list*`/`list_assets`/`list_relationships` also has a `*_page` (full pagination envelope) and
+Inventory methods `list`, `list_assets` and `list_relationships` also have a `*_page` (full pagination envelope) and
 `*_all` (auto-paginating generator) sibling, matching the `list_page`/`list_all` convention above
 (SCAN2-011). List filters are keyword-only and validated client-side against be's enums
 (`ValueError` on an unknown value); `include_archived` is sent as the lowercase string
 `"true"`/`"false"` since be's DTOs declare it `@IsBooleanString`, not a real boolean.
+Relationship lists also accept `cross_border_status="violation"` (or `unknown`,
+`compliant`, `review_required`). Create/update relationship dictionaries accept
+numeric `confidence` (0–1), `sourceGeography`, `processingGeography`,
+`destinationGeography`, `vendorAiAssetId` and `crossBorderStatus`; use `None`
+for a geography or vendor field on update to clear it.
 `transition_lifecycle`'s `lifecycle_status` is validated the same way; `change_asset_role`'s `role`
 is not (matches `attach_asset`'s `role`, per `AiSystemAssetRole` being hand-copied rather than
 derived from the entity's `as const` array — be 400s on an unknown value).

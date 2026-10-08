@@ -7,10 +7,26 @@ Covers the ``/organizations/{org_id}/connections`` management endpoints.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Literal, TypedDict, Unpack
 
 from ._http import HttpClient, path_segment
-from ._pagination import normalize_paged_envelope, paginate_all
+from ._pagination import list_query, normalize_paged_envelope, paginate_all
+
+
+class ConnectionListFilters(TypedDict, total=False):
+    """Optional filters shared by connection list, list_page and list_all."""
+
+    client_agent_id: str | None
+    server_agent_id: str | None
+    mcp_server_id: str | None
+    status: Literal["ACTIVE", "IDLE", "ERROR", "PENDING", "DISCONNECTED"] | None
+    search: str | None
+
+
+_FILTER_NAMES = {
+    "client_agent_id": "clientAgentId", "server_agent_id": "serverAgentId",
+    "mcp_server_id": "mcpServerId", "status": "status", "search": "search",
+}
 
 
 class ConnectionsResource:
@@ -31,6 +47,7 @@ class ConnectionsResource:
         self,
         page: int = 1,
         limit: int = 20,
+        **filters: Unpack[ConnectionListFilters],
     ) -> list[dict[str, Any]]:
         """
         Return a paginated list of connections for the organisation.
@@ -46,16 +63,17 @@ class ConnectionsResource:
         Returns:
             A list of connection dicts.
         """
-        return self.list_page(page=page, limit=limit)["data"]
+        return self.list_page(page=page, limit=limit, **filters)["data"]
 
-    def list_page(self, page: int = 1, limit: int = 20) -> dict[str, Any]:
+    def list_page(self, page: int = 1, limit: int = 20, **filters: Unpack[ConnectionListFilters]) -> dict[str, Any]:
         """Like :meth:`list`, but returns be's full pagination envelope (SCAN2-011)."""
-        result = self._http.get(self._base, params={"page": page, "limit": limit})
+        params = list_query(page, limit, filters, _FILTER_NAMES, {"status": self.STATUSES})
+        result = self._http.get(self._base, params=params)
         return normalize_paged_envelope(result, "connections")
 
-    def list_all(self, *, limit: int = 20) -> Iterator[dict[str, Any]]:
+    def list_all(self, *, limit: int = 20, **filters: Unpack[ConnectionListFilters]) -> Iterator[dict[str, Any]]:
         """Auto-paginate through every connection, across every page (SCAN2-011)."""
-        yield from paginate_all(lambda page: self.list_page(page=page, limit=limit))
+        yield from paginate_all(lambda page: self.list_page(page=page, limit=limit, **filters))
 
     def get(self, connection_id: str) -> dict[str, Any]:
         """

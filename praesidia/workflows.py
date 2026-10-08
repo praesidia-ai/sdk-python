@@ -9,10 +9,16 @@ from __future__ import annotations
 import builtins
 import math
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Literal, TypedDict, Unpack
 
 from ._http import HttpClient, path_segment
-from ._pagination import normalize_paged_envelope, paginate_all
+from ._pagination import list_query, normalize_paged_envelope, paginate_all
+
+
+class WorkflowListFilters(TypedDict, total=False):
+    """Optional filters shared by workflow list, list_page and list_all."""
+
+    status: Literal["DRAFT", "ACTIVE", "INACTIVE"] | None
 
 
 class WorkflowsResource:
@@ -30,6 +36,7 @@ class WorkflowsResource:
         self,
         page: int = 1,
         limit: int = 20,
+        **filters: Unpack[WorkflowListFilters],
     ) -> list[dict[str, Any]]:
         """
         Return a paginated list of workflows.
@@ -45,16 +52,17 @@ class WorkflowsResource:
         Returns:
             A list of workflow dicts.
         """
-        return self.list_page(page=page, limit=limit)["data"]
+        return self.list_page(page=page, limit=limit, **filters)["data"]
 
-    def list_page(self, page: int = 1, limit: int = 20) -> dict[str, Any]:
+    def list_page(self, page: int = 1, limit: int = 20, **filters: Unpack[WorkflowListFilters]) -> dict[str, Any]:
         """Like :meth:`list`, but returns be's full pagination envelope (SCAN2-011)."""
-        result = self._http.get(self._base, params={"page": page, "limit": limit})
+        params = list_query(page, limit, filters, {"status": "status"}, {"status": ("DRAFT", "ACTIVE", "INACTIVE")})
+        result = self._http.get(self._base, params=params)
         return normalize_paged_envelope(result, "workflows")
 
-    def list_all(self, *, limit: int = 20) -> Iterator[dict[str, Any]]:
+    def list_all(self, *, limit: int = 20, **filters: Unpack[WorkflowListFilters]) -> Iterator[dict[str, Any]]:
         """Auto-paginate through every workflow, across every page (SCAN2-011)."""
-        yield from paginate_all(lambda page: self.list_page(page=page, limit=limit))
+        yield from paginate_all(lambda page: self.list_page(page=page, limit=limit, **filters))
 
     def get(self, workflow_id: str) -> dict[str, Any]:
         """

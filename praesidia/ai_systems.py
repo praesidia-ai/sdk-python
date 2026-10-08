@@ -82,6 +82,8 @@ class AiSystemsResource:
     )
     #: be `ai-system-lifecycle.util.ts`'s `APPROVAL_GATED_LIFECYCLE_TARGETS` (AISYS-0018).
     APPROVAL_GATED_LIFECYCLE_STATUSES = ("production", "retired")
+    LIFECYCLE_REQUEST_STATUSES = ("PENDING", "APPROVED", "REJECTED", "CANCELLED")
+    CROSS_BORDER_STATUSES = ("unknown", "compliant", "review_required", "violation")
     #: `entities/ai-asset.entity.ts`'s `AI_ASSET_TYPES` (24 values, SDK-0007
     #: synced with DB-0300's widened enum, SDK-0315 adds BE-0338's
     #: `GUARDRAIL`; kept in sync via
@@ -318,6 +320,21 @@ class AiSystemsResource:
             f"{self._systems_base}/{path_segment(ai_system_id, 'ai_system_id')}/lifecycle-requests",
             json=body,
         )
+
+    def list_lifecycle_requests(
+        self,
+        *,
+        status: str | None = None,
+        ai_system_id: str | None = None,
+        page: int = 1,
+        limit: int = 20,
+    ) -> builtins.list[dict[str, Any]]:
+        """List lifecycle requests; omitting status uses the server's PENDING queue."""
+        if status is not None and status not in self.LIFECYCLE_REQUEST_STATUSES:
+            raise ValueError(f"status must be one of {self.LIFECYCLE_REQUEST_STATUSES}")
+        params = _query(page, limit, status=status, aiSystemId=ai_system_id)
+        result = self._http.get(f"{self._systems_base}/lifecycle-requests", params=params)
+        return normalize_paged_envelope(result, "data")["data"]
 
     def approve_lifecycle_transition(self, request_id: str, *, reason: str | None = None) -> dict[str, Any]:
         """
@@ -705,6 +722,7 @@ class AiSystemsResource:
         target_asset_id: str | None = None,
         asset_id: str | None = None,
         relationship_type: str | None = None,
+        cross_border_status: str | None = None,
         include_archived: bool | None = None,
         page: int = 1,
         limit: int = 20,
@@ -725,6 +743,7 @@ class AiSystemsResource:
             target_asset_id=target_asset_id,
             asset_id=asset_id,
             relationship_type=relationship_type,
+            cross_border_status=cross_border_status,
             include_archived=include_archived,
             page=page,
             limit=limit,
@@ -737,6 +756,7 @@ class AiSystemsResource:
         target_asset_id: str | None = None,
         asset_id: str | None = None,
         relationship_type: str | None = None,
+        cross_border_status: str | None = None,
         include_archived: bool | None = None,
         page: int = 1,
         limit: int = 20,
@@ -746,6 +766,8 @@ class AiSystemsResource:
             raise ValueError(
                 f"relationship_type must be one of {self.RELATIONSHIP_TYPES}; got {relationship_type!r}"
             )
+        if cross_border_status is not None and cross_border_status not in self.CROSS_BORDER_STATUSES:
+            raise ValueError(f"cross_border_status must be one of {self.CROSS_BORDER_STATUSES}")
         params = _query(
             page,
             limit,
@@ -753,6 +775,7 @@ class AiSystemsResource:
             targetAssetId=target_asset_id,
             assetId=asset_id,
             relationshipType=relationship_type,
+            crossBorderStatus=cross_border_status,
             includeArchived=include_archived,
         )
         result = self._http.get(self._relationships_base, params=params)
@@ -765,6 +788,7 @@ class AiSystemsResource:
         target_asset_id: str | None = None,
         asset_id: str | None = None,
         relationship_type: str | None = None,
+        cross_border_status: str | None = None,
         include_archived: bool | None = None,
         limit: int = 20,
     ) -> Iterator[dict[str, Any]]:
@@ -775,6 +799,7 @@ class AiSystemsResource:
                 target_asset_id=target_asset_id,
                 asset_id=asset_id,
                 relationship_type=relationship_type,
+                cross_border_status=cross_border_status,
                 include_archived=include_archived,
                 page=page,
                 limit=limit,

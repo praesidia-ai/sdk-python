@@ -146,3 +146,10 @@ jobs:
           REQUIRE_SWAGGER: '1'
           BE_SWAGGER_PATH: ../swagger.generated.json
         run: pytest tests/test_ai_systems.py -v
+
+      - name: Management list queries vs be-core
+        working-directory: sdk-python
+        env:
+          REQUIRE_SWAGGER: '1'
+          BE_SWAGGER_PATH: ../swagger.generated.json
+        run: pytest tests/test_management_query_contract.py -v

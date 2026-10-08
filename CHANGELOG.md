@@ -5,6 +5,16 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 
 ## Unreleased
 
+### App API alignment
+
+- Agent lists accept all app filters; connection lists accept agent/server/status/
+  search filters; workflow lists accept status. Each filter survives auto-pagination.
+- Added `ai_systems.list_lifecycle_requests` and cross-border relationship filters.
+- `analytics.agent_performance` and `top_agents` accept keyword-only `days` while
+  preserving their existing positional arguments and default requests.
+- Management-query fixtures shared with TypeScript are checked against fresh
+  backend OpenAPI exports in contract CI.
+
 ### Added
 - **SDK-2800 (needs be BE-2836; TS twin in `@praesidia/sdk`):** new `InteractionTaskNotLiveError`
   (subclass of `ForbiddenError`, 403, `task_id`): `decide()` and every hook, sync and async, raise

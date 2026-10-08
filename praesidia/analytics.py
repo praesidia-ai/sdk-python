@@ -73,6 +73,8 @@ class AnalyticsResource:
         self,
         from_date: str | None = None,
         to_date: str | None = None,
+        *,
+        days: int | None = None,
     ) -> dict[str, Any]:
         """
         Return per-agent performance breakdown.
@@ -82,11 +84,16 @@ class AnalyticsResource:
         Args:
             from_date: ISO 8601 start date (optional).
             to_date:   ISO 8601 end date (optional).
+            days:      Rolling window (1..365); omit for the server default.
 
         Returns:
             Agent performance dict.
         """
+        if days is not None and (isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365):
+            raise ValueError("days must be an integer from 1 to 365")
         params: dict[str, Any] = {}
+        if days is not None:
+            params["days"] = days
         if from_date is not None:
             params["startDate"] = from_date
         if to_date is not None:
@@ -100,6 +107,8 @@ class AnalyticsResource:
         from_date: str | None = None,
         to_date: str | None = None,
         limit: int = 10,
+        *,
+        days: int | None = None,
     ) -> dict[str, Any]:
         """
         Return the top agents by task volume or cost.
@@ -110,6 +119,7 @@ class AnalyticsResource:
             from_date: ISO 8601 start date (optional).
             to_date:   ISO 8601 end date (optional).
             limit:     How many top agents to return (default: 10).
+            days:      Rolling window (1..365); omit for the server default.
 
         Returns:
             Top-agents dict.
@@ -120,7 +130,11 @@ class AnalyticsResource:
             or not 1 <= limit <= 100
         ):
             raise ValueError("limit must be an integer from 1 to 100")
+        if days is not None and (isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365):
+            raise ValueError("days must be an integer from 1 to 365")
         params: dict[str, Any] = {"limit": limit}
+        if days is not None:
+            params["days"] = days
         if from_date is not None:
             params["startDate"] = from_date
         if to_date is not None:
