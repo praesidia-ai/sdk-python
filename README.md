@@ -904,10 +904,10 @@ accepts a sync or async tool, and it closes with `await hooks.aclose()` or `asyn
 
 | Hook | Asks as | Default on outage |
 |---|---|---|
-| `before_tool_call(tool_name, arguments=None)` | `model_to_tool.<tool_name>` | fail-open |
+| `before_tool_call(tool_name, arguments=None)` | `model_to_tool.<tool_name>` | **fail-closed** |
 | `before_exec(command, args=None, cwd=None, runtime="shell")` | `agent_to_shell.exec` (`runtime="code"` → `agent_to_code_execution.exec`) | **fail-closed** |
-| `before_fs_access(path, mode)` | `agent_to_filesystem.<mode>` | fail-open for `read` / `list`, **fail-closed** for `write` / `delete` |
-| `before_browser_action(action, url=None, arguments=None)` | `agent_to_browser.<action>` | fail-open |
+| `before_fs_access(path, mode)` | `agent_to_filesystem.<mode>` | **fail-closed** for every mode |
+| `before_browser_action(action, url=None, arguments=None)` | `agent_to_browser.<action>` | **fail-closed** |
 | `before_interaction(type, {"name", "arguments"?}, *, fail_mode="closed")` | `<type>.<name>`, any of `INTERACTION_TYPES` | **fail-closed** |
 
 Every hook returns `InteractionHookResult(decision=...)` on `allow`, raises
@@ -984,11 +984,13 @@ hook then raises `InteractionDecisionUnavailableError` (the outage is its
 Any other 4xx (bad key, unknown agent, feature not enabled, and 429) always raises the typed
 `PraesidiaError` (`AuthError`, `ForbiddenError`, `RateLimitError`, ...), on every hook (SDK-0353,
 parity with TS SDK-0352): an end user can cause a 429 from a shared egress IP, so it must never
-open a fail-open hook; `Guard` uses the same predicate. The defaults fail closed
-where a skipped check can do irreversible local damage with no other Praesidia control in the
-path (shell / code execution, filesystem writes), and fail open for read-only and lower-impact
-checks so a Praesidia outage does not stop every agent. Override per class with
-`fail_mode={"tool_call" | "exec" | "fs_read" | "fs_write" | "browser": "open" | "closed"}`. An
+open a fail-open hook; `Guard` uses the same predicate. Every hook defaults to fail closed: tools and browser actions can have external side effects,
+and reads can expose sensitive data. An unavailable authorization decision stops the action.
+Opt in per class with
+`fail_mode={"tool_call" | "exec" | "fs_read" | "fs_write" | "browser": "open" | "closed"}`.
+To retain the previous outage behavior, explicitly configure
+`fail_mode={"tool_call": "open", "fs_read": "open", "browser": "open"}`; those classes then
+proceed without an authorization decision on an outage. An
 outage while waiting for an approval never turns into an allow: the hook keeps waiting, then
 times out; a 429 or other 4xx while waiting raises.
 

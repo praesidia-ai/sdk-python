@@ -80,9 +80,9 @@ INTERACTION_TYPES = (
 INTERACTION_VERDICTS = ("allow", "deny", "require_approval")
 #: be ``InteractionOutcomeStatus`` (BE-1582), same order.
 INTERACTION_OUTCOME_STATUSES = ("succeeded", "failed_no_effect", "partial", "unknown")
-#: Fail-closed where a skipped check can do irreversible local damage (exec, fs writes).
+#: Require an authorization decision for every hook; fail-open is an explicit opt-in.
 DEFAULT_FAIL_MODES: Mapping[str, str] = MappingProxyType(
-    {"tool_call": "open", "exec": "closed", "fs_read": "open", "fs_write": "closed", "browser": "open"}
+    {"tool_call": "closed", "exec": "closed", "fs_read": "closed", "fs_write": "closed", "browser": "closed"}
 )
 
 _ACTION_NAME = re.compile(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*")

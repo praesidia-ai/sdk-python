@@ -15,6 +15,16 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 - Management-query fixtures shared with TypeScript are checked against fresh
   backend OpenAPI exports in contract CI.
 
+### Changed
+
+- **Breaking behavior:** sync and async interaction hooks now default to fail closed for every
+  class. Tool calls (including `guarded` tools), filesystem reads/listing and browser actions
+  raise `InteractionDecisionUnavailableError` on decision API outages; exec and filesystem
+  writes already did. Successful decisions, denials, approval waits and retries are unchanged.
+  Explicit per-class overrides remain supported. To preserve the previous outage behavior, set
+  `fail_mode={"tool_call": "open", "fs_read": "open", "browser": "open"}`. This permits those
+  actions without an authorization decision during an outage. Matches the TypeScript SDK.
+
 ### Added
 - **SDK-2800 (needs be BE-2836; TS twin in `@praesidia/sdk`):** new `InteractionTaskNotLiveError`
   (subclass of `ForbiddenError`, 403, `task_id`): `decide()` and every hook, sync and async, raise

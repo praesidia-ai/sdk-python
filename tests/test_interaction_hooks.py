@@ -103,11 +103,13 @@ def api():
 
 # `fail` is the README-documented default, stated here literally, not read from DEFAULT_FAIL_MODES.
 HOOKS = [
-    ("before_tool_call", "open", "model_to_tool", lambda h: h.before_tool_call("search.web", {"q": "x"})),
+    ("before_tool_call", "closed", "model_to_tool", lambda h: h.before_tool_call("search.web", {"q": "x"})),
     ("before_exec", "closed", "agent_to_shell", lambda h: h.before_exec("rm -rf /srv")),
-    ("before_fs_access(read)", "open", "agent_to_filesystem", lambda h: h.before_fs_access("/srv/reports/q3.csv", "read")),
+    ("before_fs_access(read)", "closed", "agent_to_filesystem", lambda h: h.before_fs_access("/srv/reports/q3.csv", "read")),
+    ("before_fs_access(list)", "closed", "agent_to_filesystem", lambda h: h.before_fs_access("/srv", "list")),
+    ("before_fs_access(delete)", "closed", "agent_to_filesystem", lambda h: h.before_fs_access("/srv/x", "delete")),
     ("before_fs_access(write)", "closed", "agent_to_filesystem", lambda h: h.before_fs_access("/srv/x", "write")),
-    ("before_browser_action", "open", "agent_to_browser", lambda h: h.before_browser_action("navigate", url="https://example.com")),
+    ("before_browser_action", "closed", "agent_to_browser", lambda h: h.before_browser_action("navigate", url="https://example.com")),
 ]
 per_hook = pytest.mark.parametrize("name,fail,kind,call", HOOKS, ids=[h[0] for h in HOOKS])
 both = pytest.mark.parametrize("mode", MODES)
@@ -193,12 +195,38 @@ def test_decision_api_outage_applies_the_documented_fail_mode(api, mode, name, f
         assert result.decision is None and isinstance(result.fail_open_error, httpx.ConnectError)
 
 
+@both
+@per_hook
+@pytest.mark.parametrize("outcome", [503, {"verdict": "maybe"}, b"not json"], ids=["503", "bad verdict", "non-JSON"])
+def test_unavailable_or_malformed_decision_blocks_every_hook_by_default(api, mode, name, fail, kind, call, outcome):
+    if isinstance(outcome, bytes):
+        api.respond(200, content=outcome)
+    else:
+        api.mock(side_effect=seq(outcome))
+    with pytest.raises(InteractionDecisionUnavailableError):
+        run(call(hooks(mode)))
+
+
+@both
+@per_hook
+def test_explicit_fail_open_override_permits_an_outage_for_each_class(api, mode, name, fail, kind, call):
+    api.mock(side_effect=httpx.ConnectError("down"))
+    cls = {
+        "before_tool_call": "tool_call", "before_exec": "exec",
+        "before_fs_access(read)": "fs_read", "before_fs_access(list)": "fs_read",
+        "before_fs_access(write)": "fs_write", "before_fs_access(delete)": "fs_write",
+        "before_browser_action": "browser",
+    }[name]
+    result = run(call(hooks(mode, fail_mode={cls: "open"})))
+    assert result.decision is None and isinstance(result.fail_open_error, httpx.ConnectError)
+
+
 # ── fail modes ───────────────────────────────────────────────────────────────
 
 
-def test_defaults_fail_closed_for_exec_and_fs_writes_only():
+def test_defaults_require_an_authorization_decision_for_every_hook():
     assert dict(DEFAULT_FAIL_MODES) == {
-        "tool_call": "open", "exec": "closed", "fs_read": "open", "fs_write": "closed", "browser": "open",
+        "tool_call": "closed", "exec": "closed", "fs_read": "closed", "fs_write": "closed", "browser": "closed",
     }
 
 
@@ -228,7 +256,7 @@ def test_unreadable_2xx_is_an_outage(api, mode, body):
 def test_a_caller_error_raises_even_on_a_fail_open_hook(api, mode, status, error):
     api.respond(status, text="no")
     with pytest.raises(error) as err:
-        run(hooks(mode).before_fs_access("/a", "read"))
+        run(hooks(mode, fail_mode={"fs_read": "open"}).before_fs_access("/a", "read"))
     assert err.value.status_code == status
 
 
@@ -246,7 +274,7 @@ def test_a_429_raises_on_a_fail_open_and_a_fail_closed_hook(api, mode, fail):
 @both
 def test_a_503_degrades_a_fail_open_hook(api, mode):
     api.respond(503, text="down")
-    result = run(hooks(mode).before_tool_call("search.web", {}))
+    result = run(hooks(mode, fail_mode={"tool_call": "open"}).before_tool_call("search.web", {}))
     assert result.decision is None and result.fail_open_error.status_code == 503
 
 
@@ -277,7 +305,7 @@ def test_before_interaction_defaults_to_fail_closed(api, mode):
 def test_an_outage_while_waiting_for_approval_never_allows_even_fail_open(api, mode):
     api.mock(side_effect=seq(PENDING, httpx.ConnectError("down")))
     with pytest.raises(InteractionDeniedError) as err:
-        run(hooks(mode, approval_timeout=0.02).before_browser_action("click"))
+        run(hooks(mode, approval_timeout=0.02, fail_mode={"browser": "open"}).before_browser_action("click"))
     assert (err.value.reason_code, err.value.decision) == ("approval_wait_timeout", PENDING)
 
 
@@ -589,6 +617,19 @@ def test_async_guarded_wraps_async_and_sync_tools(api):
     assert sent(api, 1)["action"]["name"] == "calc.double"
 
 
+@both
+def test_guarded_never_executes_the_tool_without_a_decision_by_default(api, mode):
+    api.mock(side_effect=httpx.ConnectError("down"))
+    ran = []
+
+    def send_payment(amount):
+        ran.append(amount)
+
+    with pytest.raises(InteractionDecisionUnavailableError):
+        run(hooks(mode).guarded(send_payment)(amount=42))
+    assert ran == []
+
+
 def test_context_managers_close_the_http_client():
     with hooks("sync") as h:
         pass
@@ -712,7 +753,7 @@ def test_409_idempotency_key_reused_raises_the_typed_error_once(outcome_api, mod
     decide, outcome = outcome_api
     for route in (decide, outcome):
         route.mock(return_value=httpx.Response(409, json=REUSED))  # every attempt would get it again
-    h = hooks(mode)
+    h = hooks(mode, fail_mode={"tool_call": "open"})
     for call in (lambda: h.decide("agent_to_email", EMAIL), lambda: report(h), lambda: h.before_tool_call("search.web")):
         with pytest.raises(IdempotencyKeyReusedError) as err:
             run(call())  # a fail-open hook raises too: a 409 is never an outage
@@ -736,7 +777,7 @@ def test_a_409_without_a_code_is_the_plain_error_not_retried(outcome_api, mode):
 @both
 def test_retry_false_sends_once(api, mode):
     api.respond(503, text="down")
-    result = run(hooks(mode, retry=False).before_tool_call("search.web"))
+    result = run(hooks(mode, retry=False, fail_mode={"tool_call": "open"}).before_tool_call("search.web"))
     assert result.fail_open_error.status_code == 503 and api.call_count == 1
 
 
@@ -774,14 +815,14 @@ def test_a_stale_task_id_403_is_interaction_task_not_live_error_once(api, mode):
 def test_a_fail_open_hook_raises_it_never_fail_opens(api, mode):
     api.respond(403, json=NOT_LIVE)
     with pytest.raises(InteractionTaskNotLiveError):
-        run(hooks(mode, task_id=TASK).before_tool_call("search.web"))
+        run(hooks(mode, task_id=TASK, fail_mode={"tool_call": "open"}).before_tool_call("search.web"))
 
 
 @both
 def test_any_other_403_stays_the_plain_forbidden_error(api, mode):
     api.respond(403, json={**NOT_LIVE, "message": "Caller may not act as this agent"})
     with pytest.raises(ForbiddenError) as err:
-        run(hooks(mode, task_id=TASK).before_tool_call("search.web"))
+        run(hooks(mode, task_id=TASK, fail_mode={"tool_call": "open"}).before_tool_call("search.web"))
     assert not isinstance(err.value, InteractionTaskNotLiveError)
 
 
