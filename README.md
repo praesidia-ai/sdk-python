@@ -136,7 +136,7 @@ server's default window.
 | Resource | Class | Key methods |
 |----------|-------|-------------|
 | `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `protect_action`, `refresh_credential` |
-| `client.ai_systems` | `AiSystemsResource` | `list`/`get`/`create`/`update`/`archive`/`restore`/`delete`/`update_owners`/`transition_lifecycle`/`request_lifecycle_transition`/`list_lifecycle_requests`/`approve_lifecycle_transition`/`reject_lifecycle_transition`/`retire`/`reapprove`/`summary`, `list_assets`/`create_asset`/`get_asset`/`update_asset`/`archive_asset`/`restore_asset`/`adopt_asset`, `attach_asset`/`detach_asset`/`change_asset_role`, `create_relationship`/`get_relationship`/`update_relationship`/`archive_relationship`/`restore_relationship`/`list_relationships`/`traverse`, `put_{system,asset,relationship}_by_external_id`/`delete_{system,asset,relationship}_by_external_id` (inventory lists also have a `*_page`/`*_all` sibling) |
+| `client.ai_systems` | `AiSystemsResource` | `list`/`get`/`create`/`update`/`archive`/`restore`/`delete`/`update_owners`/`transition_lifecycle`/`request_lifecycle_transition`/`list_lifecycle_requests`/`list_lifecycle_requests_page`/`approve_lifecycle_transition`/`reject_lifecycle_transition`/`retire`/`reapprove`/`summary`, `list_assets`/`create_asset`/`get_asset`/`update_asset`/`archive_asset`/`restore_asset`/`adopt_asset`, `attach_asset`/`detach_asset`/`change_asset_role`, `create_relationship`/`get_relationship`/`update_relationship`/`archive_relationship`/`restore_relationship`/`list_relationships`/`traverse`, `put_{system,asset,relationship}_by_external_id`/`delete_{system,asset,relationship}_by_external_id` (inventory lists also have a `*_page`/`*_all` sibling) |
 | `client.workflows` | `WorkflowsResource` | `list`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `get_run` |
 | `client.audit` | `AuditResource` | `list`, `list_page`, `stream`, `export`, `export_bundle`, `get_decision_receipt`, `get_receipt`, `request_package`, `get_package`, `download_package` |
 | `client.proof` | `ProofResource` | `list`, `get`, `events`, `capture_scope`, `coverage_summary` |
@@ -1105,6 +1105,13 @@ Page size: `audit.list` / `audit.list_page` / `audit.stream`, `analytics.events`
 `analytics.top_agents` and `memory.list` raise `ValueError` for a `limit` outside 1..100 (be answers 400
 above 100). `audit.list_page` and `analytics.events_page` return the full envelope (`data`, `meta`/`total`)
 instead of only the rows. Analytics `days` must be an integer 1..365 (`ValueError` otherwise).
+
+`ai_systems.list_lifecycle_requests_page(*, status=None, ai_system_id=None, page=1, limit=20)` returns the
+`{data, total, meta}` envelope; `list_lifecycle_requests` returns only `data` of the first page. Omitting `status`
+uses the server's PENDING queue. `page` must be an integer 1..1_000_000 and `limit` an integer 1..100, else
+`ValueError` before any request (`status` outside the known values raises `ValueError` too). `audit.stream` requests
+page 1, 2, ... with `limit` per call and stops on the first empty page; it applies the same page check on every
+fetch, so a stream that would pass page 1_000_000 raises `ValueError` instead of sending a request be rejects.
 
 `InteractionTaskNotLiveError` (403, a subclass of `ForbiddenError`, `task_id`) means the
 interaction hooks' `task_id` is not a live task this agent executes (BE-2836).
