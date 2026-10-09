@@ -288,3 +288,23 @@ def test_security_usage_heatmap_compliance_send_the_full_window_query():
         "endDate": "2026-07-14",
     }
     assert dict(comp_route.calls.last.request.url.params) == {"days": "60"}
+
+
+@pytest.mark.parametrize("limit", [0, 101, True])
+def test_events_and_activity_log_limit_fail_fast(limit):
+    with pytest.raises(ValueError, match="limit"):
+        _client().analytics.events(limit=limit)
+    with pytest.raises(ValueError, match="limit"):
+        _client().analytics.events_page(limit=limit)
+    with pytest.raises(ValueError, match="limit"):
+        _client().analytics.activity_log(limit=limit)
+
+
+@respx.mock
+def test_events_page_returns_total_and_meta_with_fallback_has_prev_page():
+    respx.get(f"{ANALYTICS}/events").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": "evt-1"}]})
+    )
+    page = _client().analytics.events_page()
+    assert page["total"] == 1
+    assert page["meta"]["hasPrevPage"] is False

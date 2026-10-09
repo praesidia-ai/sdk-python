@@ -133,3 +133,14 @@ def test_api_key_never_reaches_message_repr_or_str():
     assert secret_key not in str(err)
     assert secret_key not in repr(err)
     assert secret_key not in json.dumps(err.body)
+
+
+@respx.mock
+def test_error_message_is_envelope_message_not_raw_body():
+    respx.get(AGENTS_URL).mock(
+        return_value=httpx.Response(400, json={"statusCode": 400, "message": "limit must not be greater than 100"})
+    )
+    with pytest.raises(PraesidiaError) as exc_info:
+        _client().agents.list()
+    assert str(exc_info.value) == "limit must not be greater than 100"
+    assert exc_info.value.status_code == 400

@@ -656,19 +656,24 @@ class HttpClient:
             "retryable": is_retryable_status(r.status_code),
             "body": envelope,
         }
+        message = envelope.get("message") if envelope else None
+        if isinstance(message, list):
+            message = "; ".join(str(m) for m in message)
+        envelope_message = message if isinstance(message, str) and message else None
+        msg = envelope_message or r.text
         if r.status_code == 401:
-            raise AuthError(r.text, **envelope_kwargs)
+            raise AuthError(msg, **envelope_kwargs)
         if r.status_code == 403:
-            raise ForbiddenError(r.text, **envelope_kwargs)
+            raise ForbiddenError(msg, **envelope_kwargs)
         if r.status_code == 404:
-            raise NotFoundError(r.text, **envelope_kwargs)
+            raise NotFoundError(msg, **envelope_kwargs)
         if r.status_code == 429:
-            raise RateLimitError(r.text, **envelope_kwargs)
+            raise RateLimitError(msg, **envelope_kwargs)
         if r.status_code == 409 and envelope_kwargs["code"] == "IDEMPOTENCY_KEY_REUSED":
-            raise IdempotencyKeyReusedError(r.text, **envelope_kwargs)
+            raise IdempotencyKeyReusedError(msg, **envelope_kwargs)
         if r.status_code >= 500:
-            raise ServerError(r.text, r.status_code, **envelope_kwargs)
+            raise ServerError(msg, r.status_code, **envelope_kwargs)
         try:
             r.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            raise PraesidiaError(str(exc), status_code=r.status_code, **envelope_kwargs) from exc
+            raise PraesidiaError(envelope_message or str(exc), status_code=r.status_code, **envelope_kwargs) from exc

@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from ._http import HttpClient, path_segment
+from ._pagination import normalize_paged_envelope, validate_limit
 
 
 class AnalyticsResource:
@@ -124,12 +125,7 @@ class AnalyticsResource:
         Returns:
             Top-agents dict.
         """
-        if (
-            isinstance(limit, bool)
-            or not isinstance(limit, int)
-            or not 1 <= limit <= 100
-        ):
-            raise ValueError("limit must be an integer from 1 to 100")
+        validate_limit(limit)
         if days is not None and (isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365):
             raise ValueError("days must be an integer from 1 to 365")
         params: dict[str, Any] = {"limit": limit}
@@ -219,9 +215,8 @@ class AnalyticsResource:
 
         Calls ``GET /organizations/{org_id}/analytics/events``. Unwraps the
         ``{data, meta}`` pagination envelope, matching ``agents.list`` /
-        ``audit.list``. Page/limit are NOT validated client-side (matching
-        ``audit.list``/``audit.stream``'s existing convention) -- be-core's
-        ``PaginationDto`` enforces `[1, 100]` server-side.
+        ``audit.list``. ``limit`` must be 1..100 (be answers 400 above 100);
+        see :meth:`events_page` for ``total``/``meta``.
 
         Args:
             agent_id:   Filter to one agent (optional).
@@ -235,7 +230,19 @@ class AnalyticsResource:
         Returns:
             A list of analytics event dicts.
         """
-        params: dict[str, Any] = {"page": page, "limit": limit}
+        return self.events_page(agent_id, event_type, from_date, to_date, page, limit)["data"]
+
+    def events_page(
+        self,
+        agent_id: str | None = None,
+        event_type: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        page: int = 1,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Like :meth:`events` but returns ``{"data": [...], "total": int, "meta": {...}}``."""
+        params: dict[str, Any] = {"page": page, "limit": validate_limit(limit)}
         if agent_id is not None:
             params["agentId"] = agent_id
         if event_type is not None:
@@ -244,10 +251,7 @@ class AnalyticsResource:
             params["startDate"] = from_date
         if to_date is not None:
             params["endDate"] = to_date
-        result = self._http.get(f"{self._base}/events", params=params)
-        if isinstance(result, list):
-            return result
-        return result.get("data", [])
+        return normalize_paged_envelope(self._http.get(f"{self._base}/events", params=params), "data")
 
     def activity_log(
         self,
@@ -266,7 +270,7 @@ class AnalyticsResource:
 
         Calls ``GET /organizations/{org_id}/analytics/activity-log``.
         """
-        params: dict[str, Any] = {"page": page, "limit": limit}
+        params: dict[str, Any] = {"page": page, "limit": validate_limit(limit)}
         if agent_id is not None:
             params["agentId"] = agent_id
         if event_type is not None:

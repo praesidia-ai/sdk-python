@@ -12,6 +12,7 @@ from typing import Any
 
 from ._evidence import evidence_date_range
 from ._http import HttpClient, path_segment
+from ._pagination import normalize_paged_envelope, validate_limit
 
 # be validates package / AI System ids with ParseUUIDPipe / @IsUUID (any version).
 _UUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
@@ -133,7 +134,8 @@ class AuditResource:
         action: str | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Return a page of audit log entries.
+        Return a page of audit log entries (data only; see :meth:`list_page` for
+        ``total``/``meta``).
 
         Args:
             from_date: ISO 8601 start date/time (e.g. ``"2026-01-01"``).
@@ -155,18 +157,29 @@ class AuditResource:
             is not a stored, queryable column. Filter by ``action`` (e.g.
             ``action="agent.created"``) instead.
         """
-        params: dict[str, Any] = {"page": page, "limit": limit}
+        return self.list_page(from_date, to_date, limit=limit, page=page, action=action)["data"]
+
+    def list_page(
+        self,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        limit: int = 50,
+        page: int = 1,
+        action: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Return one page as ``{"data": [...], "total": int, "meta": {...}}``.
+
+        Same filters as :meth:`list`. ``limit`` must be 1..100 (be answers 400 above 100).
+        """
+        params: dict[str, Any] = {"page": page, "limit": validate_limit(limit)}
         if from_date is not None:
             params["startDate"] = from_date
         if to_date is not None:
             params["endDate"] = to_date
         if action is not None:
             params["action"] = action
-
-        result = self._http.get(self._base, params=params)
-        if isinstance(result, list):
-            return result
-        return result.get("data", result.get("logs", []))
+        return normalize_paged_envelope(self._http.get(self._base, params=params), "logs")
 
     def stream(
         self,
@@ -181,23 +194,22 @@ class AuditResource:
 
         BUGHUNT-SDK-01 — the terminal condition is an empty page, NOT a
         short one. The backend hard-caps the page size
-        (``PAGINATION_MAX_LIMIT = 100`` via ``clampLimit``), so a caller
-        asking for ``limit > 100`` still receives at most 100 rows per
-        page. The old ``len(events) < limit`` heuristic therefore treated
-        the very first (full-but-clamped) page as the last one and
-        silently dropped every event past the first 100 — the worst
-        possible failure for a compliance/audit export. Stopping only on
-        an empty page needs no knowledge of the server's cap and streams
-        the full range.
+        (``PAGINATION_MAX_LIMIT = 100``) and answers 400 for ``limit > 100``,
+        so ``limit`` is validated client-side (1..100). The old
+        ``len(events) < limit`` heuristic treated a full page as the last
+        one and could silently drop events — the worst possible failure
+        for a compliance/audit export. Stopping only on an empty page
+        needs no knowledge of the server's cap and streams the full range.
 
         Args:
             from_date: ISO 8601 start date/time.  When ``None`` the API
                        default applies (typically most-recent first).
-            limit:     Page size used for each internal fetch (default: 100).
+            limit:     Page size used for each internal fetch, 1..100 (default: 100).
 
         Yields:
             Individual audit event dicts.
         """
+        validate_limit(limit)
         page = 1
         while True:
             params: dict[str, Any] = {"page": page, "limit": limit}
@@ -211,9 +223,8 @@ class AuditResource:
                 else result.get("data", result.get("logs", []))
             )
 
-            # An empty page is the only reliable end-of-stream signal: a
-            # non-empty page shorter than `limit` may just be the server's
-            # clamp (100), not the end of the data.
+            # An empty page is the only reliable end-of-stream signal; a short
+            # page is not proof of the end.
             if not events:
                 break
 

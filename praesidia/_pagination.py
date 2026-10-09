@@ -26,6 +26,13 @@ from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
 
+def validate_limit(limit: Any) -> int:
+    """Fail fast on a page size be would 400 (``PaginationDto`` ``@Min(1) @Max(100)``)."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+        raise ValueError("limit must be an integer from 1 to 100")
+    return limit
+
+
 def list_query(
     page: int,
     limit: int,
@@ -34,7 +41,7 @@ def list_query(
     enums: dict[str, tuple[str, ...]],
 ) -> dict[str, Any]:
     """Map public snake-case filters to the backend's query DTO fields."""
-    params: dict[str, Any] = {"page": page, "limit": limit}
+    params: dict[str, Any] = {"page": page, "limit": validate_limit(limit)}
     for key, value in filters.items():
         if key not in names:
             raise ValueError(f"Unknown list filter: {key}")
@@ -69,6 +76,7 @@ def normalize_paged_envelope(
                 "total": len(result),
                 "totalPages": 1,
                 "hasNextPage": False,
+                "hasPrevPage": False,
             },
         }
     data = result.get("data", result.get(data_key, []))
@@ -84,6 +92,7 @@ def normalize_paged_envelope(
             "total": total,
             "totalPages": 1,
             "hasNextPage": False,
+            "hasPrevPage": False,
         },
     }
 

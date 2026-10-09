@@ -20,7 +20,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from ._http import HttpClient, path_segment
-from ._pagination import normalize_paged_envelope, paginate_all
+from ._pagination import normalize_paged_envelope, paginate_all, validate_limit
 from .exceptions import PraesidiaConfigError
 
 
@@ -32,7 +32,7 @@ def _query(page: int, limit: int, **filters: Any) -> dict[str, Any]:
     fields ``@IsBooleanString`` (``includeArchived``), not a real boolean --
     Python's default ``str(True) == "True"`` would 400.
     """
-    params: dict[str, Any] = {"page": page, "limit": limit}
+    params: dict[str, Any] = {"page": page, "limit": validate_limit(limit)}
     for key, value in filters.items():
         if value is None:
             continue

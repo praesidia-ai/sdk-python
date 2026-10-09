@@ -39,23 +39,38 @@ def _paged_server(total_rows: int):
     return handler
 
 
-# --- BUGHUNT-SDK-01 — stream paginates past the server page cap ------------
+# --- BUGHUNT-SDK-01 — stream pages until an empty page ---------------------
 
 
 @respx.mock
-def test_stream_paginates_full_range_when_limit_over_server_cap():
-    # 250 rows, caller asks for a 500-row page. The server clamps every page
-    # to 100, so page 1 returns 100 < 500 — the OLD `len(events) < limit`
-    # heuristic stopped right there and silently dropped 150 rows.
+def test_stream_paginates_full_range_across_pages():
     total = 250
     respx.get(AUDIT).mock(side_effect=_paged_server(total))
 
-    events = list(_client().audit.stream(limit=500))
+    events = list(_client().audit.stream(limit=100))
 
-    assert len(events) == total
     assert [e["id"] for e in events] == [f"evt-{i}" for i in range(total)]
-    # No duplicates, no gaps.
-    assert len({e["id"] for e in events}) == total
+
+
+@pytest.mark.parametrize("limit", [0, 101, 500, True, 1.5])
+@respx.mock
+def test_limit_outside_1_to_100_fails_fast_without_a_request(limit):
+    route = respx.get(AUDIT).mock(return_value=httpx.Response(200, json={"data": []}))
+    with pytest.raises(ValueError, match="limit"):
+        list(_client().audit.stream(limit=limit))
+    with pytest.raises(ValueError, match="limit"):
+        _client().audit.list(limit=limit)
+    with pytest.raises(ValueError, match="limit"):
+        _client().audit.list_page(limit=limit)
+    assert route.call_count == 0
+
+
+@respx.mock
+def test_list_page_returns_total_and_meta():
+    meta = {"page": 1, "limit": 50, "total": 120, "totalPages": 3, "hasNextPage": True, "hasPrevPage": False}
+    respx.get(AUDIT).mock(return_value=httpx.Response(200, json={"data": [{"id": "a"}], "total": 120, "meta": meta}))
+    page = _client().audit.list_page()
+    assert page == {"data": [{"id": "a"}], "total": 120, "meta": meta}
 
 
 @respx.mock
