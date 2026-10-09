@@ -296,6 +296,10 @@ class _InteractionHooksBase(Generic[_R]):
             raise _OutcomeKeyError(f"{'approval_id' if key == 'approvalId' else 'decision_id'} must be a non-empty string")
         if status not in INTERACTION_OUTCOME_STATUSES:
             raise PraesidiaConfigError(f"status must be one of {', '.join(INTERACTION_OUTCOME_STATUSES)}")
+        # be InteractionOutcomeDto bounds: targetSystem <= 100, targetTransactionId <= 200 chars.
+        for label, val, cap in (("target_system", target_system, 100), ("target_transaction_id", target_transaction_id, 200)):
+            if val is not None and (not isinstance(val, str) or len(val) > cap):
+                raise PraesidiaConfigError(f"{label} must be a string of at most {cap} characters")
         try:
             commitment = None if result is None else jcs_commitment(result)
         except JcsCanonicalizationError as exc:

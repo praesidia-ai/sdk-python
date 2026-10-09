@@ -398,8 +398,10 @@ def test_report_409_is_one_typed_error_not_retried(outcome_api, mode):
 @both
 @pytest.mark.parametrize(
     "args,kwargs",
-    [((RECEIPT["approvalId"], "done"), {}), (("", "succeeded"), {}), ((RECEIPT["approvalId"], "partial"), {"result": {"n": float("nan")}})],
-    ids=["bad status", "no approval_id", "non-JSON result"],
+    [((RECEIPT["approvalId"], "done"), {}), (("", "succeeded"), {}), ((RECEIPT["approvalId"], "partial"), {"result": {"n": float("nan")}}),
+     ((RECEIPT["approvalId"], "succeeded"), {"target_system": "x" * 101}),
+     ((RECEIPT["approvalId"], "succeeded"), {"target_transaction_id": "x" * 201})],
+    ids=["bad status", "no approval_id", "non-JSON result", "target_system > 100", "target_transaction_id > 200"],
 )
 def test_report_rejects_bad_input_before_any_request(outcome_api, mode, args, kwargs):
     _, report = outcome_api
