@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from typing import Any, Literal, TypedDict, Unpack
 
 from ._http import HttpClient, path_segment
-from ._pagination import list_query, normalize_paged_envelope, paginate_all, validate_limit
+from ._pagination import list_query, normalize_paged_envelope, paginate_all, validate_limit, validate_page
 
 
 class WorkflowListFilters(TypedDict, total=False):
@@ -188,7 +188,7 @@ class WorkflowsResource:
         """Like :meth:`list_runs`, but returns be's full pagination envelope (SCAN2-011)."""
         result = self._http.get(
             f"{self._base}/{path_segment(workflow_id, 'workflow_id')}/runs",
-            params={"page": page, "limit": validate_limit(limit)},
+            params={"page": validate_page(page), "limit": validate_limit(limit)},
         )
         return normalize_paged_envelope(result, "runs")
 

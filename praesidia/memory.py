@@ -14,7 +14,7 @@ import re
 from typing import Any
 
 from ._http import HttpClient, path_segment
-from ._pagination import validate_limit
+from ._pagination import validate_limit, validate_page
 
 
 class MemoryResource:
@@ -175,7 +175,7 @@ class MemoryResource:
             raise ValueError(
                 f"source_type must be one of {self.SOURCE_TYPES}; got {source_type!r}"
             )
-        params: dict[str, Any] = {"page": page, "limit": validate_limit(limit)}
+        params: dict[str, Any] = {"page": validate_page(page), "limit": validate_limit(limit)}
         if memory_key is not None:
             params["memoryKey"] = memory_key
         if source_type is not None:

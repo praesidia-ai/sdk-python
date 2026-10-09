@@ -12,7 +12,7 @@ from typing import Any
 
 from ._evidence import evidence_date_range
 from ._http import HttpClient, path_segment
-from ._pagination import normalize_paged_envelope, validate_limit
+from ._pagination import normalize_paged_envelope, validate_limit, validate_page
 
 # be validates package / AI System ids with ParseUUIDPipe / @IsUUID (any version).
 _UUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
@@ -172,7 +172,7 @@ class AuditResource:
 
         Same filters as :meth:`list`. ``limit`` must be 1..100 (be answers 400 above 100).
         """
-        params: dict[str, Any] = {"page": page, "limit": validate_limit(limit)}
+        params: dict[str, Any] = {"page": validate_page(page), "limit": validate_limit(limit)}
         if from_date is not None:
             params["startDate"] = from_date
         if to_date is not None:
@@ -212,16 +212,11 @@ class AuditResource:
         validate_limit(limit)
         page = 1
         while True:
-            params: dict[str, Any] = {"page": page, "limit": limit}
+            params: dict[str, Any] = {"page": validate_page(page), "limit": limit}
             if from_date is not None:
                 params["startDate"] = from_date
 
-            result = self._http.get(self._base, params=params)
-            events: list[dict[str, Any]] = (
-                result
-                if isinstance(result, list)
-                else result.get("data", result.get("logs", []))
-            )
+            events = normalize_paged_envelope(self._http.get(self._base, params=params), "logs")["data"]
 
             # An empty page is the only reliable end-of-stream signal; a short
             # page is not proof of the end.

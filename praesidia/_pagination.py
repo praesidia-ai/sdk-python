@@ -33,6 +33,13 @@ def validate_limit(limit: Any) -> int:
     return limit
 
 
+def validate_page(page: Any) -> int:
+    """Fail fast on a page be would 400 (``MAX_PAGE = 1_000_000``)."""
+    if isinstance(page, bool) or not isinstance(page, int) or not 1 <= page <= 1_000_000:
+        raise ValueError("page must be an integer from 1 to 1000000")
+    return page
+
+
 def list_query(
     page: int,
     limit: int,
@@ -41,7 +48,7 @@ def list_query(
     enums: dict[str, tuple[str, ...]],
 ) -> dict[str, Any]:
     """Map public snake-case filters to the backend's query DTO fields."""
-    params: dict[str, Any] = {"page": page, "limit": validate_limit(limit)}
+    params: dict[str, Any] = {"page": validate_page(page), "limit": validate_limit(limit)}
     for key, value in filters.items():
         if key not in names:
             raise ValueError(f"Unknown list filter: {key}")

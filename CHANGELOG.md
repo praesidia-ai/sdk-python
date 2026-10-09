@@ -5,6 +5,25 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 
 ## Unreleased
 
+### Changed
+
+- **Breaking behavior:** a `limit` outside 1..100 now raises `ValueError` client-side on every
+  list/stream method (be answers 400 above 100). Same for `page` outside 1..1_000_000.
+- **Breaking behavior:** `str(exception)` is now be's envelope `message` instead of a generic
+  HTTP summary; the raw body stays on the exception.
+- Interaction-hook outcome `target_system` / `target_transaction_id` bounds are validated
+  client-side (a0fdeaf).
+- Memory `list` validates `limit` 1..100.
+
+### Added
+
+- `ai_systems.list_lifecycle_requests_page` (full `{data, total, meta}`), matching TypeScript.
+- `list_page` for audit and analytics events.
+
+### Fixed
+
+- `audit.stream` unwraps pages through the shared envelope normalizer.
+
 ## 0.5.0 — 2026-10-08 (first PyPI release)
 
 No earlier version reached PyPI (0.2.x to 0.4.x existed only in source), so 0.5.0 carries every

@@ -20,7 +20,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from ._http import HttpClient, path_segment
-from ._pagination import normalize_paged_envelope, paginate_all, validate_limit
+from ._pagination import normalize_paged_envelope, paginate_all, validate_limit, validate_page
 from .exceptions import PraesidiaConfigError
 
 
@@ -32,7 +32,7 @@ def _query(page: int, limit: int, **filters: Any) -> dict[str, Any]:
     fields ``@IsBooleanString`` (``includeArchived``), not a real boolean --
     Python's default ``str(True) == "True"`` would 400.
     """
-    params: dict[str, Any] = {"page": page, "limit": validate_limit(limit)}
+    params: dict[str, Any] = {"page": validate_page(page), "limit": validate_limit(limit)}
     for key, value in filters.items():
         if value is None:
             continue
@@ -329,12 +329,25 @@ class AiSystemsResource:
         page: int = 1,
         limit: int = 20,
     ) -> builtins.list[dict[str, Any]]:
-        """List lifecycle requests; omitting status uses the server's PENDING queue."""
+        """List lifecycle requests (first page only; see :meth:`list_lifecycle_requests_page`)."""
+        return self.list_lifecycle_requests_page(
+            status=status, ai_system_id=ai_system_id, page=page, limit=limit
+        )["data"]
+
+    def list_lifecycle_requests_page(
+        self,
+        *,
+        status: str | None = None,
+        ai_system_id: str | None = None,
+        page: int = 1,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Like :meth:`list_lifecycle_requests` but returns ``{data, total, meta}``; omitting status uses the server's PENDING queue."""
         if status is not None and status not in self.LIFECYCLE_REQUEST_STATUSES:
             raise ValueError(f"status must be one of {self.LIFECYCLE_REQUEST_STATUSES}")
         params = _query(page, limit, status=status, aiSystemId=ai_system_id)
         result = self._http.get(f"{self._systems_base}/lifecycle-requests", params=params)
-        return normalize_paged_envelope(result, "data")["data"]
+        return normalize_paged_envelope(result, "data")
 
     def approve_lifecycle_transition(self, request_id: str, *, reason: str | None = None) -> dict[str, Any]:
         """

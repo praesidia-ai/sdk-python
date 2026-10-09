@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from ._http import HttpClient, path_segment
-from ._pagination import normalize_paged_envelope, validate_limit
+from ._pagination import normalize_paged_envelope, validate_limit, validate_page
 
 
 class AnalyticsResource:
@@ -242,7 +242,7 @@ class AnalyticsResource:
         limit: int = 20,
     ) -> dict[str, Any]:
         """Like :meth:`events` but returns ``{"data": [...], "total": int, "meta": {...}}``."""
-        params: dict[str, Any] = {"page": page, "limit": validate_limit(limit)}
+        params: dict[str, Any] = {"page": validate_page(page), "limit": validate_limit(limit)}
         if agent_id is not None:
             params["agentId"] = agent_id
         if event_type is not None:
@@ -270,7 +270,7 @@ class AnalyticsResource:
 
         Calls ``GET /organizations/{org_id}/analytics/activity-log``.
         """
-        params: dict[str, Any] = {"page": page, "limit": validate_limit(limit)}
+        params: dict[str, Any] = {"page": validate_page(page), "limit": validate_limit(limit)}
         if agent_id is not None:
             params["agentId"] = agent_id
         if event_type is not None:
