@@ -138,9 +138,9 @@ server's default window.
 | `client.agents` | `AgentsResource` | `list`, `get`, `create`, `update`, `delete`, `run`, `poll_pending_tasks`, `call_mcp_tool`, `protect_action`, `refresh_credential` |
 | `client.ai_systems` | `AiSystemsResource` | `list`/`get`/`create`/`update`/`archive`/`restore`/`delete`/`update_owners`/`transition_lifecycle`/`request_lifecycle_transition`/`list_lifecycle_requests`/`approve_lifecycle_transition`/`reject_lifecycle_transition`/`retire`/`reapprove`/`summary`, `list_assets`/`create_asset`/`get_asset`/`update_asset`/`archive_asset`/`restore_asset`/`adopt_asset`, `attach_asset`/`detach_asset`/`change_asset_role`, `create_relationship`/`get_relationship`/`update_relationship`/`archive_relationship`/`restore_relationship`/`list_relationships`/`traverse`, `put_{system,asset,relationship}_by_external_id`/`delete_{system,asset,relationship}_by_external_id` (inventory lists also have a `*_page`/`*_all` sibling) |
 | `client.workflows` | `WorkflowsResource` | `list`, `get`, `create`, `update`, `delete`, `trigger`, `list_runs`, `get_run` |
-| `client.audit` | `AuditResource` | `list`, `stream`, `export`, `export_bundle`, `get_decision_receipt`, `get_receipt`, `request_package`, `get_package`, `download_package` |
+| `client.audit` | `AuditResource` | `list`, `list_page`, `stream`, `export`, `export_bundle`, `get_decision_receipt`, `get_receipt`, `request_package`, `get_package`, `download_package` |
 | `client.proof` | `ProofResource` | `list`, `get`, `events`, `capture_scope`, `coverage_summary` |
-| `client.analytics` | `AnalyticsResource` | `usage`, `cost_trends`, `agent_performance`, `top_agents`, `export`, `capture_state`, `agent_analytics`, `events`, `activity_log`, `record_event`, `security_metrics`, `usage_heatmap`, `compliance_metrics`, `anomalies`, `cost_by_team`, `model_comparison` |
+| `client.analytics` | `AnalyticsResource` | `usage`, `cost_trends`, `agent_performance`, `top_agents`, `export`, `capture_state`, `agent_analytics`, `events`, `events_page`, `activity_log`, `record_event`, `security_metrics`, `usage_heatmap`, `compliance_metrics`, `anomalies`, `cost_by_team`, `model_comparison` |
 | `client.connections` | `ConnectionsResource` | `list`, `get`, `create`, `create_agent`, `create_mcp`, `update_status`, `delete`, `test`, `health` |
 | `client.compliance` | `ComplianceResource` | `request_report`, `get_status`, `get_json`, `get_pdf`, `wait_for_report`, `generate_and_wait` |
 | `client.memory` | `MemoryResource` | `create`, `list`, `search`, `erase`, `get`, `delete` |
@@ -1097,6 +1097,14 @@ only by `client.agents.protect_action` — see [above](#protect-a-dispatch--prot
 
 `IdempotencyKeyReusedError` (409 `IDEMPOTENCY_KEY_REUSED`, a subclass of `PraesidiaError`) is
 never retried: the `Idempotency-Key` was already used with a different body.
+
+`str(exc)` is be's `message` (validation message arrays are joined with `; `); when the response
+has none it falls back to the raw text. The full parsed error envelope is on `exc.body`.
+
+Page size: `audit.list` / `audit.list_page` / `audit.stream`, `analytics.events` / `analytics.events_page`,
+`analytics.top_agents` and `memory.list` raise `ValueError` for a `limit` outside 1..100 (be answers 400
+above 100). `audit.list_page` and `analytics.events_page` return the full envelope (`data`, `meta`/`total`)
+instead of only the rows. Analytics `days` must be an integer 1..365 (`ValueError` otherwise).
 
 `InteractionTaskNotLiveError` (403, a subclass of `ForbiddenError`, `task_id`) means the
 interaction hooks' `task_id` is not a live task this agent executes (BE-2836).
