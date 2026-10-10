@@ -482,15 +482,15 @@ def test_asset_and_relationship_types_match_openapi():
     """SDK-0007 — fails if be's enum widens/shrinks again without an SDK sync.
 
     Reads the gate-verified `ui/swagger.json` (never regenerated here) and
-    compares its `AiAsset.assetType` / `AssetRelationship.relationshipType`
+    compares its `AiAssetResponseDto.assetType` / `AssetRelationshipResponseDto.relationshipType`
     enums against `AiSystemsResource.ASSET_TYPES` / `RELATIONSHIP_TYPES`.
     """
     assert _SWAGGER_AVAILABLE, f"REQUIRE_SWAGGER=1 but no swagger.json at {_SWAGGER_PATH}"
     spec = json.loads(_SWAGGER_PATH.read_text())
     schemas = spec["components"]["schemas"]
-    openapi_asset_types = set(schemas["AiAsset"]["properties"]["assetType"]["enum"])
+    openapi_asset_types = set(schemas["AiAssetResponseDto"]["properties"]["assetType"]["enum"])
     openapi_relationship_types = set(
-        schemas["AssetRelationship"]["properties"]["relationshipType"]["enum"]
+        schemas["AssetRelationshipResponseDto"]["properties"]["relationshipType"]["enum"]
     )
     assert set(AiSystemsResource.ASSET_TYPES) == openapi_asset_types
     assert set(AiSystemsResource.RELATIONSHIP_TYPES) == openapi_relationship_types
