@@ -256,3 +256,13 @@ def test_run_omits_delegation_constraints_when_none():
 def test_run_rejects_non_dict_delegation_constraints_before_network(bad):
     with pytest.raises(ValueError, match="delegation_constraints"):
         _client().agents.run(CONN_ID, {"message": "hi"}, delegation_constraints=bad)
+
+
+@respx.mock
+@pytest.mark.parametrize("data", [{}, {"type": "SERVICE"}, {"name": ""}, {"name": None}])
+def test_create_without_name_raises_before_request(data):
+    # CreateAgentDto requires `name` (be/openapi.json); fail before the round trip.
+    route = respx.post(AGENTS_URL).mock(return_value=httpx.Response(201, json=CREATE_FIXTURE))
+    with pytest.raises(ValueError, match="name"):
+        _client().agents.create(data)
+    assert not route.called

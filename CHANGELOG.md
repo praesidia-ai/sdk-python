@@ -9,6 +9,9 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 
 - **Breaking behavior:** a `limit` outside 1..100 now raises `ValueError` client-side on every
   list/stream method (be answers 400 above 100). Same for `page` outside 1..1_000_000.
+- **Breaking behavior:** `agents.create()` raises `ValueError` before any request when `data` has
+  no non-empty string `name` (be's `CreateAgentDto` requires it); before, be's 400 surfaced as
+  `PraesidiaError`.
 - **Breaking behavior:** `str(exception)` is now be's envelope `message` instead of a generic
   HTTP summary; the raw body stays on the exception.
 - Interaction-hook outcome `target_system` / `target_transaction_id` bounds are validated

@@ -196,7 +196,13 @@ class AgentsResource:
             JIT capability tokens (Q4-02) minted per task. ``webhookSigningSecret``
             is returned ONCE — persist it immediately and never log it.
             ``agent["clientId"]`` (public, non-secret) is always set.
+
+        Raises:
+            ValueError: If ``data`` has no non-empty string ``name`` (be's
+                ``CreateAgentDto`` requires it); no request is sent.
         """
+        if not isinstance(data.get("name"), str) or not data["name"]:
+            raise ValueError("data['name'] is required: a non-empty string (CreateAgentDto)")
         result: AgentCreateResult = self._http.post(self._base, json=data)
         return result
 

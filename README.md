@@ -769,7 +769,8 @@ for row in client.agents.poll_pending_tasks(
 ```
 
 `agents.create()` returns be's create envelope (`AgentCreateResult`), not the
-bare agent — the agent is under `"agent"`:
+bare agent — the agent is under `"agent"`. `data["name"]` is required (be's `CreateAgentDto`):
+a missing or empty `name` raises `ValueError` before any request.
 
 ```python
 # type: "AUTONOMOUS" (default) | "SUPERVISED" | "SERVICE" | "ORCHESTRATOR"
@@ -1138,6 +1139,11 @@ agent-runtime caller needs:
   `exchange` / `down_exchange` / `introspect` (token-exchange and introspection) are covered.
 - **`agents/oauth/browser`** admin endpoints (authorize/approve/deny/browser-client CRUD) — only
   the token-exchange side effect is consumed, via `identity` above.
+- **`api-keys`** management (`/organizations/{orgId}/integrations/api-keys` list/create/rotate/
+  metrics/delete, `/users/api-keys`, `/account/api-keys/{id}/rotate`) — keys are issued and rotated
+  in the app; the SDK only accepts an existing key as `api_key`.
+- **`organizations`** CRUD (`POST`/`GET /organizations`, `GET`/`PATCH`/`DELETE
+  /organizations/{orgId}`, `accept-invite`) — the SDK is scoped to one existing org via `org_id`.
 
 This matches `sdk`'s (TypeScript) coverage exactly (no TS↔Python gap). If any of these should
 become SDK-callable, treat it as a new feature request, not a bug in this list.
