@@ -440,10 +440,12 @@ Path("audit-bundle.zip").write_bytes(bundle)
 `proof.list()` accepts `agent_id`, `task_id`, `chain_id`, `state`, `closure`,
 `from_date`, `to_date`, `page`, and `limit` (1–100), preserving the full
 `data`/`total`/`meta` response. `praesidia.proof.PROTECTED_ACTION_STATES` lists
-the known `state` values (an open phase, or the closure once closed); the SDK
-sends `state` unchanged and the API rejects an unknown value with 400. The lower time bound is inclusive and the upper
-bound exclusive. `events()` preserves decimal sequence strings, signatures,
-and redacted `None` payloads without coercing or interpreting them.
+the known `state` values (an open phase, or the closure once closed) and
+`praesidia.proof.PROTECTED_ACTION_CLOSURES` the known `closure` values; the SDK
+sends both unchanged and the API rejects an unknown value with 400. The lower
+time bound is inclusive and the upper bound exclusive. `events()` preserves
+decimal sequence strings, signatures, and redacted `None` payloads without
+coercing or interpreting them.
 
 `audit.export_bundle()` downloads a signed ZIP; `audit.export()` still exports
 ordinary JSON/CSV logs. Signed windows must be greater than zero and at most
