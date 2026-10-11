@@ -192,7 +192,8 @@ class AnalyticsResource:
             days:     Rolling window in days (1..365, default: 30).
 
         Returns:
-            Agent analytics dict.
+            Agent analytics dict. ``responseTimePercentiles`` p50/p95/p99 are
+            ``None`` when the window has no response-time samples.
         """
         if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365:
             raise ValueError("days must be an integer from 1 to 365")

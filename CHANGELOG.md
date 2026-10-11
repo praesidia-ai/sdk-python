@@ -7,6 +7,11 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 
 ### Changed
 
+- **Breaking behavior:** `proof.list(state=...)` raises `ValueError` before any request unless
+  `state` is one of the 18 values in the new `praesidia.proof.PROTECTED_ACTION_STATES` (7 open
+  phases plus the 11 closures); be already answered 400.
+- `analytics.agent_analytics()` documents that `responseTimePercentiles` p50/p95/p99 are `None`
+  when the window has no response-time samples (be 39989432).
 - **Breaking behavior:** a `limit` outside 1..100 now raises `ValueError` client-side on every
   list/stream method (be answers 400 above 100). Same for `page` outside 1..1_000_000.
 - **Breaking behavior:** `agents.create()` raises `ValueError` before any request when `data` has

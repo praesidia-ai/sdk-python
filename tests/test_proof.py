@@ -1,7 +1,12 @@
+import json
+import os
+from pathlib import Path
+
 import pytest
 import respx
 
 from praesidia import ForbiddenError, Praesidia, ResponseTooLargeError
+from praesidia.proof import PROTECTED_ACTION_STATES
 
 BASE = "https://api.test/organizations/org-1"
 
@@ -14,9 +19,9 @@ def client():
 def test_list_preserves_envelope_and_exact_backend_query():
     response = {"data": [{"actionId": "action1", "closure": "SUCCEEDED", "evidenceGrade": "C"}], "total": 102, "meta": {"page": 2, "limit": 10, "total": 102, "totalPages": 11, "hasNextPage": True, "hasPrevPage": True}}
     route = respx.get(f"{BASE}/protected-actions").respond(json=response)
-    assert client().proof.list(agent_id="agent-id",task_id="task-id",chain_id="chain-id",state="OUTCOME_UNKNOWN & review",closure="OUTCOME_UNKNOWN",from_date="2026-09-01T00:00:00+03:00",to_date="2026-09-02T00:00:00+03:00",page=2,limit=10) == response
+    assert client().proof.list(agent_id="agent-id",task_id="task-id",chain_id="chain-id & review",state="OUTCOME_UNKNOWN",closure="OUTCOME_UNKNOWN",from_date="2026-09-01T00:00:00+03:00",to_date="2026-09-02T00:00:00+03:00",page=2,limit=10) == response
     request = route.calls.last.request
-    assert dict(request.url.params) == {"agentId":"agent-id","taskId":"task-id","chainId":"chain-id","state":"OUTCOME_UNKNOWN & review","closure":"OUTCOME_UNKNOWN","from":"2026-09-01T00:00:00+03:00","to":"2026-09-02T00:00:00+03:00","page":"2","limit":"10"}
+    assert dict(request.url.params) == {"agentId":"agent-id","taskId":"task-id","chainId":"chain-id & review","state":"OUTCOME_UNKNOWN","closure":"OUTCOME_UNKNOWN","from":"2026-09-01T00:00:00+03:00","to":"2026-09-02T00:00:00+03:00","page":"2","limit":"10"}
     assert request.headers["Authorization"] == "Bearer pk_personal"
 
 
@@ -49,8 +54,17 @@ def test_default_list_and_access_denial_do_not_become_empty_success():
     assert route.call_count == 1
 
 
+SPEC = Path(os.environ.get("BE_SWAGGER_PATH", Path(__file__).resolve().parents[2] / "be/openapi.json"))
+
+
+@pytest.mark.skipif(not SPEC.is_file() and os.environ.get("REQUIRE_SWAGGER") != "1", reason="Backend OpenAPI spec is not available")
+def test_state_values_match_backend_spec_enum():
+    params = json.loads(SPEC.read_text())["paths"]["/organizations/{orgId}/protected-actions"]["get"]["parameters"]
+    assert sorted(next(p for p in params if p["name"] == "state")["schema"]["enum"]) == sorted(PROTECTED_ACTION_STATES)
+
+
 @pytest.mark.parametrize("query",[
-    {"page":0},{"page":True},{"limit":101},{"limit":1.5},{"closure":"SUCCESS"},
+    {"page":0},{"page":True},{"limit":101},{"limit":1.5},{"closure":"SUCCESS"},{"state":"DISPATCHD"},
     {"from_date":"2026-02-30"},{"from_date":"2026-09-01T24:00:00Z"},
     {"from_date":"2026-09-01T10:00:00"},{"from_date":"2026-09-02","to_date":"2026-09-01"},
 ])

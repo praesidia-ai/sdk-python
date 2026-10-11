@@ -12,6 +12,11 @@ PROTECTED_ACTION_CLOSURES = (
     "SUCCEEDED", "FAILED_NO_EFFECT", "PARTIAL", "REVERSED",
     "DUPLICATE_SUPPRESSED", "OUTCOME_UNKNOWN", "EVIDENCE_INCOMPLETE",
 )
+# ``list(state=...)`` values: an open phase (be ``ProtectedActionPhase``), or the closure once closed.
+PROTECTED_ACTION_STATES = (
+    "PROPOSED", "AUTHORITY_RESOLVED", "POLICY_DECIDED", "PERMIT_ISSUED", "PERMIT_CONSUMED",
+    "DISPATCHED", "AWAITING_OUTCOME", *PROTECTED_ACTION_CLOSURES,
+)
 
 
 class ProofResource:
@@ -37,6 +42,8 @@ class ProofResource:
         evidence_date_range(from_date, to_date)
         if closure is not None and closure not in PROTECTED_ACTION_CLOSURES:
             raise ValueError("closure must be a supported protected-action closure")
+        if state is not None and state not in PROTECTED_ACTION_STATES:
+            raise ValueError("state must be a supported protected-action phase or closure")
         params: dict[str, Any] = {"page": page, "limit": limit}
         for key, value in (("agentId", agent_id), ("taskId", task_id), ("chainId", chain_id), ("state", state), ("closure", closure), ("from", from_date), ("to", to_date)):
             if value is not None:

@@ -439,7 +439,9 @@ Path("audit-bundle.zip").write_bytes(bundle)
 
 `proof.list()` accepts `agent_id`, `task_id`, `chain_id`, `state`, `closure`,
 `from_date`, `to_date`, `page`, and `limit` (1–100), preserving the full
-`data`/`total`/`meta` response. The lower time bound is inclusive and the upper
+`data`/`total`/`meta` response. `state` must be one of
+`praesidia.proof.PROTECTED_ACTION_STATES` (an open phase, or the closure once
+closed); any other value raises `ValueError` before the request. The lower time bound is inclusive and the upper
 bound exclusive. `events()` preserves decimal sequence strings, signatures,
 and redacted `None` payloads without coercing or interpreting them.
 
