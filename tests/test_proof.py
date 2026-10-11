@@ -64,14 +64,17 @@ def test_state_values_match_backend_spec_enum():
 
 
 @respx.mock
-def test_unknown_state_is_sent_unchanged():
+def test_unknown_state_and_closure_are_sent_unchanged():
     route = respx.get(f"{BASE}/protected-actions").respond(200, json={"data": [], "total": 0, "meta": {}})
-    client().proof.list(state="FUTURE_PHASE")
-    assert route.calls.last.request.url.params["state"] == "FUTURE_PHASE"
+    client().proof.list(state="FUTURE_PHASE & review", closure="FUTURE_CLOSURE")
+    url = route.calls.last.request.url
+    assert b"state=FUTURE_PHASE%20%26%20review" in url.query or b"state=FUTURE_PHASE+%26+review" in url.query
+    assert url.params["state"] == "FUTURE_PHASE & review"
+    assert url.params["closure"] == "FUTURE_CLOSURE"
 
 
 @pytest.mark.parametrize("query",[
-    {"page":0},{"page":True},{"limit":101},{"limit":1.5},{"closure":"SUCCESS"},
+    {"page":0},{"page":True},{"limit":101},{"limit":1.5},
     {"from_date":"2026-02-30"},{"from_date":"2026-09-01T24:00:00Z"},
     {"from_date":"2026-09-01T10:00:00"},{"from_date":"2026-09-02","to_date":"2026-09-01"},
 ])

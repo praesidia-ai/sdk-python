@@ -66,7 +66,7 @@ def test_preserves_filters_on_every_page(resource):
 @pytest.mark.parametrize("resource,key", [
     ("agents", "role"), ("agents", "status"), ("agents", "visibility"),
     ("agents", "tier"), ("agents", "scope"), ("connections", "status"),
-    ("workflows", "status"), ("ai_systems", "cross_border_status"),
+    ("ai_systems", "cross_border_status"),
 ])
 def test_rejects_invalid_enum_before_request(resource, key):
     c = client()

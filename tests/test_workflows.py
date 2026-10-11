@@ -124,3 +124,10 @@ def test_workflow_run_list_handles_bare_and_legacy_envelopes():
     assert client.workflows.list_runs("w") == [{"id": "bare"}]
     assert client.workflows.list_runs("w") == [{"id": "legacy"}]
     assert route.call_count == 2
+
+
+@respx.mock
+def test_unknown_status_is_sent_unchanged():
+    route = respx.get(BASE).mock(return_value=httpx.Response(200, json=[]))
+    _client().workflows.list(status="ARCHIVED")
+    assert route.calls.last.request.url.params["status"] == "ARCHIVED"

@@ -18,7 +18,7 @@ from ._pagination import list_query, normalize_paged_envelope, paginate_all, val
 class WorkflowListFilters(TypedDict, total=False):
     """Optional filters shared by workflow list, list_page and list_all."""
 
-    status: Literal["DRAFT", "ACTIVE", "INACTIVE"] | None
+    status: Literal["DRAFT", "ACTIVE", "INACTIVE"] | str | None  # known values; others sent unchanged, be validates
 
 
 class WorkflowsResource:
@@ -56,7 +56,7 @@ class WorkflowsResource:
 
     def list_page(self, page: int = 1, limit: int = 20, **filters: Unpack[WorkflowListFilters]) -> dict[str, Any]:
         """Like :meth:`list`, but returns be's full pagination envelope (SCAN2-011)."""
-        params = list_query(page, limit, filters, {"status": "status"}, {"status": ("DRAFT", "ACTIVE", "INACTIVE")})
+        params = list_query(page, limit, filters, {"status": "status"}, {})
         result = self._http.get(self._base, params=params)
         return normalize_paged_envelope(result, "workflows")
 

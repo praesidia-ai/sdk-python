@@ -36,16 +36,15 @@ class ProofResource:
     ) -> dict[str, Any]:
         """Return data/total/meta unchanged; from is inclusive and to exclusive.
 
-        ``state`` known values are in ``PROTECTED_ACTION_STATES``; it is sent
-        unchanged, and the API answers 400 for an unknown value.
+        ``state`` and ``closure`` known values are in ``PROTECTED_ACTION_STATES``
+        and ``PROTECTED_ACTION_CLOSURES``; both are sent unchanged, and the API
+        answers 400 for an unknown value.
         """
         if isinstance(page, bool) or not isinstance(page, int) or page < 1:
             raise ValueError("page must be a positive integer")
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
             raise ValueError("limit must be an integer between 1 and 100")
         evidence_date_range(from_date, to_date)
-        if closure is not None and closure not in PROTECTED_ACTION_CLOSURES:
-            raise ValueError("closure must be a supported protected-action closure")
         params: dict[str, Any] = {"page": page, "limit": limit}
         for key, value in (("agentId", agent_id), ("taskId", task_id), ("chainId", chain_id), ("state", state), ("closure", closure), ("from", from_date), ("to", to_date)):
             if value is not None:

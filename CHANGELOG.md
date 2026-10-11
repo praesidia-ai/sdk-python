@@ -10,6 +10,8 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 - Added `praesidia.proof.PROTECTED_ACTION_STATES`: the 18 known `proof.list(state=...)` values
   (7 open phases plus the 11 closures). `state` stays `str` and is sent unchanged; be answers 400
   for an unknown value.
+- `proof.list(closure=...)` and `workflows.list`/`list_page`/`list_all(status=...)` send the value
+  unchanged; they no longer raise `ValueError` on a value outside the known list (be validates).
 - `analytics.agent_analytics()` documents that `responseTimePercentiles` p50/p95/p99 are `None`
   when the window has no response-time samples (be 39989432).
 - **Breaking behavior:** a `limit` outside 1..100 now raises `ValueError` client-side on every
