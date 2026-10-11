@@ -63,8 +63,15 @@ def test_state_values_match_backend_spec_enum():
     assert sorted(next(p for p in params if p["name"] == "state")["schema"]["enum"]) == sorted(PROTECTED_ACTION_STATES)
 
 
+@respx.mock
+def test_unknown_state_is_sent_unchanged():
+    route = respx.get(f"{BASE}/protected-actions").respond(200, json={"data": [], "total": 0, "meta": {}})
+    client().proof.list(state="FUTURE_PHASE")
+    assert route.calls.last.request.url.params["state"] == "FUTURE_PHASE"
+
+
 @pytest.mark.parametrize("query",[
-    {"page":0},{"page":True},{"limit":101},{"limit":1.5},{"closure":"SUCCESS"},{"state":"DISPATCHD"},
+    {"page":0},{"page":True},{"limit":101},{"limit":1.5},{"closure":"SUCCESS"},
     {"from_date":"2026-02-30"},{"from_date":"2026-09-01T24:00:00Z"},
     {"from_date":"2026-09-01T10:00:00"},{"from_date":"2026-09-02","to_date":"2026-09-01"},
 ])
