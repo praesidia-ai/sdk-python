@@ -20,7 +20,12 @@ from collections.abc import Iterator
 from typing import Any
 
 from ._http import HttpClient, path_segment
-from ._pagination import normalize_paged_envelope, paginate_all, validate_limit, validate_page
+from ._pagination import (
+    normalize_paged_envelope,
+    paginate_all,
+    validate_limit,
+    validate_page,
+)
 from .exceptions import PraesidiaConfigError
 
 

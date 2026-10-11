@@ -12,7 +12,13 @@ from collections.abc import Iterator
 from typing import Any, Literal, TypedDict, Unpack
 
 from ._http import HttpClient, path_segment
-from ._pagination import list_query, normalize_paged_envelope, paginate_all, validate_limit, validate_page
+from ._pagination import (
+    list_query,
+    normalize_paged_envelope,
+    paginate_all,
+    validate_limit,
+    validate_page,
+)
 
 
 class WorkflowListFilters(TypedDict, total=False):
