@@ -45,17 +45,17 @@ def list_query(
     limit: int,
     filters: Mapping[str, Any],
     names: dict[str, str],
-    enums: dict[str, tuple[str, ...]],
 ) -> dict[str, Any]:
-    """Map public snake-case filters to the backend's query DTO fields."""
+    """Map public snake-case filters to the backend's query DTO fields.
+
+    Enum values are sent unchanged: be validates them, so a value be adds later still works.
+    """
     params: dict[str, Any] = {"page": validate_page(page), "limit": validate_limit(limit)}
     for key, value in filters.items():
         if key not in names:
             raise ValueError(f"Unknown list filter: {key}")
         if value is None:
             continue
-        if key in enums and value not in enums[key]:
-            raise ValueError(f"{key} must be one of {enums[key]}; got {value!r}")
         params[names[key]] = value
     return params
 

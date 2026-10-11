@@ -241,13 +241,12 @@ class AuditResource:
         Args:
             from_date: ISO 8601 start date/time.
             to_date:   ISO 8601 end date/time.
-            format:    Export format — ``"json"`` or ``"csv"`` (default: ``"json"``).
+            format:    Export format — ``"json"`` or ``"csv"`` (default: ``"json"``);
+                sent unchanged, be validates.
 
         Returns:
             Raw export bytes.
         """
-        if format not in ("json", "csv"):
-            raise ValueError("format must be 'json' or 'csv'")
         params: dict[str, Any] = {"format": format}
         if from_date is not None:
             params["startDate"] = from_date

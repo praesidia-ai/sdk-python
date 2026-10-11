@@ -107,10 +107,6 @@ class MemoryResource:
             )
         if source_type == "IMPORT" and not access_source_id:
             raise ValueError("Imported memory requires access_source_id")
-        if source_type is not None and source_type not in self.SOURCE_TYPES:
-            raise ValueError(
-                f"source_type must be one of {self.SOURCE_TYPES}; got {source_type!r}"
-            )
         if (
             retention_regime is not None
             and retention_regime not in self.RETENTION_REGIMES
@@ -171,10 +167,6 @@ class MemoryResource:
         Returns:
             A list of memory dicts (unwrapped from the pagination envelope).
         """
-        if source_type is not None and source_type not in self.SOURCE_TYPES:
-            raise ValueError(
-                f"source_type must be one of {self.SOURCE_TYPES}; got {source_type!r}"
-            )
         params: dict[str, Any] = {"page": validate_page(page), "limit": validate_limit(limit)}
         if memory_key is not None:
             params["memoryKey"] = memory_key

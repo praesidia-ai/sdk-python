@@ -12,6 +12,10 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
   for an unknown value.
 - `proof.list(closure=...)` and `workflows.list`/`list_page`/`list_all(status=...)` send the value
   unchanged; they no longer raise `ValueError` on a value outside the known list (be validates).
+- Every remaining enum filter/argument is sent unchanged instead of raising `ValueError` before the
+  request: `agents.list` role/status/visibility/tier/scope, `connections.list(status=...)` and
+  `connections.update_status`, `ai_systems.list_relationships(cross_border_status=...)` and
+  `list_lifecycle_requests(status=...)`, `memory.create`/`list(source_type=...)`, `audit.export(format=...)`.
 - `analytics.agent_analytics()` documents that `responseTimePercentiles` p50/p95/p99 are `None`
   when the window has no response-time samples (be 39989432).
 - **Breaking behavior:** a `limit` outside 1..100 now raises `ValueError` client-side on every

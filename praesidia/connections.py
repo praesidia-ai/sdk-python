@@ -19,7 +19,7 @@ class ConnectionListFilters(TypedDict, total=False):
     client_agent_id: str | None
     server_agent_id: str | None
     mcp_server_id: str | None
-    status: Literal["ACTIVE", "IDLE", "ERROR", "PENDING", "DISCONNECTED"] | None
+    status: Literal["ACTIVE", "IDLE", "ERROR", "PENDING", "DISCONNECTED"] | str | None  # known values; others sent unchanged, be validates
     search: str | None
 
 
@@ -67,7 +67,7 @@ class ConnectionsResource:
 
     def list_page(self, page: int = 1, limit: int = 20, **filters: Unpack[ConnectionListFilters]) -> dict[str, Any]:
         """Like :meth:`list`, but returns be's full pagination envelope (SCAN2-011)."""
-        params = list_query(page, limit, filters, _FILTER_NAMES, {"status": self.STATUSES})
+        params = list_query(page, limit, filters, _FILTER_NAMES)
         result = self._http.get(self._base, params=params)
         return normalize_paged_envelope(result, "connections")
 
@@ -140,13 +140,11 @@ class ConnectionsResource:
 
         Args:
             connection_id: UUID of the connection.
-            status:        One of :attr:`STATUSES` (uppercase).
+            status:        Known values in :attr:`STATUSES` (uppercase); sent unchanged, be validates.
 
         Returns:
             Updated connection dict.
         """
-        if status not in self.STATUSES:
-            raise ValueError(f"status must be one of {self.STATUSES}; got {status!r}")
         return self._http.patch(
             f"{self._base}/{path_segment(connection_id, 'connection_id')}/status",
             json={"status": status},

@@ -68,12 +68,14 @@ def test_preserves_filters_on_every_page(resource):
     ("agents", "tier"), ("agents", "scope"), ("connections", "status"),
     ("ai_systems", "cross_border_status"),
 ])
-def test_rejects_invalid_enum_before_request(resource, key):
+def test_unknown_enum_value_is_sent_unchanged(resource, key):
+    # be validates enums; an installed SDK must not block a value be adds later.
+    respx.route(url__startswith=BASE).mock(return_value=httpx.Response(200, json={"data": []}))
     c = client()
     call = c.ai_systems.list_relationships if resource == "ai_systems" else getattr(c, resource).list
-    with pytest.raises(ValueError, match=key):
-        call(**{key: "invalid"})
-    assert not respx.calls
+    call(**{key: "FUTURE"})
+    params = respx.calls.last.request.url.params
+    assert params[re.sub(r"_(.)", lambda m: m[1].upper(), key)] == "FUTURE"
 
 
 @respx.mock
@@ -93,9 +95,8 @@ def test_lifecycle_queue_defaults_and_bare_response():
     req = respx.get(f"{BASE}/ai-systems/lifecycle-requests").mock(return_value=httpx.Response(200, json=[{"id": "pending"}]))
     assert client().ai_systems.list_lifecycle_requests() == [{"id": "pending"}]
     assert "status" not in req.calls.last.request.url.params
-    with pytest.raises(ValueError, match="status"):
-        client().ai_systems.list_lifecycle_requests(status="invalid")
-    assert req.call_count == 1
+    client().ai_systems.list_lifecycle_requests(status="FUTURE")
+    assert req.calls.last.request.url.params["status"] == "FUTURE"
 
 
 @respx.mock

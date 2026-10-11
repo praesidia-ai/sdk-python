@@ -87,12 +87,12 @@ class AgentListFilters(TypedDict, total=False):
 
     name: str | None
     search: str | None
-    role: Literal["CLIENT", "SERVER"] | None
-    status: Literal["ACTIVE", "INACTIVE", "SUSPENDED", "QUARANTINED", "REVOKED"] | None
+    role: Literal["CLIENT", "SERVER"] | str | None  # known values; others sent unchanged, be validates
+    status: Literal["ACTIVE", "INACTIVE", "SUSPENDED", "QUARANTINED", "REVOKED"] | str | None
     type: str | None
-    visibility: Literal["PRIVATE", "TEAM", "ORGANIZATION", "PUBLIC"] | None
-    tier: Literal["MANAGED", "OBSERVED"] | None
-    scope: Literal["own", "organization"] | None
+    visibility: Literal["PRIVATE", "TEAM", "ORGANIZATION", "PUBLIC"] | str | None
+    tier: Literal["MANAGED", "OBSERVED"] | str | None
+    scope: Literal["own", "organization"] | str | None
     capability: str | None
     capability_exact: str | None
     skill_tag: str | None
@@ -106,15 +106,6 @@ _FILTER_NAMES = {
     "capability": "capability", "capability_exact": "capabilityExact",
     "skill_tag": "skillTag", "input_mode": "inputMode", "output_mode": "outputMode",
 }
-_FILTER_ENUMS = {
-    "role": ("CLIENT", "SERVER"),
-    "status": ("ACTIVE", "INACTIVE", "SUSPENDED", "QUARANTINED", "REVOKED"),
-    "visibility": ("PRIVATE", "TEAM", "ORGANIZATION", "PUBLIC"),
-    "tier": ("MANAGED", "OBSERVED"),
-    "scope": ("own", "organization"),
-}
-
-
 class AgentsResource:
     """
     Manage AI agents within an organisation.
@@ -151,7 +142,7 @@ class AgentsResource:
 
     def list_page(self, page: int = 1, limit: int = 20, **filters: Unpack[AgentListFilters]) -> dict[str, Any]:
         """Like :meth:`list`, but returns be's full pagination envelope (SCAN2-011)."""
-        params = list_query(page, limit, filters, _FILTER_NAMES, _FILTER_ENUMS)
+        params = list_query(page, limit, filters, _FILTER_NAMES)
         result = self._http.get(self._base, params=params)
         return normalize_paged_envelope(result, "agents")
 

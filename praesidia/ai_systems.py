@@ -348,8 +348,6 @@ class AiSystemsResource:
         limit: int = 20,
     ) -> dict[str, Any]:
         """Like :meth:`list_lifecycle_requests` but returns ``{data, total, meta}``; omitting status uses the server's PENDING queue."""
-        if status is not None and status not in self.LIFECYCLE_REQUEST_STATUSES:
-            raise ValueError(f"status must be one of {self.LIFECYCLE_REQUEST_STATUSES}")
         params = _query(page, limit, status=status, aiSystemId=ai_system_id)
         result = self._http.get(f"{self._systems_base}/lifecycle-requests", params=params)
         return normalize_paged_envelope(result, "data")
@@ -784,8 +782,6 @@ class AiSystemsResource:
             raise ValueError(
                 f"relationship_type must be one of {self.RELATIONSHIP_TYPES}; got {relationship_type!r}"
             )
-        if cross_border_status is not None and cross_border_status not in self.CROSS_BORDER_STATUSES:
-            raise ValueError(f"cross_border_status must be one of {self.CROSS_BORDER_STATUSES}")
         params = _query(
             page,
             limit,

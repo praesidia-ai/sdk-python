@@ -190,11 +190,6 @@ def test_export_sends_format_and_date_range():
     }
 
 
-def test_export_rejects_unsupported_format_before_network():
-    with pytest.raises(ValueError, match="format"):
-        _client().audit.export(format="xml")
-
-
 def test_list_rejects_resource_type_kwarg():
     # Breaking signature change (documented in the README changelog): the
     # parameter was removed because it always 400'd — no working caller

@@ -62,7 +62,7 @@ class WorkflowsResource:
 
     def list_page(self, page: int = 1, limit: int = 20, **filters: Unpack[WorkflowListFilters]) -> dict[str, Any]:
         """Like :meth:`list`, but returns be's full pagination envelope (SCAN2-011)."""
-        params = list_query(page, limit, filters, {"status": "status"}, {})
+        params = list_query(page, limit, filters, {"status": "status"})
         result = self._http.get(self._base, params=params)
         return normalize_paged_envelope(result, "workflows")
 

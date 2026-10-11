@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import httpx
-import pytest
 import respx
 
 from praesidia import Praesidia
@@ -85,7 +84,3 @@ def test_connection_lifecycle_routes_and_status_enum():
     assert delete.called
 
 
-@pytest.mark.parametrize("status", ["active", "INACTIVE", "", None])
-def test_connection_status_rejects_values_the_backend_enum_rejects(status):
-    with pytest.raises(ValueError, match="status"):
-        _client().connections.update_status("c", status)

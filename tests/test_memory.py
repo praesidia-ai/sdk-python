@@ -87,8 +87,6 @@ def test_create_uses_exact_backend_memory_enums():
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
-        ({"source_type": "agent"}, "source_type"),
-        ({"source_type": "TOOL"}, "source_type"),
         ({"retention_regime": "sox"}, "retention_regime"),
         ({"retention_regime": "SOX"}, "retention_regime"),
         ({"retention_days": 0}, "retention_days"),
@@ -113,11 +111,6 @@ def test_create_rejects_invalid_or_silently_ignored_values(kwargs, message):
 def test_create_rejects_invalid_content_before_network(content):
     with pytest.raises(ValueError, match="content"):
         _client().memory.create(content)
-
-
-def test_list_rejects_invalid_source_type_before_network():
-    with pytest.raises(ValueError, match="source_type"):
-        _client().memory.list(source_type="agent")
 
 
 @respx.mock
