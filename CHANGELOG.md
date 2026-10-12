@@ -99,7 +99,7 @@ change below. It is the first version intended for the PyPI registry.
   `before_browser_action` now fail **closed** on a decision-API outage (network error, timeout,
   408 / 5xx, malformed response): they raise `InteractionDecisionUnavailableError` instead of
   returning `decision=None`. `DEFAULT_FAIL_MODES` is now `tool_call` / `browser` /
-  `exec` / `fs_write`: `"closed"`, `fs_read`: `"open"`. A tool call or browser action leaves the
+  `exec` / `fs_write` / `fs_read`: `"closed"` (main already closed fs reads too). A tool call or browser action leaves the
   process and usually cannot be undone, the same reason exec and fs writes already failed closed.
   Migration: `fail_mode={"tool_call": "open", "browser": "open"}` restores the old behaviour (and
   results are then `degraded=True`). 429 and other 4xx still raise on every hook. README: the
