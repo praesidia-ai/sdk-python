@@ -448,3 +448,55 @@ def test_slow_attempt_past_deadline_is_not_retried(monkeypatch):
     with pytest.raises(Exception):
         client.get("/health")
     assert calls["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# PRA-70: a transport failure while the 2xx body is read is retried
+# ---------------------------------------------------------------------------
+
+
+class _ResetMidBody(httpx.SyncByteStream):
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    def __iter__(self):
+        yield b'{"ok":'
+        raise self._exc
+
+
+def _body_failure_route(respx_mock, exc_factory, method="GET"):
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(200, stream=_ResetMidBody(exc_factory(request)))
+        return httpx.Response(200, json={"ok": True})
+
+    respx_mock.route(method=method, url="https://test.local/x").mock(side_effect=handler)
+    return calls
+
+
+@pytest.mark.parametrize(
+    "exc_factory",
+    [
+        lambda r: httpx.ReadError("connection reset", request=r),
+        lambda r: httpx.ReadTimeout("read timed out", request=r),
+    ],
+    ids=["reset", "timeout"],
+)
+def test_get_body_transport_failure_is_retried(respx_mock, exc_factory):
+    calls = _body_failure_route(respx_mock, exc_factory)
+    client = HttpClient(api_key="k", org_id="o", base_url="https://test.local", retry=FAST_RETRY)
+    assert client.get("/x") == {"ok": True}
+    assert calls["n"] == 2
+
+
+def test_bare_post_body_transport_failure_sends_once(respx_mock):
+    calls = _body_failure_route(
+        respx_mock, lambda r: httpx.ReadError("connection reset", request=r), method="POST"
+    )
+    client = HttpClient(api_key="k", org_id="o", base_url="https://test.local", retry=FAST_RETRY)
+    with pytest.raises(httpx.ReadError):
+        client.post("/x", json={})
+    assert calls["n"] == 1
