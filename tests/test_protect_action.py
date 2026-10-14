@@ -56,6 +56,29 @@ def test_success_returns_dispatch_result_and_sends_correct_body():
     }
 
 
+@respx.mock
+@pytest.mark.parametrize("method", ["protect_action", "call_mcp_tool"])
+def test_structured_only_result_keeps_structured_content(method):
+    """PRA-197 — be returns MCP structuredContent; the SDK must not drop it."""
+    structured = {"records": [{"id": 1}, {"id": 2}]}
+    respx.post(CALL_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "success": True,
+                "content": [],
+                "structuredContent": structured,
+                "latencyMs": 5,
+            },
+        )
+    )
+
+    result = getattr(_client().agents, method)("srv-1", "search")
+
+    assert result["content"] == []
+    assert result["structuredContent"] == structured
+
+
 # PA-0026 — these are the tests that would have caught the original
 # heuristic bug: it decided "pre-dispatch denial?" via
 # `errorCode != 'TOOL_ERROR'`, but `'TOOL_ERROR'` is never present in this

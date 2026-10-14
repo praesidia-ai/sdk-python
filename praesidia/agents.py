@@ -458,7 +458,8 @@ class AgentsResource:
             timeout_ms:       Optional per-call timeout in milliseconds.
 
         Returns:
-            The tool result dict.
+            The tool result dict, including ``structuredContent`` when the
+            tool returned one (see :meth:`protect_action`).
         """
         headers = tool_call_headers_from_task(task) if task else {}
         if capability_token:
@@ -586,7 +587,9 @@ class AgentsResource:
                         it today.
 
         Returns:
-            The tool result dict on a non-denied dispatch.
+            The tool result dict on a non-denied dispatch. It carries the
+            tool's MCP ``structuredContent`` (a JSON object) when the tool
+            returned one; a structured-only result has an empty ``content``.
 
         Raises:
             UnsupportedProtectedActionTargetError: ``protocol`` is not ``"mcp"``.

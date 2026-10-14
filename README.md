@@ -836,6 +836,8 @@ try:
         arguments={"to": "user@example.com", "subject": "Hi"},
     )
     # result["success"] / result["content"] — the tool's own dispatch outcome.
+    # result.get("structuredContent") — the tool's MCP structured JSON object,
+    # when it returned one (a structured-only result has an empty "content").
     # result.get("actionId") / .get("closure") / .get("evidenceGrade") are
     # None when the Proof Edge feature is off for the org; absence != failure.
 except ProtectedActionDeniedError as e:
