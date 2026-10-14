@@ -7,6 +7,7 @@ import os
 import re
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from ._crypto import ed25519_verify
 from ._http import HttpClient, path_segment
@@ -23,6 +24,26 @@ def _public_key(pem: str) -> bytes:
 
 def http_target_key_fingerprint(public_key_pem: str) -> str:
     return hashlib.sha256(_public_key(public_key_pem)).hexdigest()
+
+def _normalize_destination(url: str) -> str:
+    """Mirror WHATWG `new URL(x).href` (sdk/src/protected-http.ts:63) for http(s): lowercase scheme/host, default port, dot segments."""
+    u = urlsplit(url)
+    host = u.hostname
+    if u.scheme not in ("http", "https") or not host or u.username is not None or u.password is not None or u.fragment or "#" in url:
+        raise ValueError("Target destination must be an http(s) URL without credentials or fragment")
+    port = u.port
+    if port == {"http": 80, "https": 443}[u.scheme]: port = None
+    segments: list[str] = []
+    parts = (u.path or "/").split("/")[1:]
+    for i, seg in enumerate(parts):
+        if seg.lower() in ("..", "%2e%2e", ".%2e", "%2e."):
+            if segments: segments.pop()
+            if i == len(parts) - 1: segments.append("")
+        elif seg.lower() in (".", "%2e"):
+            if i == len(parts) - 1: segments.append("")
+        else: segments.append(seg)
+    netloc = f"[{host}]" if ":" in host else host
+    return f"{u.scheme}://{netloc}{':' + str(port) if port else ''}/{'/'.join(segments)}{'?' + u.query if u.query or url.endswith('?') else ''}"
 
 def verify_http_receipt(receipt: Any, public_key_pem: str, expected: dict[str, str]) -> bool:
     """Pins come from the verifier's trust configuration, never from receipt contents."""
@@ -50,7 +71,7 @@ def verify_protected_http_result(result: dict[str, Any], original: dict[str, Any
     try:
         if original["targetId"] != target["targetId"]: return False
         request = {"version": "praesidia.http-request.v1", "targetId": target["targetId"],
-            "destination": target["destination"], "targetKeyFingerprint": http_target_key_fingerprint(target["publicKeyPem"]),
+            "destination": _normalize_destination(target["destination"]), "targetKeyFingerprint": http_target_key_fingerprint(target["publicKeyPem"]),
             "method": "POST", "contentType": "application/json", "body": original["body"]}
         expected_closure = {"succeeded": "SUCCEEDED", "failed_no_effect": "FAILED_NO_EFFECT", "partial": "PARTIAL", "unknown": "OUTCOME_UNKNOWN"}.get(result["receipt"]["statement"]["effect"])
         if not expected_closure or result["closure"] != expected_closure: return False

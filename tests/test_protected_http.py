@@ -66,3 +66,15 @@ def test_installation_binding_is_exact_immutable_and_sent_on_prepare_and_resume(
     with pytest.raises(ValueError, match='conflicts'): client.protected_http.prepare(changed)
     assert all(route.call_count == 1 for route in routes)
     with pytest.raises(ValueError, match='UUID'): Praesidia(api_key='pk_test', org_id=FIXTURE['organizationId'], runtime_installation_id='../other')
+
+
+@pytest.mark.parametrize('destination', ['https://TARGET.EXAMPLE:443/execute', 'https://target.example/a/../execute', 'https://target.example/./execute'])
+def test_equivalent_destination_forms_verify(destination):
+    target = {**FIXTURE['target'], 'destination': destination}
+    assert verify_protected_http_result(FIXTURE['response'], FIXTURE['request'], target, FIXTURE['organizationId'])
+
+
+@pytest.mark.parametrize('destination', ['https://target.example/EXECUTE', 'http://target.example/execute', 'https://target.example:8443/execute', 'ftp://target.example/execute'])
+def test_changed_destination_still_fails(destination):
+    target = {**FIXTURE['target'], 'destination': destination}
+    assert not verify_protected_http_result(FIXTURE['response'], FIXTURE['request'], target, FIXTURE['organizationId'])
