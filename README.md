@@ -1106,7 +1106,7 @@ client = Praesidia(
         max_attempts=3,      # default: 3 (i.e. up to 2 retries)
         base_delay_s=0.25,   # default: 0.25
         max_delay_s=4.0,     # default: 4.0
-        max_elapsed_s=15.0,  # default: 15.0 -- total budget across all attempts
+        max_elapsed_s=15.0,  # default: 15.0 -- hard total deadline: each attempt's timeout is capped to the time left; Retry-After never extends it
     ),
 )
 

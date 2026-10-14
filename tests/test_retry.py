@@ -378,3 +378,73 @@ def test_assert_idempotency_key_supported_rejects_other_post_paths():
 def test_assert_idempotency_key_supported_rejects_every_patch_path():
     with pytest.raises(ValueError, match="does not honour Idempotency-Key"):
         assert_idempotency_key_supported("PATCH", "/organizations/org_1/tasks")
+
+
+# ---------------------------------------------------------------------------
+# PRA-85: overall deadline bounds every attempt
+# ---------------------------------------------------------------------------
+
+
+class _Clock:
+    def __init__(self):
+        self.now = 100.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, s):
+        self.now += s
+
+
+def _deadline_client(monkeypatch, fake_get, **cfg):
+    clock = _Clock()
+    monkeypatch.setattr("praesidia._http.time", clock)
+    _patch_bounded_request(monkeypatch, "GET", fake_get)
+    retry = RetryConfig(max_attempts=3, base_delay_s=0.04, max_delay_s=0.04, max_elapsed_s=0.1, **cfg)
+    return clock, HttpClient(api_key="k", org_id="o", base_url="https://test.local", retry=retry, timeout=5.0)
+
+
+def test_each_attempt_is_capped_to_remaining_budget(monkeypatch):
+    seen: list[float] = []
+
+    def fake_get(url, **kwargs):
+        seen.append(kwargs["timeout"])
+        clock.now += 0.01
+        return httpx.Response(503, request=httpx.Request("GET", url))
+
+    clock, client = _deadline_client(monkeypatch, fake_get)
+    with pytest.raises(Exception):
+        client.get("/health")
+    assert seen[0] == pytest.approx(0.1)  # first attempt gets the whole budget, not 5s
+    assert all(t <= 0.1 for t in seen)
+    assert seen[1] < seen[0]
+
+
+def test_no_retry_starts_after_deadline_and_retry_after_cannot_extend(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_get(url, **kwargs):
+        calls["n"] += 1
+        return httpx.Response(
+            503, headers={"Retry-After": "30"}, request=httpx.Request("GET", url)
+        )
+
+    clock, client = _deadline_client(monkeypatch, fake_get)
+    with pytest.raises(Exception):
+        client.get("/health")
+    assert calls["n"] == 1
+    assert clock.now == pytest.approx(100.0)  # did not sleep 30s
+
+
+def test_slow_attempt_past_deadline_is_not_retried(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_get(url, **kwargs):
+        calls["n"] += 1
+        clock.now += 0.2
+        return httpx.Response(503, request=httpx.Request("GET", url))
+
+    clock, client = _deadline_client(monkeypatch, fake_get)
+    with pytest.raises(Exception):
+        client.get("/health")
+    assert calls["n"] == 1

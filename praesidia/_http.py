@@ -7,6 +7,7 @@ future release via httpx.AsyncClient without changing the resource API.
 
 from __future__ import annotations
 
+import contextvars
 import ipaddress
 import json
 import os
@@ -70,6 +71,28 @@ PERMIT_HEADER = "X-Praesidia-Permit"
 #: value as ASCII, so obs-text (0x80-0xff) is refused here where the TS SDK allows it.
 _HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 _HEADER_VALUE = re.compile(r"[\t\x20-\x7e]*")
+
+
+#: Time left in the active retry budget; set per attempt by ``_send_with_retry``.
+_remaining_s: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "praesidia_retry_remaining_s", default=None
+)
+#: Floor so an exhausted budget never yields a non-positive httpx timeout.
+_MIN_ATTEMPT_S = 0.001
+
+
+def _cap_timeout(timeout: Any) -> Any:
+    """Lower ``timeout`` (float or httpx.Timeout) to the remaining retry budget."""
+    cap = _remaining_s.get()
+    if cap is None:
+        return timeout
+    if isinstance(timeout, httpx.Timeout):
+        return httpx.Timeout(
+            **{k: cap if v is None else min(v, cap) for k, v in
+               (("connect", timeout.connect), ("read", timeout.read),
+                ("write", timeout.write), ("pool", timeout.pool))}
+        )
+    return cap if timeout is None else min(timeout, cap)
 
 
 def path_segment(value: str, name: str = "path segment") -> str:
@@ -343,8 +366,12 @@ class HttpClient:
 
         cfg = self._retry
         start = time.monotonic()
+        deadline = start + cfg.max_elapsed_s
         attempt = 1
         while True:
+            # Every attempt (headers + body) is capped to the time left in the
+            # overall budget; the first attempt gets the whole budget.
+            token = _remaining_s.set(max(deadline - time.monotonic(), _MIN_ATTEMPT_S))
             try:
                 response = do_request()
             except httpx.HTTPError:
@@ -357,6 +384,8 @@ class HttpClient:
                 time.sleep(delay)
                 attempt += 1
                 continue
+            finally:
+                _remaining_s.reset(token)
 
             if attempt < cfg.max_attempts and is_retryable_status(response.status_code):
                 elapsed = time.monotonic() - start
@@ -368,6 +397,7 @@ class HttpClient:
                     if retry_after is not None
                     else compute_backoff_s(attempt, cfg.base_delay_s, cfg.max_delay_s)
                 )
+                # Retry-After can never push past the overall deadline.
                 if elapsed + delay >= cfg.max_elapsed_s:
                     return response
                 time.sleep(delay)
@@ -442,7 +472,7 @@ class HttpClient:
                 success_limit=_MAX_JSON_RESPONSE_BYTES,
                 headers=self._merged_headers(headers, include_auth=include_auth),
                 params=params,
-                timeout=self._timeout if timeout is None else min(self._timeout, timeout),
+                timeout=_cap_timeout(self._timeout if timeout is None else min(self._timeout, timeout)),
             )
 
         r = self._send_with_retry(True, do)
@@ -481,7 +511,7 @@ class HttpClient:
                 success_limit=_MAX_JSON_RESPONSE_BYTES,
                 headers=self._merged_headers(merged),
                 json=json,
-                timeout=self._timeout,
+                timeout=_cap_timeout(self._timeout),
             )
 
         r = self._send_with_retry(idempotency_key is not None, do)
@@ -521,7 +551,7 @@ class HttpClient:
                 success_limit=_MAX_JSON_RESPONSE_BYTES,
                 headers=self._merged_headers(merged),
                 json=json,
-                timeout=self._timeout,
+                timeout=_cap_timeout(self._timeout),
             )
 
         r = self._send_with_retry(idempotency_key is not None, do)
@@ -552,7 +582,7 @@ class HttpClient:
                 success_limit=_MAX_JSON_RESPONSE_BYTES,
                 headers=self._merged_headers(headers),
                 json=json,
-                timeout=self._timeout,
+                timeout=_cap_timeout(self._timeout),
             )
 
         r = self._send_with_retry(True, do)
@@ -573,7 +603,7 @@ class HttpClient:
                 path=path,
                 success_limit=_MAX_ERROR_RESPONSE_BYTES,
                 headers=self._merged_headers(None),
-                timeout=self._timeout,
+                timeout=_cap_timeout(self._timeout),
             )
 
         r = self._send_with_retry(True, do)
@@ -601,7 +631,7 @@ class HttpClient:
                 path=path,
                 success_limit=_MAX_JSON_RESPONSE_BYTES,
                 headers=self._merged_headers(None),
-                timeout=self._timeout,
+                timeout=_cap_timeout(self._timeout),
             )
 
         r = self._send_with_retry(True, do)
@@ -639,7 +669,7 @@ class HttpClient:
                 success_limit=_MAX_DOWNLOAD_RESPONSE_BYTES,
                 headers=self._merged_headers(None, include_auth=include_auth),
                 params=params,
-                timeout=_DOWNLOAD_TIMEOUT if timeout is None else timeout,
+                timeout=_cap_timeout(_DOWNLOAD_TIMEOUT if timeout is None else timeout),
             )
 
         return self._send_with_retry(True, do)
