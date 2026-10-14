@@ -426,8 +426,12 @@ class HttpClient:
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         include_auth: bool = True,
+        timeout: float | None = None,
     ) -> Any:
-        """Send a GET request and return the parsed JSON body. Always idempotent -- retried per policy."""
+        """Send a GET request and return the parsed JSON body. Always idempotent -- retried per policy.
+
+        ``timeout`` lowers (never raises) the client's per-request timeout for this call.
+        """
         url = f"{self._base}{path}"
 
         def do() -> httpx.Response:
@@ -438,7 +442,7 @@ class HttpClient:
                 success_limit=_MAX_JSON_RESPONSE_BYTES,
                 headers=self._merged_headers(headers, include_auth=include_auth),
                 params=params,
-                timeout=self._timeout,
+                timeout=self._timeout if timeout is None else min(self._timeout, timeout),
             )
 
         r = self._send_with_retry(True, do)

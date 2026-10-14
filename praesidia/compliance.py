@@ -121,7 +121,9 @@ class ComplianceResource:
 
         Args:
             report_id:     The id returned by :meth:`request_report`.
-            timeout:       Give up after this many seconds (default: 120).
+            timeout:       Overall deadline in seconds (default: 120). Each status
+                           request is capped at the time remaining, and a response
+                           that arrives after the deadline is not accepted.
             poll_interval: Delay between status polls in seconds (default: 2).
 
         Returns:
@@ -136,20 +138,33 @@ class ComplianceResource:
             poll_interval, "poll_interval", allow_zero=True
         )
         deadline = time.monotonic() + timeout
+        path = f"{self._base}/{path_segment(report_id, 'report_id')}"
+        last: Any = None
+
+        def timed_out() -> TimeoutError:
+            return TimeoutError(
+                f"Timed out after {timeout}s waiting for Praesidia report "
+                f"{report_id} (last status: {last})"
+            )
+
         while True:
-            status = self.get_status(report_id)
-            if status.get("status") == "failed":
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise timed_out()
+            # Each poll is bounded by what is left of the overall deadline.
+            status = self._http.get(path, timeout=remaining)
+            last = status.get("status")
+            if time.monotonic() >= deadline:
+                raise timed_out()  # a response after the deadline is not accepted
+            if last == "failed":
                 raise PraesidiaError(
                     f"Praesidia report {report_id} failed: "
                     f"{status.get('error') or 'unknown error'}"
                 )
             if status.get("ready"):
                 return status
-            if time.monotonic() + poll_interval > deadline:
-                raise TimeoutError(
-                    f"Timed out after {timeout}s waiting for Praesidia report "
-                    f"{report_id} (last status: {status.get('status')})"
-                )
+            if time.monotonic() + poll_interval >= deadline:
+                raise timed_out()  # no poll may start at/after the deadline
             time.sleep(poll_interval)
 
     def generate_and_wait(
@@ -161,7 +176,9 @@ class ComplianceResource:
         Convenience helper: request a new report and poll until it is ready.
 
         Args:
-            timeout:       Give up after this many seconds (default: 120).
+            timeout:       Overall deadline in seconds for the polling phase
+                           (default: 120). It starts after the initial enqueue
+                           returns; the enqueue uses the client timeout.
             poll_interval: Delay between status polls in seconds (default: 2).
 
         Returns:

@@ -179,3 +179,63 @@ def test_generate_and_wait_validates_before_enqueuing(kwargs, message):
         _client().compliance.generate_and_wait(**kwargs)
 
     assert not create_route.called
+
+
+class _Clock:
+    """Deterministic stand-in for the ``time`` module used by compliance.py."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    c = _Clock()
+    monkeypatch.setattr("praesidia.compliance.time", c)
+    return c
+
+
+@respx.mock
+def test_wait_for_report_caps_request_timeout_to_remaining_deadline(clock):
+    seen: list[float] = []
+
+    def handler(request):
+        seen.append(request.extensions["timeout"]["read"])
+        clock.now += 1.0
+        return httpx.Response(200, json=_status("processing", False))
+
+    respx.get(f"{REPORTS}/rep-1").mock(side_effect=handler)
+    with pytest.raises(TimeoutError):
+        _client().compliance.wait_for_report("rep-1", timeout=3.0, poll_interval=0.5)
+
+    assert seen == [3.0, 1.5]  # never the 30s client default, shrinks with the deadline
+
+
+@respx.mock
+def test_wait_for_report_rejects_ready_response_after_deadline(clock):
+    def handler(request):
+        clock.now += 5.0  # slow response lands after the 3s deadline
+        return httpx.Response(200, json=_status("completed", True))
+
+    route = respx.get(f"{REPORTS}/rep-1").mock(side_effect=handler)
+    with pytest.raises(TimeoutError):
+        _client().compliance.wait_for_report("rep-1", timeout=3.0, poll_interval=0.5)
+
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_wait_for_report_starts_no_poll_at_deadline(clock):
+    route = respx.get(f"{REPORTS}/rep-1").mock(
+        return_value=httpx.Response(200, json=_status("processing", False))
+    )
+    with pytest.raises(TimeoutError):
+        _client().compliance.wait_for_report("rep-1", timeout=2.0, poll_interval=1.0)
+
+    assert route.call_count == 2  # polls at t=0 and t=1; a poll at t=2 (the deadline) never starts
