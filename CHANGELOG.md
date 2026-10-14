@@ -5,6 +5,16 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 
 ## Unreleased
 
+### Fixed
+
+- `compliance.wait_for_report` / `generate_and_wait`: `timeout` is now a true overall deadline. Each
+  status request is capped at the time remaining, a response arriving after the deadline raises
+  `TimeoutError` even if the report is ready, and no poll starts at the deadline. For
+  `generate_and_wait` the deadline covers polling only, not the initial enqueue (PRA-261).
+- `TaskHandle` as a context manager: if recording the failed task raises, the application's
+  original exception now propagates (audit error attached as a note) instead of being replaced.
+  A failure while the body succeeded behaves as before (PRA-260).
+
 ### Changed
 
 - Added `praesidia.proof.PROTECTED_ACTION_STATES`: the 18 known `proof.list(state=...)` values

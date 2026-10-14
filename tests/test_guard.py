@@ -14,7 +14,7 @@ import pytest
 import respx
 
 from praesidia.exceptions import GuardrailBlockedError, PraesidiaConfigError
-from praesidia.guard import Guard
+from praesidia.guard import Guard, TaskHandle
 
 BASE_URL = "https://test.local"
 ORG_ID = "org-uuid-123"
@@ -290,6 +290,24 @@ class TestTaskHandleContextManager:
         lines = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
         assert len(lines) == 1
         assert lines[0]["data"]["status"] == "completed"
+
+    def test_audit_failure_on_exception_keeps_the_original_exception(self):
+        def broken_record(*_args):
+            raise RuntimeError("audit down")
+
+        task = TaskHandle(broken_record)
+        with pytest.raises(ValueError, match="boom") as info:
+            with task:
+                raise ValueError("boom")
+        assert any("audit down" in n for n in info.value.__notes__)
+
+    def test_audit_failure_after_clean_body_still_raises(self):
+        def broken_record(*_args):
+            raise RuntimeError("audit down")
+
+        with pytest.raises(RuntimeError, match="audit down"):
+            with TaskHandle(broken_record) as task:
+                task.complete("x")
 
     def test_second_complete_call_is_a_no_op_memoized(self):
         guard = Guard()

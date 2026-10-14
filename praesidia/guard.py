@@ -178,7 +178,11 @@ class TaskHandle:
 
     def __exit__(self, exc_type: Any, exc: BaseException | None, tb: Any) -> Literal[False]:
         if exc is not None:
-            self.fail(exc)
+            try:
+                self.fail(exc)
+            except Exception as audit_err:  # noqa: BLE001 -- the application's exception wins
+                if audit_err is not exc:  # body's own complete() failed: same exception, nothing to attach
+                    exc.add_note(f"praesidia: failed to record the failed task: {audit_err!r}")
         return False  # never suppress the exception
 
 
