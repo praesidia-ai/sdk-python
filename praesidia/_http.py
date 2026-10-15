@@ -81,9 +81,9 @@ _remaining_s: contextvars.ContextVar[float | None] = contextvars.ContextVar(
 _MIN_ATTEMPT_S = 0.001
 
 
-def _cap_timeout(timeout: Any) -> Any:
-    """Lower ``timeout`` (float or httpx.Timeout) to the remaining retry budget."""
-    cap = _remaining_s.get()
+def _cap_timeout(timeout: Any, cap: float | None = None) -> Any:
+    """Lower ``timeout`` (float or httpx.Timeout) to ``cap`` or else the remaining retry budget."""
+    cap = _remaining_s.get() if cap is None else max(cap, _MIN_ATTEMPT_S)
     if cap is None:
         return timeout
     if isinstance(timeout, httpx.Timeout):

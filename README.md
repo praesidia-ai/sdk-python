@@ -1119,6 +1119,15 @@ client_no_retry = Praesidia(api_key="sk-...", org_id="...", retry=False)
 client.agents.update("agent-1", {"name": "Renamed"})  # PATCH — not retried by default
 ```
 
+`max_elapsed_s` is a hard deadline over every attempt, including in-flight header and
+body reads, for the management client and the interaction hooks alike: each attempt's
+httpx timeout is capped to the remaining budget (minimum 1 ms), no retry starts once
+elapsed time plus the delay reaches the budget, and `Retry-After` cannot extend it. With
+`max_elapsed_s=0` the SDK makes exactly one attempt with a 1 ms timeout. httpx's read
+timeout is per-read (idle), so a body that keeps trickling bytes can outlive the budget
+by up to one read; timers have normal event-loop precision. With `retry=False` each
+request gets the full client `timeout`.
+
 To retry a POST/PATCH from a resource method, pass through to
 `client._http.post(..., idempotency_key=...)` / `.patch(...)` directly — and
 only for the three allow-listed routes above (in practice: task

@@ -1034,3 +1034,74 @@ def test_the_token_is_kept_off_the_public_instance():
     h = hooks("sync", capability_token=TOKEN)
     assert TOKEN not in repr(h)
     assert all(v != TOKEN for k, v in vars(h).items() if not k.startswith("_"))
+
+
+# ── PRA-85: the retry budget is a hard total deadline for hook POSTs too ──────
+
+
+class _Clock:
+    def __init__(self):
+        self.now = 100.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, s):
+        self.now += s
+
+
+def _budget(max_elapsed_s=0.1):
+    return RetryConfig(max_attempts=3, base_delay_s=0, max_delay_s=0, max_elapsed_s=max_elapsed_s)
+
+
+@both
+def test_each_hook_attempt_is_capped_to_the_remaining_budget(api, mode, monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr("praesidia.interaction_hooks.time", clock)
+    seen = []
+
+    def handler(request):
+        seen.append(request.extensions["timeout"])
+        clock.now += 0.04
+        return httpx.Response(503) if len(seen) == 1 else httpx.Response(200, json=ALLOW)
+
+    api.mock(side_effect=handler)
+    h = hooks(mode, timeout=5.0, retry=_budget())
+    assert run(h.decide("agent_to_email", EMAIL)) == ALLOW
+    assert [t["read"] for t in seen] == pytest.approx([0.1, 0.06])  # not 5s each
+    assert all(v <= 0.1 for t in seen for v in t.values())
+    assert keys(api)[0] == keys(api)[1]
+
+
+@both
+@pytest.mark.parametrize("retry_after", [None, "30"], ids=["slow-attempt", "retry-after"])
+def test_no_hook_retry_starts_after_the_deadline(api, mode, monkeypatch, retry_after):
+    clock = _Clock()
+    monkeypatch.setattr("praesidia.interaction_hooks.time", clock)
+
+    def handler(request):
+        if retry_after is None:
+            clock.now += 0.2  # this attempt alone overran the 0.1s budget
+        return httpx.Response(503, headers={"Retry-After": retry_after} if retry_after else {})
+
+    api.mock(side_effect=handler)
+    h = hooks(mode, timeout=5.0, retry=_budget())
+    with contextlib.suppress(Exception):
+        run(h.decide("agent_to_email", EMAIL))
+    assert api.call_count == 1
+    assert clock.now <= 100.2  # Retry-After: 30 never slept
+
+
+@both
+def test_zero_hook_budget_makes_one_attempt_with_a_1ms_timeout(api, mode):
+    seen = []
+
+    def handler(request):
+        seen.append(request.extensions["timeout"]["read"])
+        return httpx.Response(503)
+
+    api.mock(side_effect=handler)
+    h = hooks(mode, timeout=5.0, retry=_budget(0))
+    with contextlib.suppress(Exception):
+        run(h.decide("agent_to_email", EMAIL))
+    assert seen == [pytest.approx(0.001)]

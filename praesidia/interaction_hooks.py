@@ -38,6 +38,7 @@ from ._http import (
     _DEFAULT_TIMEOUT,
     CAPABILITY_TOKEN_HEADER,
     HttpClient,
+    _cap_timeout,
     _validate_api_key,
     _validate_idempotency_key,
     _validate_timeout,
@@ -543,7 +544,7 @@ class _SyncPost:
         while True:
             raw = bytearray()
             try:
-                with self.client.stream("POST", path, content=content, headers=headers) as r:
+                with self.client.stream("POST", path, content=content, headers=headers, timeout=_attempt_timeout(self.client, self.retry, start)) as r:
                     for chunk in r.iter_bytes():
                         _append(raw, chunk, r)
             except httpx.RequestError:
@@ -566,7 +567,7 @@ class _AsyncPost:
         while True:
             raw = bytearray()
             try:
-                async with self.client.stream("POST", path, content=content, headers=headers) as r:
+                async with self.client.stream("POST", path, content=content, headers=headers, timeout=_attempt_timeout(self.client, self.retry, start)) as r:
                     async for chunk in r.aiter_bytes():
                         _append(raw, chunk, r)
             except httpx.RequestError:
@@ -615,6 +616,13 @@ def _retry_delay(cfg: RetryConfig | None, attempt: int, start: float, r: httpx.R
     retry_after = None if r is None else parse_retry_after_s(r.headers.get("retry-after"))
     delay = retry_after if retry_after is not None else compute_backoff_s(attempt, cfg.base_delay_s, cfg.max_delay_s)
     return None if time.monotonic() - start + delay >= cfg.max_elapsed_s else delay
+
+
+def _attempt_timeout(client: httpx.Client | httpx.AsyncClient, cfg: RetryConfig | None, start: float) -> httpx.Timeout:
+    """PRA-85 — each attempt (headers + body) gets only the time left in the total budget (floor 1 ms)."""
+    if cfg is None:
+        return client.timeout
+    return _cap_timeout(client.timeout, start + cfg.max_elapsed_s - time.monotonic())
 
 
 def _dumps(body: dict[str, Any]) -> bytes:
