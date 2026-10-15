@@ -707,6 +707,37 @@ def test_exec_code_runtime_sends_command_args_and_cwd(api):
     }
 
 
+@both
+def test_explicit_none_tool_arguments_are_sent_as_json_null(api, mode):
+    """RCONT-C002 — a caller's ``None`` is JSON ``null`` (be's ``eq null`` condition), never a dropped key."""
+    api.respond(200, json=ALLOW)
+    h = hooks(mode)
+    ran = []
+
+    def clear_optional_field(value=None):
+        ran.append(value)
+
+    async def aclear(value=None):
+        ran.append(value)
+
+    if mode == "sync":
+        h.guarded(clear_optional_field, tool_name="review.clear")(value=None)
+    else:
+        asyncio.run(h.guarded(aclear, tool_name="review.clear")(value=None))
+    run(h.before_tool_call("t.nested", {"a": None, "b": {"c": None}}))
+    run(h.before_tool_call("t.empty", {}))
+    run(h.before_exec("ls"))
+    run(h.before_browser_action("click", arguments={"x": None}))
+    assert [sent(api, i)["action"] for i in range(5)] == [
+        {"name": "review.clear", "arguments": {"value": None}},
+        {"name": "t.nested", "arguments": {"a": None, "b": {"c": None}}},
+        {"name": "t.empty"},
+        {"name": "exec", "arguments": {"command": "ls"}},
+        {"name": "click", "arguments": {"x": None}},
+    ]
+    assert ran == [None]
+
+
 def test_guarded_checks_before_every_call_and_keeps_the_signature(api):
     api.mock(side_effect=seq(ALLOW, DENY))
     ran = []

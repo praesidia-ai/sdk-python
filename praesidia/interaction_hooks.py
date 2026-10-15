@@ -264,7 +264,7 @@ class _InteractionHooksBase(Generic[_R]):
             raise PraesidiaConfigError("runtime must be 'shell' or 'code'")
         kind = "agent_to_code_execution" if runtime == "code" else "agent_to_shell"
         arguments = {"command": command, "args": None if args is None else list(args), "cwd": cwd}
-        return self._guard(kind, _action("exec", arguments), self._fail_modes["exec"])
+        return self._guard(kind, _action("exec", _unset(arguments)), self._fail_modes["exec"])
 
     def before_fs_access(self, path: str, mode: str) -> _R:
         """Filesystem access: ``agent_to_filesystem.<mode>``. Default fail-closed for every mode (``fs_read`` / ``fs_write``)."""
@@ -275,7 +275,10 @@ class _InteractionHooksBase(Generic[_R]):
         self, action: str, url: str | None = None, arguments: Mapping[str, Any] | None = None
     ) -> _R:
         """Browser action: ``agent_to_browser.<action>``. Default fail-closed."""
-        return self._guard("agent_to_browser", _action(action, {**(arguments or {}), "url": url}), self._fail_modes["browser"])
+        args = {**(arguments or {}), "url": url}
+        if url is None:  # TS parity: ``url: undefined`` drops the key, a caller's ``None`` elsewhere stays ``null``
+            del args["url"]
+        return self._guard("agent_to_browser", _action(action, args), self._fail_modes["browser"])
 
     def before_interaction(self, interaction_type: str, action: Mapping[str, Any], *, fail_mode: str = "closed") -> _R:
         """Any other interaction type (e.g. ``agent_to_email``), ``action = {"name", "arguments"?}``. Default fail-closed."""
@@ -686,11 +689,15 @@ def _decision(r: httpx.Response, raw: bytearray, task_id: str | None = None) -> 
 
 
 def _action(name: str, arguments: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Drop ``None`` argument values (the TS SDK drops ``undefined``); omit ``arguments`` when nothing is left."""
+    """Keep a caller's ``None`` as JSON ``null`` (TS keeps ``null``); omit ``arguments`` when empty."""
     if arguments is not None and not isinstance(arguments, Mapping):
         raise PraesidiaConfigError("action arguments must be a JSON object")
-    kept = {k: v for k, v in (arguments or {}).items() if v is not None}
-    return {"name": name, "arguments": kept} if kept else {"name": name}
+    return {"name": name, "arguments": dict(arguments)} if arguments else {"name": name}
+
+
+def _unset(fields: Mapping[str, Any]) -> dict[str, Any]:
+    """Drop SDK-owned optional fields left at their ``None`` default (the TS SDK's ``undefined``)."""
+    return {k: v for k, v in fields.items() if v is not None}
 
 
 def _check(interaction_type: str, action: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:

@@ -7,6 +7,11 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 
 ### Fixed
 
+- Interaction hooks: a `None` in caller tool arguments (`before_tool_call`, `guarded` kwargs,
+  `before_browser_action(arguments=...)`) is now sent as JSON `null` instead of being dropped, so
+  be's `eq null` policy conditions can allow a nullable tool call and the server's argument
+  commitment matches the real call. Behaviour change on the wire for callers that passed `None`
+  (RCONT-C002).
 - `compliance.wait_for_report` / `generate_and_wait`: `timeout` is now a true overall deadline. Each
   status request is capped at the time remaining, a response arriving after the deadline raises
   `TimeoutError` even if the report is ready, and no poll starts at the deadline. For

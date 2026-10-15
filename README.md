@@ -1058,10 +1058,12 @@ fingerprint evicts them all. A policy change therefore takes effect within `ttlS
 In `observe` governance mode be answers `allow` and records the would-be decision; in `off` it
 answers `allow`. `decide(type, action, approval_id=None, idempotency_key=None, *, capability_token=None)` is the raw call (no cache, no wait, no
 fail mode). Action names must be dot-separated `[A-Za-z0-9_-]` segments (be's rule); anything
-else raises `PraesidiaConfigError` before a request is sent. The four typed hooks and `guarded`
-omit an argument whose value is `None` (and `arguments` when none is left);
-`before_interaction` and `decide` send `action` as given, so a `None` value is sent as JSON
-`null`. The route is `POST /organizations/{orgId}/interaction-decisions` (`agents:invoke` key
+else raises `PraesidiaConfigError` before a request is sent. A `None` you put in tool
+arguments (`before_tool_call`, `guarded` kwargs, `before_browser_action(arguments=...)`,
+`before_interaction`, `decide`) is sent as JSON `null`, so a policy condition
+`{"path": "value", "op": "eq", "value": null}` matches it. Only the SDK's own optional
+parameters left at `None` (`before_exec`'s `args` / `cwd`, `before_browser_action`'s `url`) are
+omitted, and an empty argument mapping omits `arguments`. The route is `POST /organizations/{orgId}/interaction-decisions` (`agents:invoke` key
 scope, `AGENT_POLICIES` feature); the request and response bytes match the TS SDK's, proven by
 replaying be's recorded `test-fixtures/interaction-decision-v1.json` in both SDKs.
 
