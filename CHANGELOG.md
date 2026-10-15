@@ -7,6 +7,11 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 
 ### Fixed
 
+- Interaction hooks (sync and async): `approval_timeout` is now a hard, monotonic deadline. No
+  approval re-ask starts after it; a re-ask in flight (with its retries) is capped to the time left;
+  an answer that lands after it raises `InteractionDeniedError` `approval_wait_timeout` (late
+  decision on `err.decision`) and is not cached. Before, the last re-ask could start at the deadline
+  and a late allow released the action. Parity with TS `@praesidia/sdk` (RCONT-C001).
 - Interaction hooks: a `None` in caller tool arguments (`before_tool_call`, `guarded` kwargs,
   `before_browser_action(arguments=...)`) is now sent as JSON `null` instead of being dropped, so
   be's `eq null` policy conditions can allow a nullable tool call and the server's argument

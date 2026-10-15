@@ -1136,3 +1136,51 @@ def test_zero_hook_budget_makes_one_attempt_with_a_1ms_timeout(api, mode):
     with contextlib.suppress(Exception):
         run(h.decide("agent_to_email", EMAIL))
     assert seen == [pytest.approx(0.001)]
+
+
+# ── RCONT-C001: the approval wait is a hard local deadline (TS 0eaacb1) ───────
+
+
+@both
+def test_no_approval_poll_starts_once_the_wait_deadline_has_passed(api, mode):
+    api.mock(side_effect=seq(PENDING, CONSUMED))
+    with pytest.raises(InteractionDeniedError) as err:
+        run(hooks(mode, approval_timeout=0.02, approval_poll_interval=0.1).before_browser_action("click"))
+    assert (err.value.reason_code, err.value.decision, api.call_count) == ("approval_wait_timeout", PENDING, 1)
+
+
+@both
+def test_a_poll_answered_after_the_deadline_times_out_keeps_the_late_decision_and_is_not_cached(api, mode):
+    def late_allow(request):
+        time.sleep(0.04)  # the poll was admitted in time; its answer lands after the 20 ms wait
+        return httpx.Response(200, json=CONSUMED)
+
+    async def late_allow_async(request):
+        await asyncio.sleep(0.04)
+        return httpx.Response(200, json=CONSUMED)
+
+    answers = [httpx.Response(200, json=PENDING), late_allow if mode == "sync" else late_allow_async]
+    api.mock(side_effect=lambda request: answers.pop(0)(request) if callable(answers[0]) else answers.pop(0))
+    h = hooks(mode, approval_timeout=0.02, approval_poll_interval=0.005)
+    with pytest.raises(InteractionDeniedError) as err:
+        run(h.before_browser_action("click"))
+    assert (err.value.reason_code, err.value.decision, api.call_count) == ("approval_wait_timeout", CONSUMED, 2)
+    api.mock(side_effect=None, return_value=httpx.Response(200, json=DENY))
+    with pytest.raises(InteractionDeniedError) as err:  # not cached: the next call asks again
+        run(h.before_browser_action("click"))
+    assert (err.value.reason_code, api.call_count) == (DENY["reasonCode"], 3)
+
+
+@both
+@pytest.mark.parametrize("retry", [NO_WAIT, False], ids=["retry", "no-retry"])
+def test_each_approval_poll_is_capped_to_the_wait_left(api, mode, retry):
+    seen = []
+
+    def handler(request):
+        seen.append(request.extensions["timeout"])
+        return httpx.Response(200, json=PENDING)
+
+    api.mock(side_effect=handler)
+    with pytest.raises(InteractionDeniedError):
+        run(hooks(mode, timeout=5.0, retry=retry, approval_timeout=0.05, approval_poll_interval=0.01).before_browser_action("click"))
+    assert len(seen) > 1 and all(v <= 0.05 for t in seen[1:] for v in t.values())  # not the 5 s client timeout

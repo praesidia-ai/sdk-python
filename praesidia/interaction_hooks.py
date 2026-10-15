@@ -287,7 +287,8 @@ class _InteractionHooksBase(Generic[_R]):
         return self._guard(interaction_type, action, fail_mode)
 
     def _send(
-        self, interaction_type: str, act: dict[str, Any], approval_id: str | None, key: str | None = None, token: str | None = None
+        self, interaction_type: str, act: dict[str, Any], approval_id: str | None, key: str | None = None, token: str | None = None,
+        deadline: float | None = None,
     ) -> Any:
         # One Idempotency-Key per call (BE-1759): retries replay it; a poll adds approvalId, so it is a new call. Key order = be DTO = TS SDK.
         token = _capability_token(token) or self._capability_token
@@ -298,7 +299,7 @@ class _InteractionHooksBase(Generic[_R]):
             "action": act,
             **({} if approval_id is None else {"approvalId": approval_id}),
             **({} if self.task_id is None else {"taskId": self.task_id}),
-        }, functools.partial(_decision, task_id=self.task_id), _idempotency_key(key), headers)
+        }, functools.partial(_decision, task_id=self.task_id), _idempotency_key(key), headers, deadline=deadline)
 
     def report_outcome(
         self,
@@ -348,14 +349,14 @@ class _InteractionHooksBase(Generic[_R]):
             hit = self._cache.get(key)
         return hit[0] if hit is not None and hit[1] > time.monotonic() else None
 
-    def _record(self, key: str, decision: InteractionDecision) -> InteractionDecision:
+    def _record(self, key: str, decision: InteractionDecision, cache: bool = True) -> InteractionDecision:
         """Cache a fresh decision; a new policy fingerprint evicts every cached verdict (BE-0328 pattern)."""
         with self._lock:
             self._degraded_since = None  # a fresh decision ends the outage episode
             if decision["policyFingerprint"] != self._fingerprint:
                 self._cache.clear()
                 self._fingerprint = decision["policyFingerprint"]
-            if decision["ttlSeconds"] > 0 and decision["verdict"] != "require_approval":
+            if cache and decision["ttlSeconds"] > 0 and decision["verdict"] != "require_approval":
                 if len(self._cache) >= _MAX_CACHE_ENTRIES:
                     del self._cache[next(iter(self._cache))]
                 self._cache[key] = (decision, time.monotonic() + decision["ttlSeconds"])
@@ -392,6 +393,13 @@ class _InteractionHooksBase(Generic[_R]):
         if self._on_approval_required is not None:
             self._on_approval_required(pending)
         return time.monotonic() + self._approval_timeout
+
+    def _poll_done(self, key: str, interaction_type: str, act: dict[str, Any], decision: InteractionDecision, deadline: float) -> bool:
+        """RCONT-C001 — an answer after the deadline is never cached and never releases the action: it rides on the error."""
+        if time.monotonic() >= deadline:
+            self._record(key, decision, cache=False)
+            raise InteractionDeniedError(interaction_type, act["name"], "approval_wait_timeout", decision)  # type: ignore[arg-type]
+        return self._record(key, decision)["verdict"] != "require_approval"
 
     @staticmethod
     def _finish(interaction_type: str, act: dict[str, Any], decision: InteractionDecision) -> InteractionHookResult:
@@ -444,18 +452,23 @@ class PraesidiaInteractionHooks(_InteractionHooksBase[InteractionHookResult]):
         return self._finish(interaction_type, act, decision)
 
     def _await_approval(self, key: str, interaction_type: str, act: dict[str, Any], pending: InteractionDecision) -> InteractionDecision:
-        """Re-POST echoing ``approvalId`` until the verdict changes; an outage keeps waiting, never allows."""
+        """
+        Re-POST echoing ``approvalId`` until the verdict changes; an outage keeps waiting, never allows.
+        RCONT-C001 — the monotonic deadline is hard: each poll (with its retries) gets only the time left.
+        """
         deadline = self._approval_deadline(pending)
         current = pending
-        while time.monotonic() < deadline:
-            time.sleep(min(self._poll, max(0.0, deadline - time.monotonic())))
+        while (left := deadline - time.monotonic()) > 0:
+            time.sleep(min(self._poll, left))
+            if time.monotonic() >= deadline:
+                break  # RCONT-C001 — no poll starts once the wait is spent
             try:
-                current = self._record(key, self._send(interaction_type, act, current["approvalId"]))
+                current = self._send(interaction_type, act, current["approvalId"], deadline=deadline)
             except _NO_DECISION as err:
                 if not _is_outage(err):
                     raise
                 continue
-            if current["verdict"] != "require_approval":
+            if self._poll_done(key, interaction_type, act, current, deadline):
                 break
         return current
 
@@ -515,15 +528,17 @@ class AsyncPraesidiaInteractionHooks(_InteractionHooksBase[Awaitable[Interaction
     async def _await_approval(self, key: str, interaction_type: str, act: dict[str, Any], pending: InteractionDecision) -> InteractionDecision:
         deadline = self._approval_deadline(pending)
         current = pending
-        while time.monotonic() < deadline:
-            await asyncio.sleep(min(self._poll, max(0.0, deadline - time.monotonic())))
+        while (left := deadline - time.monotonic()) > 0:
+            await asyncio.sleep(min(self._poll, left))
+            if time.monotonic() >= deadline:
+                break  # RCONT-C001 — no poll starts once the wait is spent
             try:
-                current = self._record(key, await self._send(interaction_type, act, current["approvalId"]))
+                current = await self._send(interaction_type, act, current["approvalId"], deadline=deadline)
             except _NO_DECISION as err:
                 if not _is_outage(err):
                     raise
                 continue
-            if current["verdict"] != "require_approval":
+            if self._poll_done(key, interaction_type, act, current, deadline):
                 break
         return current
 
@@ -542,19 +557,23 @@ class _SyncPost:
         self.client = client
         self.retry = retry
 
-    def post(self, path: str, json: dict[str, Any], parse: Callable[..., Any], key: str, extra: Mapping[str, str] | None = None) -> Any:
-        content, headers, start, attempt = _dumps(json), {**(extra or {}), "Idempotency-Key": key}, time.monotonic(), 1
+    def post(
+        self, path: str, json: dict[str, Any], parse: Callable[..., Any], key: str, extra: Mapping[str, str] | None = None,
+        deadline: float | None = None,
+    ) -> Any:
+        content, headers, attempt = _dumps(json), {**(extra or {}), "Idempotency-Key": key}, 1
+        end = _end(self.retry, deadline)
         while True:
             raw = bytearray()
             try:
-                with self.client.stream("POST", path, content=content, headers=headers, timeout=_attempt_timeout(self.client, self.retry, start)) as r:
+                with self.client.stream("POST", path, content=content, headers=headers, timeout=_attempt_timeout(self.client, end)) as r:
                     for chunk in r.iter_bytes():
                         _append(raw, chunk, r)
             except httpx.RequestError:
-                if (delay := _retry_delay(self.retry, attempt, start, None)) is None:
+                if (delay := _retry_delay(self.retry, attempt, end, None)) is None:
                     raise
             else:
-                if (delay := _retry_delay(self.retry, attempt, start, r)) is None:
+                if (delay := _retry_delay(self.retry, attempt, end, r)) is None:
                     return parse(r, raw)
             time.sleep(delay)
             attempt += 1
@@ -565,19 +584,23 @@ class _AsyncPost:
         self.client = client
         self.retry = retry
 
-    async def post(self, path: str, json: dict[str, Any], parse: Callable[..., Any], key: str, extra: Mapping[str, str] | None = None) -> Any:
-        content, headers, start, attempt = _dumps(json), {**(extra or {}), "Idempotency-Key": key}, time.monotonic(), 1
+    async def post(
+        self, path: str, json: dict[str, Any], parse: Callable[..., Any], key: str, extra: Mapping[str, str] | None = None,
+        deadline: float | None = None,
+    ) -> Any:
+        content, headers, attempt = _dumps(json), {**(extra or {}), "Idempotency-Key": key}, 1
+        end = _end(self.retry, deadline)
         while True:
             raw = bytearray()
             try:
-                async with self.client.stream("POST", path, content=content, headers=headers, timeout=_attempt_timeout(self.client, self.retry, start)) as r:
+                async with self.client.stream("POST", path, content=content, headers=headers, timeout=_attempt_timeout(self.client, end)) as r:
                     async for chunk in r.aiter_bytes():
                         _append(raw, chunk, r)
             except httpx.RequestError:
-                if (delay := _retry_delay(self.retry, attempt, start, None)) is None:
+                if (delay := _retry_delay(self.retry, attempt, end, None)) is None:
                     raise
             else:
-                if (delay := _retry_delay(self.retry, attempt, start, r)) is None:
+                if (delay := _retry_delay(self.retry, attempt, end, r)) is None:
                     return parse(r, raw)
             await asyncio.sleep(delay)
             attempt += 1
@@ -606,7 +629,12 @@ def _idempotency_key(key: str | None) -> str:
     return key
 
 
-def _retry_delay(cfg: RetryConfig | None, attempt: int, start: float, r: httpx.Response | None) -> float | None:
+def _end(cfg: RetryConfig | None, deadline: float | None) -> float:
+    """Monotonic end of one POST and its retries: the retry budget, cut to a caller deadline (RCONT-C001)."""
+    return min(math.inf if cfg is None else time.monotonic() + cfg.max_elapsed_s, math.inf if deadline is None else deadline)
+
+
+def _retry_delay(cfg: RetryConfig | None, attempt: int, end: float, r: httpx.Response | None) -> float | None:
     """
     Seconds to wait before re-sending the same key, or ``None`` to stop. Retried: a transport error
     (``r`` is ``None``) or 429/5xx, never a 409 or any other 4xx (TS SDK-2503). Budget and backoff as
@@ -618,14 +646,12 @@ def _retry_delay(cfg: RetryConfig | None, attempt: int, start: float, r: httpx.R
         return None
     retry_after = None if r is None else parse_retry_after_s(r.headers.get("retry-after"))
     delay = retry_after if retry_after is not None else compute_backoff_s(attempt, cfg.base_delay_s, cfg.max_delay_s)
-    return None if time.monotonic() - start + delay >= cfg.max_elapsed_s else delay
+    return None if time.monotonic() + delay >= end else delay
 
 
-def _attempt_timeout(client: httpx.Client | httpx.AsyncClient, cfg: RetryConfig | None, start: float) -> httpx.Timeout:
-    """PRA-85 — each attempt (headers + body) gets only the time left in the total budget (floor 1 ms)."""
-    if cfg is None:
-        return client.timeout
-    return _cap_timeout(client.timeout, start + cfg.max_elapsed_s - time.monotonic())
+def _attempt_timeout(client: httpx.Client | httpx.AsyncClient, end: float) -> httpx.Timeout:
+    """PRA-85 / RCONT-C001 — each attempt (headers + body) gets only the time left before ``end`` (floor 1 ms)."""
+    return client.timeout if end == math.inf else _cap_timeout(client.timeout, end - time.monotonic())
 
 
 def _dumps(body: dict[str, Any]) -> bytes:

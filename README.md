@@ -925,8 +925,12 @@ Every hook returns `InteractionHookResult(decision=...)` on `allow`, raises
 `InteractionDeniedError` on `deny`, and on `require_approval` blocks: it re-asks every
 `approval_poll_interval` seconds (default 2), echoing `approvalId`, until a human approves
 (returns) or rejects / the approval expires (raises). After `approval_timeout` seconds (default
-600) it raises with `reason_code="approval_wait_timeout"`. `on_approval_required(decision)` is
-called once when the wait starts, so you can tell someone which approval to act on.
+600) it raises with `reason_code="approval_wait_timeout"`. The deadline is hard: no re-ask starts
+after it, a re-ask in flight (with its retries) gets only the time left, and an answer that
+arrives late does not release the action and is not cached. If that late answer was an allow, it
+is on `err.decision` (e.g. `reasonCode` `"approval_consumed"` with its `approvalId`): the approval
+is used up server-side, so record what you did with `report_outcome` instead of asking again.
+`on_approval_required(decision)` is called once when the wait starts, so you can tell someone which approval to act on.
 `guarded(tool, tool_name=None)` wraps a keyword-argument tool (the kwargs become `arguments`;
 the name defaults to `tool.__name__`) and keeps its signature for framework introspection.
 The TS SDK has no `guarded` equivalent: call `beforeToolCall` before the tool there.
