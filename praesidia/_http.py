@@ -95,6 +95,17 @@ def _cap_timeout(timeout: Any, cap: float | None = None) -> Any:
     return cap if timeout is None else min(timeout, cap)
 
 
+def _check_body_deadline(r: httpx.Response, end: float) -> None:
+    """
+    N135 -- httpx's read timeout is per read (idle), so a body that keeps trickling bytes is cut
+    off here once the monotonic ``end`` has passed (TS aborts the whole body). A body already
+    fully received (``Content-Length`` reached) is kept: there is nothing left to wait for.
+    """
+    declared = r.headers.get("content-length", "")
+    if time.monotonic() >= end and not (declared.isdigit() and r.num_bytes_downloaded >= int(declared)):
+        raise httpx.ReadTimeout("timed out", request=r.request)
+
+
 def path_segment(value: str, name: str = "path segment") -> str:
     """Validate and percent-encode a caller-controlled URL path segment."""
     if (
@@ -419,6 +430,7 @@ class HttpClient:
         **kwargs: Any,
     ) -> httpx.Response:
         """Execute one request while enforcing a decoded response-byte cap."""
+        start = time.monotonic()
         with httpx.stream(method, url, **kwargs) as streamed:
             limit = (
                 _MAX_ERROR_RESPONSE_BYTES
@@ -429,8 +441,11 @@ class HttpClient:
             if declared is not None and declared.isdigit() and int(declared) > limit:
                 raise ResponseTooLargeError(path, limit, streamed.status_code)
 
+            left = _remaining_s.get()
+            end = float("inf") if left is None else start + left
             body = bytearray()
             for chunk in streamed.iter_bytes():
+                _check_body_deadline(streamed, end)
                 if len(body) + len(chunk) > limit:
                     raise ResponseTooLargeError(path, limit, streamed.status_code)
                 body.extend(chunk)

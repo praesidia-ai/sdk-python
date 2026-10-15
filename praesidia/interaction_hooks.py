@@ -39,6 +39,7 @@ from ._http import (
     CAPABILITY_TOKEN_HEADER,
     HttpClient,
     _cap_timeout,
+    _check_body_deadline,
     _validate_api_key,
     _validate_idempotency_key,
     _validate_timeout,
@@ -568,7 +569,7 @@ class _SyncPost:
             try:
                 with self.client.stream("POST", path, content=content, headers=headers, timeout=_attempt_timeout(self.client, end)) as r:
                     for chunk in r.iter_bytes():
-                        _append(raw, chunk, r)
+                        _append(raw, chunk, r, end)
             except httpx.RequestError:
                 if (delay := _retry_delay(self.retry, attempt, end, None)) is None:
                     raise
@@ -595,7 +596,7 @@ class _AsyncPost:
             try:
                 async with self.client.stream("POST", path, content=content, headers=headers, timeout=_attempt_timeout(self.client, end)) as r:
                     async for chunk in r.aiter_bytes():
-                        _append(raw, chunk, r)
+                        _append(raw, chunk, r, end)
             except httpx.RequestError:
                 if (delay := _retry_delay(self.retry, attempt, end, None)) is None:
                     raise
@@ -659,7 +660,8 @@ def _dumps(body: dict[str, Any]) -> bytes:
     return json.dumps(body, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
 
 
-def _append(raw: bytearray, chunk: bytes, r: httpx.Response) -> None:
+def _append(raw: bytearray, chunk: bytes, r: httpx.Response, end: float) -> None:
+    _check_body_deadline(r, end)
     raw.extend(chunk)
     if len(raw) > _MAX_DECISION_BYTES:
         raise ResponseTooLargeError(r.request.url.path, _MAX_DECISION_BYTES, r.status_code)

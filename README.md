@@ -1133,8 +1133,10 @@ body reads, for the management client and the interaction hooks alike: each atte
 httpx timeout is capped to the remaining budget (minimum 1 ms), no retry starts once
 elapsed time plus the delay reaches the budget, and `Retry-After` cannot extend it. With
 `max_elapsed_s=0` the SDK makes exactly one attempt with a 1 ms timeout. httpx's read
-timeout is per-read (idle), so a body that keeps trickling bytes can outlive the budget
-by up to one read; timers have normal event-loop precision. With `retry=False` each
+timeout is per-read (idle), so the SDK also checks the deadline on every body chunk and
+raises `httpx.ReadTimeout` once it has passed: a body that keeps trickling bytes is cut off
+at the first chunk after the deadline (one idle read, itself capped to the budget, at most);
+timers have normal event-loop precision. With `retry=False` each
 request gets the full client `timeout`.
 
 To retry a POST/PATCH from a resource method, pass through to

@@ -7,6 +7,10 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 
 ### Fixed
 
+- Retry budget (`max_elapsed_s`) and the interaction hooks' approval-wait deadline now bound the
+  whole response body. A server that trickles bytes no longer keeps a hook request, an approval
+  re-ask or a management call open past the budget: the SDK raises `httpx.ReadTimeout` at the next
+  chunk after the deadline. Parity with TS `@praesidia/sdk` (N135).
 - `proof.events()`: documented and test-pinned that each event row is returned unchanged with
   the PRA-146 signed-preimage fields (`organizationId`, `timeSource`, `permitNonce`, `edgeVersion`,
   `adapterVersion`, `externalReceiptRef`, `artifactStorageRef`, `signatureFormat`). No code change:
