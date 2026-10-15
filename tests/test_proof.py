@@ -28,7 +28,10 @@ def test_list_preserves_envelope_and_exact_backend_query():
 @respx.mock
 def test_detail_events_scope_and_coverage_preserve_evidence_without_verifying():
     detail = {"actionId":"action1","closure":"SUCCEEDED","verificationStatus":"INCOMPLETE","evidenceGrade":None}
-    events = [{"actionSeq":"90071992547409931234","payload":None,"signature":"exact/base64==","eventCommitment":"sha256:original"}]
+    # PRA-146: a format-2 row carries every signed-preimage field; all must survive unchanged.
+    events = [{"actionSeq":"90071992547409931234","payload":None,"signature":"exact/base64==","eventCommitment":"sha256:original",
+               "organizationId":"org-1","timeSource":"system","permitNonce":"nonce-1","edgeVersion":"edge-1.2.3",
+               "adapterVersion":None,"externalReceiptRef":"rcpt-9","artifactStorageRef":None,"signatureFormat":2}]
     scope = [{"edgeId":"external","supportStatus":"UNSUPPORTED","maxEvidenceGrade":None,"gapNotes":"Not captured"}]
     coverage = {"organizationId":"org-1","closureCounts":{"OUTCOME_UNKNOWN":12},"openPhaseCounts":{"AUTHORIZED":3},"totalClosed":12,"totalOpen":3}
     detail_route = respx.get(f"{BASE}/protected-actions/action%2Fone").respond(json=detail)

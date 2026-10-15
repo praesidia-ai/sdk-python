@@ -7,6 +7,10 @@ bumps the minor version (see `PUBLISHING.md`, "Semver policy").
 
 ### Fixed
 
+- `proof.events()`: documented and test-pinned that each event row is returned unchanged with
+  the PRA-146 signed-preimage fields (`organizationId`, `timeSource`, `permitNonce`, `edgeVersion`,
+  `adapterVersion`, `externalReceiptRef`, `artifactStorageRef`, `signatureFormat`). No code change:
+  the SDK already passes rows through as dicts (PRA-146).
 - Interaction hooks (sync and async): `approval_timeout` is now a hard, monotonic deadline. No
   approval re-ask starts after it; a re-ask in flight (with its retries) is capped to the time left;
   an answer that lands after it raises `InteractionDeniedError` `approval_wait_timeout` (late

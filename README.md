@@ -445,7 +445,10 @@ the known `state` values (an open phase, or the closure once closed) and
 sends both unchanged and the API rejects an unknown value with 400. The lower
 time bound is inclusive and the upper bound exclusive. `events()` preserves
 decimal sequence strings, signatures, and redacted `None` payloads without
-coercing or interpreting them.
+coercing or interpreting them. Each event row carries every field of its signed
+preimage (`organizationId`, `timeSource`, `permitNonce`, `edgeVersion`,
+`adapterVersion`, `externalReceiptRef`, `artifactStorageRef`) plus
+`signatureFormat` (`1` or `2`); the SDK does not verify event signatures itself.
 
 `audit.export_bundle()` downloads a signed ZIP; `audit.export()` still exports
 ordinary JSON/CSV logs. Signed windows must be greater than zero and at most
